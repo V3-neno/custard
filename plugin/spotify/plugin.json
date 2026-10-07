@@ -2,8 +2,8 @@
   "manifestVersion": 1,
   "id": "spotify",
   "name": "Spotify",
-  "description": "Search Spotify, see what's playing and your devices, add songs to your queue, open the app and move playback.",
-  "version": "1.0.0",
+  "description": "Search Spotify, see playback and devices, wait for device readiness, queue songs, open the app and move playback.",
+  "version": "1.1.0",
   "apiVersion": 1,
   "entry": "src/index.ts",
   "instructions": "instructions.md",
@@ -18,6 +18,14 @@
       "title": "Client ID",
       "description": "From your app at developer.spotify.com/dashboard. Add http://127.0.0.1:43821/callback as a Redirect URI there.",
       "pattern": "^[0-9a-fA-F]{32}$"
+    },
+    "deviceReadyTimeoutSeconds": {
+      "type": "number",
+      "title": "Device readiness timeout (seconds)",
+      "description": "Maximum wait for Spotify to become available. Checks immediately, then once a second after each response; continues as soon as ready. The host limits tool calls to 60 seconds.",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 30
     }
   },
   "auth": {
@@ -26,35 +34,21 @@
     "tokenUrl": "https://accounts.spotify.com/api/token",
     "redirectPort": 43821,
     "redirectPath": "/callback",
-    "scopes": [
-      "user-read-playback-state",
-      "user-read-currently-playing",
-      "user-modify-playback-state"
-    ],
+    "scopes": ["user-read-playback-state", "user-read-currently-playing", "user-modify-playback-state"],
     "clientIdConfigKey": "clientId",
     "apiHosts": ["api.spotify.com"]
   },
   "tools": [
     {
       "name": "search",
-      "description": "Search Spotify for tracks. Returns up to 10 real tracks with title, artists, album, explicit flag, duration and Spotify URI. Search one specific track or artist per call (e.g. \"Nils Frahm Says\"), not a mood. Only URIs returned by this tool can be queued.",
+      "description": "Search Spotify for tracks. Returns up to 10 real tracks with title, artists, album, explicit flag, duration and Spotify URI. Search one specific track or artist per call (e.g. Nils Frahm Says), not a mood. Only URIs returned by this tool can be queued.",
       "effect": "read",
       "label": "Searched Spotify for \"{query}\"",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "query": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200,
-            "description": "Track and/or artist to find"
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10,
-            "description": "Defaults to 5"
-          }
+          "query": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Track and/or artist to find" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Defaults to 5" }
         },
         "required": ["query"],
         "additionalProperties": false
@@ -69,14 +63,29 @@
     },
     {
       "name": "devices",
-      "description": "List the user's available Spotify devices, with which one is active. Read-only.",
+      "description": "List the user's available Spotify devices, with which one is active. Read-only snapshot. During startup use wait_for_device instead of treating an empty list as failure.",
       "effect": "read",
       "label": "Listed Spotify devices",
       "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
     },
     {
+      "name": "wait_for_device",
+      "description": "Wait until Spotify exposes a controllable device, returning immediately if ready. Read-only polling bounded by the configured readiness timeout (default 30 seconds, maximum 50). Use during startup or before a dependent step, rather than reporting failure after one empty device list. Returns device IDs; does not open Spotify, queue, transfer or start playback. Authentication, permission and rate-limit errors are reported without repeated polling.",
+      "effect": "read",
+      "label": "Waited for Spotify device readiness",
+      "timeoutMs": 60000,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Optional specific device ID previously returned by Spotify" },
+          "active_only": { "type": "boolean", "description": "Require an active device. Default false; inactive controllable devices can be addressed explicitly by ID." }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "add_to_queue",
-      "description": "Add tracks to the end of the user's Spotify queue, in the given order. Does not start, pause or replace playback. Needs an active device, or a device_id from spotify__devices. Each URI must come from a spotify__search or spotify__now_playing result. Use only when the user asked for songs to be queued.",
+      "description": "Add tracks to the end of the user's Spotify queue, in order. Does not start, pause or replace playback. Needs an active device, or an explicit device_id returned by Spotify. During startup first await open with wait_for_device=true or wait_for_device. Each URI must come from spotify__search or spotify__now_playing. Use only when the user asked for songs to be queued. Do not automatically repeat uncertain queue writes.",
       "effect": "write",
       "label": "Spotify queue: {uris} tracks",
       "timeoutMs": 45000,
@@ -88,13 +97,9 @@
             "items": { "type": "string", "pattern": "^spotify:track:[0-9A-Za-z]{22}$" },
             "minItems": 1,
             "maxItems": 10,
-            "description": "Spotify track URIs, e.g. spotify:track:4uLU6hMCjMI75M1A2tKUQC"
+            "description": "Spotify track URIs returned by search or now_playing"
           },
-          "device_id": {
-            "type": "string",
-            "maxLength": 100,
-            "description": "Optional device from spotify__devices. Leave out to use the active device."
-          }
+          "device_id": { "type": "string", "maxLength": 100, "description": "Optional device ID returned by Spotify. Leave out to use the active device." }
         },
         "required": ["uris"],
         "additionalProperties": false
@@ -102,35 +107,28 @@
     },
     {
       "name": "open",
-      "description": "Open the Spotify desktop app on this computer, optionally on a track, album, artist or playlist page. Does not start playback or change the queue. Use when the user asks to open Spotify or there is no device to play on.",
+      "description": "Open the Spotify desktop app, optionally on a track, album, artist or playlist page. Does not start playback or change the queue. For open-and-queue or open-and-play requests set wait_for_device=true and await this tool before the dependent step: it polls until a controllable Computer device appears, up to the configured readiness timeout. Spotify cannot identify this computer uniquely; ask if the target is ambiguous. A plain open can omit the wait.",
       "effect": "write",
       "label": "Opened Spotify",
+      "timeoutMs": 60000,
       "inputSchema": {
         "type": "object",
         "properties": {
-          "uri": {
-            "type": "string",
-            "pattern": "^spotify:(track|album|artist|playlist):[0-9A-Za-z]{22}$",
-            "description": "Optional Spotify URI to show, e.g. spotify:album:..."
-          }
+          "uri": { "type": "string", "pattern": "^spotify:(track|album|artist|playlist):[0-9A-Za-z]{22}$", "description": "Optional Spotify URI to show" },
+          "wait_for_device": { "type": "boolean", "description": "Set true when another requested step needs Spotify ready. Default false. Returns immediately once a controllable Computer device is visible." }
         },
         "additionalProperties": false
       }
     },
     {
       "name": "transfer_playback",
-      "description": "Move Spotify playback to another device. `play` must be set: true starts playing there, false moves without changing play/pause. Use only when the user asked to switch devices or start playback.",
+      "description": "Move Spotify playback to another device. play must be set: true starts playing there, false moves without changing play/pause. Use only when the user asked to switch devices or start playback. During startup await device readiness first.",
       "effect": "write",
       "label": "Moved Spotify playback to a device",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "device_id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100,
-            "description": "A device id from spotify__devices"
-          },
+          "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "A device ID returned by Spotify" },
           "play": { "type": "boolean", "description": "Start playback on the device" }
         },
         "required": ["device_id", "play"],
