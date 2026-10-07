@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useContext, useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import Markdown from '../Markdown'
 import Orb from '../Orb'
 import { toolLabel } from '../../../../shared/vault'
+import { ToolLabelsContext } from '../../toolLabels'
 
 // The orb is the "buffer": it glows while Claude works and holds the
 // collapsible thinking summary once there is one.
@@ -41,24 +42,19 @@ export function FallbackNote({ to }: { to: string }): React.JSX.Element {
 
 export function ToolLine({
   label,
-  status = 'done'
+  status = 'done',
+  write = false
 }: {
   label: string
   status?: 'running' | 'done' | 'error'
+  write?: boolean
 }): React.JSX.Element {
   return (
     <div
       className={`mb-2 flex items-center gap-2.5 text-xs ${status === 'error' ? 'text-ember-600' : 'text-ash-400'}`}
     >
       {status === 'running' ? (
-        <Orb
-          size={16}
-          state={
-            /^(Created|Added|Saved|Spotify queue|Opened|Moved|Started)/.test(label)
-              ? 'composing'
-              : 'searching'
-          }
-        />
+        <Orb size={16} state={write ? 'composing' : 'searching'} />
       ) : (
         <span
           className={`h-2 w-2 rounded-full ${status === 'error' ? 'bg-ember-600' : 'bg-molten-400 shadow-[0_0_8px_rgb(var(--glow)/0.6)]'}`}
@@ -83,6 +79,7 @@ export function UserBubble({ text }: { text: string }): React.JSX.Element {
 type Props = { message: BetaMessageParam; failedTools?: Set<string> }
 
 function MessageView({ message, failedTools }: Props): React.JSX.Element | null {
+  const labels = useContext(ToolLabelsContext)
   const blocks =
     typeof message.content === 'string'
       ? [{ type: 'text' as const, text: message.content }]
@@ -104,7 +101,7 @@ function MessageView({ message, failedTools }: Props): React.JSX.Element | null 
           return (
             <ToolLine
               key={i}
-              label={toolLabel(b.name, b.input)}
+              label={toolLabel(b.name, b.input, labels)}
               status={failedTools?.has(b.id) ? 'error' : 'done'}
             />
           )

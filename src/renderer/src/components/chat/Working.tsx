@@ -1,8 +1,15 @@
+import { useState } from 'react'
 import Orb, { type OrbState } from '../Orb'
 
 export type Segment =
   | { kind: 'thinking' | 'text'; text: string }
-  | { kind: 'tool'; id: string; label: string; status: 'running' | 'done' | 'error' }
+  | {
+      kind: 'tool'
+      id: string
+      label: string
+      status: 'running' | 'done' | 'error'
+      write?: boolean
+    }
   | { kind: 'fallback'; to: string }
 
 type Stage = {
@@ -12,8 +19,7 @@ type Stage = {
   orb: OrbState
 }
 
-const isWrite = (label: string): boolean =>
-  /^(Created|Added|Saved|Spotify queue|Opened|Moved|Started)/.test(label)
+export type Approval = { id: string; plugin: string; label: string; detail: string }
 
 // The latest line of the thinking summary, as a hint of what it's on now.
 function latestThought(text: string): string | undefined {
@@ -40,7 +46,7 @@ function toStages(segments: Segment[]): Stage[] {
       stages.push({
         label: seg.label,
         status: seg.status === 'error' ? 'error' : seg.status === 'running' ? 'active' : 'done',
-        orb: isWrite(seg.label) ? 'weaving' : 'searching'
+        orb: seg.write ? 'weaving' : 'searching'
       })
     else if (seg.kind === 'fallback')
       stages.push({ label: `Continuing with ${seg.to}`, status, orb: 'connecting' })
@@ -58,12 +64,66 @@ function toStages(segments: Segment[]): Stage[] {
 // Shown while a reply is being made: the orb holds the centre and thin stage
 // lines underneath tick off what it's doing. The answer itself appears, in
 // the normal format, once it's finished.
-function Working({ segments }: { segments: Segment[] }): React.JSX.Element {
+// A plugin action waiting for the user. Nothing runs until they choose.
+function ApprovalCard({ a }: { a: Approval }): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const answer = (d: 'once' | 'chat' | 'deny'): void => {
+    setBusy(true)
+    window.custard.chat.approve(a.id, d)
+  }
+  return (
+    <div
+      className="stage-in w-full max-w-md rounded-2xl border border-molten-500/40 bg-forge-850 p-4"
+      role="alertdialog"
+      aria-label="Allow plugin action"
+    >
+      <p className="text-sm text-ash-100">
+        <span className="text-molten-200">{a.plugin}</span> wants to: {a.label}
+      </p>
+      {a.detail && a.detail !== '{}' && (
+        <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-forge-950 p-2 text-[11px] text-ash-400">
+          {a.detail}
+        </pre>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          disabled={busy}
+          onClick={() => answer('once')}
+          className="molten-fill rounded-lg px-3 py-1.5 text-sm font-medium text-forge-950 disabled:opacity-40"
+        >
+          Allow
+        </button>
+        <button
+          disabled={busy}
+          onClick={() => answer('chat')}
+          className="rounded-lg border border-forge-700 px-3 py-1.5 text-sm text-ash-300 hover:text-molten-200 disabled:opacity-40"
+        >
+          Allow for this chat
+        </button>
+        <button
+          disabled={busy}
+          onClick={() => answer('deny')}
+          className="rounded-lg border border-forge-700 px-3 py-1.5 text-sm text-ash-400 hover:border-ember-600 hover:text-ember-600 disabled:opacity-40"
+        >
+          Don&apos;t allow
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Working({
+  segments,
+  approvals = []
+}: {
+  segments: Segment[]
+  approvals?: Approval[]
+}): React.JSX.Element {
   const stages = toStages(segments)
   const current = stages[stages.length - 1]
   return (
     <div className="flex min-h-[45vh] flex-col items-center justify-center gap-8 py-6">
-      <Orb size={96} state={current.orb} />
+      <Orb size={96} state={approvals.length ? 'breathing' : current.orb} />
       <ol className="flex w-full max-w-md flex-col gap-2.5" aria-live="polite">
         {stages.map((s, i) => (
           <li key={i} className="stage-in">
@@ -94,6 +154,9 @@ function Working({ segments }: { segments: Segment[] }): React.JSX.Element {
           </li>
         ))}
       </ol>
+      {approvals.map((a) => (
+        <ApprovalCard key={a.id} a={a} />
+      ))}
     </div>
   )
 }

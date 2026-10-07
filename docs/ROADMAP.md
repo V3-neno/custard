@@ -26,9 +26,11 @@ Later in this phase:
 
 ## Phase 3: Code mode
 
-Claude Code inside Custard, using the Claude Agent SDK in the main process.
+Started: Code mode has two workspaces with app-enforced folder boundaries and no shell. **Plugins** edits one plugin in `plugin/<id>` and can validate and test it; **General Code** edits a folder you pick, and Custard's own source needs a separate approval. See [plugins/README.md](plugins/README.md).
 
-- Open a project folder and chat with Claude Code about it.
+Still to do:
+
+- Claude Code itself (Claude Agent SDK) as an option for General Code.
 - Show tool calls, file diffs and permission prompts in the UI.
 - Give it the same vault access, so coding sessions can use and update the brain.
 
@@ -49,7 +51,9 @@ Basic skills in Chat arrived with the starter vault in Phase 2. This phase build
 
 ## Integrations
 
-- **Spotify** (done): search, now playing, devices, queue, open and transfer, with a `music` skill. See [SPOTIFY.md](SPOTIFY.md).
+- **Plugin platform** (done, MVP): sandboxed plugins with a manifest, review and activation, permissions, write approvals, rollback and OAuth. See [plugins/README.md](plugins/README.md).
+- **Spotify** (done, now a plugin): search, now playing, devices, queue, open and transfer, with a `music` skill. See [SPOTIFY.md](SPOTIFY.md).
+- Later for plugins: UI panels, vault access through a reviewed capability, signed plugins from other people.
 
 ## Phase 6: Polish and reach
 

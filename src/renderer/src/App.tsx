@@ -10,6 +10,7 @@ import {
   type Mode
 } from '../../shared/chat'
 import { ProviderContext } from './provider'
+import { ToolLabelsContext } from './toolLabels'
 
 function App(): React.JSX.Element {
   const [mode, setMode] = useState<Mode>('chat')
@@ -18,6 +19,7 @@ function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [settings, setSettings] = useState<ChatSettings>(defaultChatSettings)
+  const [labels, setLabels] = useState<Record<string, string>>({})
   const provider = providerOf(settings.model)
 
   useEffect(() => {
@@ -32,6 +34,7 @@ function App(): React.JSX.Element {
   const refreshStatus = useCallback(() => {
     window.custard.apiKey.has(provider).then(setHasKey)
     window.custard.vault.get().then((v) => setVaultConnected(v !== null))
+    window.custard.plugins.labels().then(setLabels)
   }, [provider])
   useEffect(() => {
     refreshStatus()
@@ -44,35 +47,37 @@ function App(): React.JSX.Element {
 
   return (
     <ProviderContext.Provider value={provider}>
-      <div className="flex h-full flex-col">
-        <TopBar
-          modeLabel={modes.find((m) => m.id === mode)?.label ?? 'Chat'}
-          vaultConnected={vaultConnected}
-          onHistory={() => setHistoryOpen(true)}
-          onSettings={() => setSettingsOpen(true)}
-        />
-        {/* Each mode has its own history, so switching mode starts fresh. */}
-        <ChatView
-          key={mode}
-          mode={mode}
-          onModeChange={setMode}
-          hasKey={hasKey}
-          settings={settings}
-          onSettings={updateSettings}
-          onOpenSettings={() => setSettingsOpen(true)}
-          historyOpen={historyOpen}
-          onCloseHistory={() => setHistoryOpen(false)}
-        />
-        {settingsOpen && (
-          <SettingsDialog
-            onClose={() => {
-              setSettingsOpen(false)
-              refreshStatus()
-            }}
-            onChanged={refreshStatus}
+      <ToolLabelsContext.Provider value={labels}>
+        <div className="flex h-full flex-col">
+          <TopBar
+            modeLabel={modes.find((m) => m.id === mode)?.label ?? 'Chat'}
+            vaultConnected={vaultConnected}
+            onHistory={() => setHistoryOpen(true)}
+            onSettings={() => setSettingsOpen(true)}
           />
-        )}
-      </div>
+          {/* Each mode has its own history, so switching mode starts fresh. */}
+          <ChatView
+            key={mode}
+            mode={mode}
+            onModeChange={setMode}
+            hasKey={hasKey}
+            settings={settings}
+            onSettings={updateSettings}
+            onOpenSettings={() => setSettingsOpen(true)}
+            historyOpen={historyOpen}
+            onCloseHistory={() => setHistoryOpen(false)}
+          />
+          {settingsOpen && (
+            <SettingsDialog
+              onClose={() => {
+                setSettingsOpen(false)
+                refreshStatus()
+              }}
+              onChanged={refreshStatus}
+            />
+          )}
+        </div>
+      </ToolLabelsContext.Provider>
     </ProviderContext.Provider>
   )
 }

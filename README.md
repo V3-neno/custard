@@ -3,7 +3,7 @@
 A personal desktop Claude client with three modes:
 
 - **Chat**: normal conversations through the Claude API
-- **Code**: Claude Code (via the Claude Agent SDK) working in a folder on this computer
+- **Code**: work on files in one folder: a plugin in `plugin/<id>` (**Plugins** workspace) or a project folder you pick (**General Code**). File access is checked by the app, and there is no shell.
 - **Design**: generate UI and preview it live
 
 Built with Electron, React, TypeScript, Vite (electron-vite) and Tailwind CSS.
@@ -22,7 +22,9 @@ npm run build:win  # build a Windows installer into dist/
 
 Open **Settings** and paste a Claude API key from [console.anthropic.com](https://console.anthropic.com), an OpenAI key from [platform.openai.com](https://platform.openai.com), or both. Keys are encrypted with Windows secure storage. Pick a model from either provider under the message box; the app turns amber for Claude and blue-grey for OpenAI. Chats are saved as JSON files in `%APPDATA%\custard\conversations`, and either provider can continue a chat the other started.
 
-**Spotify (optional):** Custard can search Spotify, see what's playing and queue songs that match the music preferences in your vault. It needs Spotify Premium and a free Spotify developer app; see [docs/SPOTIFY.md](docs/SPOTIFY.md) for setup.
+**Plugins:** plugins add tools to the assistant. They live in [`plugin/`](plugin), are developed in Code mode's Plugins workspace, and are reviewed, activated, configured and disabled in **Settings → Plugins**. Each runs in its own sandbox and reaches the network only through the app. See [docs/plugins](docs/plugins/README.md).
+
+**Spotify (optional plugin):** search Spotify, see what's playing and queue songs that match the music preferences in your vault. It needs Spotify Premium and a free Spotify developer app; see [docs/SPOTIFY.md](docs/SPOTIFY.md) for setup.
 
 Pick the model and effort under the message box. Opus 5.5 and Sonnet 5.5 show a summary of Claude's thinking and fall back to another model automatically if a safety check declines a request.
 
@@ -44,3 +46,6 @@ See [docs/ROADMAP.md](docs/ROADMAP.md).
 - `src/preload`: the safe bridge exposed to the UI as `window.custard`
 - `src/renderer`: the React UI
 - `src/shared`: types shared by the main process and the UI
+- `src/main/plugins`, `src/plugin-sdk`: the plugin host and the plugin API
+- `src/main/workspace`: Code mode's folder-bounded file tools
+- `plugin/`: plugin source (Spotify)

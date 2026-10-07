@@ -2,6 +2,8 @@
 
 Custard can search Spotify, see what's playing, list your devices, add songs to your queue, open the Spotify app and move playback between devices. It picks music using `Areas/Music Preferences.md` in your vault and the `music` skill.
 
+Spotify is a **plugin** (`plugin/spotify`), built only on the public plugin API: Custard's core has no Spotify code. See [plugins/README.md](plugins/README.md) for how plugins are reviewed, activated, disabled and rolled back.
+
 ## What you need
 
 - **Spotify Premium.** Spotify's player endpoints (queue, transfer) only work for Premium accounts, and since February 2026 an app in development mode only works if its owner has Premium.
@@ -26,49 +28,55 @@ Sources: [quota modes](https://developer.spotify.com/documentation/web-api/conce
    (Spotify doesn't allow `localhost`; the loopback IP is required.) Under APIs, tick **Web API**. Save.
 3. Open the app's **Settings** and copy the **Client ID**.
 4. If anyone other than the app owner will connect, add them under **User Management**.
-5. In Custard, open **Settings → Spotify**, paste the Client ID, click **Save**, then **Connect**. Your browser opens Spotify's consent page; approve it and come back to Custard. Settings shows _connected as \<your name\>_.
-6. If your vault was created before this feature, click **Add missing starter skills** under the vault in Settings. It adds `Custard/Skills/music/SKILL.md` and `Areas/Music Preferences.md` and never overwrites anything.
-7. Optionally fill in `Areas/Music Preferences.md` in Obsidian. If it's empty, Custard asks a few questions first.
+5. In Custard, open **Settings → Plugins → Spotify**. Click **Review and activate**, read the permissions, tick them and click **Activate**.
+6. Under **Configuration**, paste the Client ID and click **Save configuration**. Then click **Connect** under Account. Your browser opens Spotify's consent page; approve it and come back. Account shows _connected_.
+7. If your vault was created before this feature, click **Add missing starter skills** in Settings → General. It adds the `music` and `plugin-development` skills and `Areas/Music Preferences.md`, and never overwrites anything. If you already had the `music` skill from the previous version, it still names the old tools (`spotify_search`); delete `Custard/Skills/music` in Obsidian and click the button again to get the updated one.
+8. Optionally fill in `Areas/Music Preferences.md` in Obsidian. If it's empty, Custard asks a few questions first.
+
+**Upgrading from the built-in Spotify:** your Client ID and sign-in are moved into the plugin automatically the first time this version starts, but the plugin still has to be reviewed and activated (step 5).
 
 Custard listens on port 43821 only while you're signing in. If something else uses that port, Connect fails with a clear error.
 
 ## How it's built
 
-| Piece                                                             | File                                                                                        |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| PKCE sign-in, token exchange and refresh                          | `src/main/spotify/pkce.ts`                                                                  |
-| API client: refresh on 401, retry reads after 429, error messages | `src/main/spotify/client.ts`                                                                |
-| Tools, validation, queue reporting, Spotify system prompt         | `src/main/spotify/tools.ts`                                                                 |
-| Encrypted token storage, loopback server, IPC                     | `src/main/spotify/index.ts`                                                                 |
-| Tool registration (both Claude and OpenAI)                        | `src/main/chat.ts`                                                                          |
-| Settings UI                                                       | `src/renderer/src/components/SettingsDialog.tsx`                                            |
-| Skill and preferences note                                        | `vault-template/Custard/Skills/music/SKILL.md`, `vault-template/Areas/Music Preferences.md` |
+| Piece                                                                                 | File                                                                                        |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Manifest: tools, schemas, permissions, OAuth settings                                 | `plugin/spotify/plugin.json`                                                                |
+| Tools, validation, queue reporting                                                    | `plugin/spotify/src/tools.ts`                                                               |
+| API client: retry reads after 429, error messages                                     | `plugin/spotify/src/client.ts`                                                              |
+| Rules for the model while Spotify is enabled                                          | `plugin/spotify/instructions.md`                                                            |
+| Tests                                                                                 | `plugin/spotify/tests/`                                                                     |
+| PKCE sign-in, token storage and refresh, network policy (generic, used by any plugin) | `src/main/plugins/oauth.ts`, `host.ts`, `net.ts`                                            |
+| Skill and preferences note                                                            | `vault-template/Custard/Skills/music/SKILL.md`, `vault-template/Areas/Music Preferences.md` |
 
 **Scopes:** `user-read-playback-state` (player and devices), `user-read-currently-playing` (needed to read the queue back), `user-modify-playback-state` (queue and transfer). No listening history, library or profile email.
 
-**Tokens** are encrypted with Windows secure storage (`safeStorage`) in Custard's app data folder. They never go into the vault, prompts or logs. Spotify has no token revocation endpoint, so **Disconnect** deletes the tokens on this computer; to remove Custard's access entirely, also remove it at [spotify.com/account/apps](https://www.spotify.com/account/apps/).
+**Tokens** are held by Custard's plugin host, encrypted with Windows secure storage (`safeStorage`) in Custard's app data folder. The plugin never sees them: it asks the host to add the token to requests for `api.spotify.com`. They never go into the vault, prompts or logs. Spotify has no token revocation endpoint, so **Disconnect** deletes the tokens on this computer; to remove Custard's access entirely, also remove it at [spotify.com/account/apps](https://www.spotify.com/account/apps/).
 
 ### Tools
 
-| Tool                        | What it does                                                                          | Changes playback?  |
-| --------------------------- | ------------------------------------------------------------------------------------- | ------------------ |
-| `spotify_search`            | Finds tracks (title, artists, album, explicit, length, URI)                           | No                 |
-| `spotify_now_playing`       | Current track, play state, device                                                     | No                 |
-| `spotify_devices`           | Available devices and which is active                                                 | No                 |
-| `spotify_add_to_queue`      | Adds 1–10 tracks to the end of the queue, in order                                    | Adds to queue only |
-| `spotify_open`              | Opens the Spotify desktop app (optionally on a track, album, artist or playlist page) | No                 |
-| `spotify_transfer_playback` | Moves playback to a device; `play` must be set to true or false                       | Yes, when asked    |
+| Tool                         | What it does                                                                          | Changes playback?  |
+| ---------------------------- | ------------------------------------------------------------------------------------- | ------------------ |
+| `spotify__search`            | Finds tracks (title, artists, album, explicit, length, URI)                           | No                 |
+| `spotify__now_playing`       | Current track, play state, device                                                     | No                 |
+| `spotify__devices`           | Available devices and which is active                                                 | No                 |
+| `spotify__add_to_queue`      | Adds 1–10 tracks to the end of the queue, in order                                    | Adds to queue only |
+| `spotify__open`              | Opens the Spotify desktop app (optionally on a track, album, artist or playlist page) | No                 |
+| `spotify__transfer_playback` | Moves playback to a device; `play` must be set to true or false                       | Yes, when asked    |
 
 Custard enforces these rules in code, not only in prompts:
 
-- **Only real tracks are queued.** URIs must be valid track URIs _and_ must have been returned by `spotify_search` or `spotify_now_playing` during this app session. A made-up or misremembered ID is refused before anything is sent.
+- **You approve each action that changes something.** Queueing, opening the app and moving playback are write tools: Custard shows an approval card (Allow, Allow for this chat, Don't allow) before the plugin runs, unless you turn that off for a tool in Settings → Plugins. Reading (search, now playing, devices) doesn't ask.
+- **Inputs are checked by the host** against the manifest's schemas before the plugin runs, e.g. track URIs must match `spotify:track:` plus 22 characters.
+
+- **Only real tracks are queued.** URIs must be valid track URIs _and_ must have been returned by `spotify__search` or `spotify__now_playing` while the plugin runs. A made-up or misremembered ID is refused before anything is sent.
 - **Queueing never starts, pauses or replaces playback.** It only calls the queue endpoint.
 - **Transferring requires an explicit `play` choice** and checks the device exists and isn't restricted.
-- **Opening is limited to `spotify:` URIs.** It goes through Electron's `shell.openExternal`, with no shell commands.
+- **Opening is limited to `spotify:` URIs.** The plugin's only link permission is `spotify:`, checked by the host, which uses Electron's `shell.openExternal`, with no shell commands.
 - **The queue is never retried blindly.** Spotify's queue endpoint takes one track per call and isn't idempotent, so Custard adds tracks one at a time and never retries a queue call after a rate limit, server error or dropped connection, since that could add a song twice. Errors that would fail every later track (no active device, Premium required, expired sign-in, rate limit) stop the run. Remaining tracks are reported as _not attempted_. A track Spotify rejects on its own is reported and the rest continue.
 - **Reports say only what Spotify confirmed.** After queueing, Custard reads the queue back with `GET /me/player/queue` and reports how many of the accepted tracks appear. "Accepted" is never reported as "playing". Spotify doesn't guarantee ordering when other playback changes happen at the same time.
 
-The model decides _when_ to queue, transfer or open, guided by the Spotify system prompt (added whenever Spotify is connected) and the music skill. A request to recommend is answered in chat. "Queue five songs for focus" is permission to queue those five. Playback is only started or moved when you ask.
+The model decides _when_ to queue, transfer or open, guided by the plugin's instructions (added while it is enabled) and the music skill. A request to recommend is answered in chat. "Queue five songs for focus" leads to one queue call for all five, which you approve once. Playback is only started or moved when you ask.
 
 ## Tests
 
@@ -76,27 +84,24 @@ The model decides _when_ to queue, transfer or open, guided by the Spotify syste
 npm test
 ```
 
-`src/main/spotify/*.test.ts` cover:
-
-- **PKCE:** the RFC 7636 challenge, the authorize URL and its scopes, state mismatch, declined consent, no client secret sent, refresh-token rotation and revoked refresh tokens.
-- **Validation:** malformed and unsearched URIs are rejected before any request, and more than 10 tracks is refused.
-- **Queue results:** ordering, partial success, no active device, Premium required, a rate limit with no retry, a server error marked unknown and stopped, and a 401 refreshed once.
-- **Permission boundaries:** queueing touches only the queue endpoint, open allows only `spotify:` URIs, transfer requires `play`, and restricted or unknown devices are refused.
-- **Read-only tools:** no active player, now playing, no devices, and a read retried once after a 429.
+`plugin/spotify/tests/*.test.ts` run under vitest and in Custard's sandbox (**Run tests** on the review screen). They cover search, now playing, devices, a read retried once after a 429, queue validation (malformed and unsearched URIs, more than 10), order, partial success, no active device, Premium required, a rate limit with no retry, a server error or dropped connection marked unknown and stopped, read tools never changing playback, queueing never starting playback, `open` allowing only `spotify:` URIs, and transfer requiring `play` and refusing restricted or unknown devices. PKCE, token refresh after a 401 and keeping tokens out of results are tested in the host (`src/main/plugins/oauth.test.ts`, `host.test.ts`).
 
 ## Manual end-to-end test
 
-1. Complete Setup with a Premium account. In Settings, check it says _connected as \<name\>_.
+1. Complete Setup with a Premium account. In Settings → Plugins → Spotify, check Account says _connected_.
 2. Open Spotify on your computer or phone and play anything, then pause. This makes a device active.
 3. In Custard Chat, ask: **"What's playing on Spotify?"** You should see _Checked what is playing_ with the right track and device.
 4. Ask: **"Recommend three songs like this."** It should answer in chat with no queue or playback change, and say these are its own suggestions.
 5. Ask: **"Queue five songs for focused work."**
    - If preferences are empty, it asks a couple of questions first. Answer them.
-   - The stage lines show the music preferences being read, then one _Searched Spotify_ per song, then _Spotify queue: 5 tracks_.
+   - The stage lines show the music preferences being read, then one _Searched Spotify_ per song, then an approval card for _Spotify queue: 5 tracks_. Click **Allow**.
    - The reply names what was added and anything that wasn't. Check Spotify's queue: the songs are at the end, in that order, and nothing started playing.
 6. Close Spotify everywhere, then ask to queue two more songs. It should say there's no active device and offer to open Spotify. Say yes: Spotify opens, nothing plays.
 7. With Spotify open on two devices, ask **"Move playback to my phone."** It should list devices and move playback there. It only starts playing if you asked it to.
-8. In Settings, click **Disconnect**, then ask what's playing. It should say Spotify isn't connected.
+8. In Settings → Plugins → Spotify, click **Disconnect**, then ask what's playing. It should say you need to connect Spotify again.
+9. Click **Disable**, then ask to queue a song. The Spotify tools are gone and nothing reaches Spotify.
+
+The full plugin walkthrough, including editing, review and rollback, is in [plugins/TESTING.md](plugins/TESTING.md).
 
 ## Known limitations
 
@@ -105,4 +110,5 @@ npm test
 - Listening history isn't used. It would need another scope (`user-top-read` or `user-read-recently-played`) and separate consent; it could be added later as opt-in.
 - The `spotify:` link that opens the desktop app isn't documented by Spotify for desktop. It works when the Spotify app is installed and registered, which the Windows app does.
 - Player error reasons such as `NO_ACTIVE_DEVICE` and `PREMIUM_REQUIRED` aren't in Spotify's current docs. Custard handles them when present and otherwise falls back to the HTTP status.
-- URIs found by search are remembered until Custard restarts. After a restart, Custard searches again before queueing.
+- URIs found by search are remembered while the plugin runs. After a restart, disable, update or crash, Custard searches again before queueing.
+- None of this has been tried against the real Spotify API from this build. It was tested with a mock Spotify; the live checklist above needs your account.

@@ -14,8 +14,10 @@ import ModeBubbles from '../ModeBubbles'
 import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
 import MessageView, { UserBubble } from './MessageView'
-import Working, { type Segment } from './Working'
-type Live = { requestId: string; userText: string; segments: Segment[] }
+import Working, { type Approval, type Segment } from './Working'
+import WorkspaceBar from './WorkspaceBar'
+import type { Workspace } from '../../../../shared/plugins'
+type Live = { requestId: string; userText: string; segments: Segment[]; approvals: Approval[] }
 
 const isToolResults = (m: BetaMessageParam | undefined): boolean =>
   !!m && typeof m.content !== 'string' && m.content.every((b) => b.type === 'tool_result')
@@ -71,6 +73,8 @@ function ChatView(props: Props): React.JSX.Element {
   const [live, setLive] = useState<Live | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  // Code mode: the workspace for the next new conversation.
+  const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
   // The request in flight, read by the event listener without re-subscribing.
   const pending = useRef<{ requestId: string; userText: string } | null>(null)
@@ -108,10 +112,26 @@ function ChatView(props: Props): React.JSX.Element {
                     kind: 'tool',
                     id: e.id,
                     label: e.label,
-                    status: e.status
+                    status: e.status,
+                    write: e.write
                   })
                 }
             )
+            break
+          case 'approval':
+            setLive(
+              (l) =>
+                l && {
+                  ...l,
+                  approvals: [
+                    ...l.approvals,
+                    { id: e.id, plugin: e.plugin, label: e.label, detail: e.detail }
+                  ]
+                }
+            )
+            break
+          case 'approval-done':
+            setLive((l) => l && { ...l, approvals: l.approvals.filter((a) => a.id !== e.id) })
             break
           case 'done':
           case 'error':
@@ -136,13 +156,14 @@ function ChatView(props: Props): React.JSX.Element {
     setError(null)
     setDraft('')
     pending.current = { requestId, userText: text }
-    setLive({ requestId, userText: text, segments: [] })
+    setLive({ requestId, userText: text, segments: [], approvals: [] })
     window.custard.chat.send({
       requestId,
       conversationId: current?.id ?? null,
       mode,
       text,
-      settings
+      settings,
+      ...(mode === 'code' && !current && workspace ? { workspace } : {})
     })
   }
 
@@ -213,7 +234,7 @@ function ChatView(props: Props): React.JSX.Element {
             {live && (
               <>
                 <UserBubble text={live.userText} />
-                <Working segments={live.segments} />
+                <Working segments={live.segments} approvals={live.approvals} />
               </>
             )}
             <div ref={bottom} />
@@ -223,6 +244,14 @@ function ChatView(props: Props): React.JSX.Element {
 
       <div className="mx-auto w-full max-w-3xl px-6 pb-6">
         {error && <div className="mb-2 px-2 text-sm text-ember-600">{error}</div>}
+        {mode === 'code' && (
+          <WorkspaceBar
+            fixed={current ? current.workspace : null}
+            value={workspace}
+            onChange={setWorkspace}
+            disabled={!!live}
+          />
+        )}
         <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
         <Composer
           busy={!!live}
