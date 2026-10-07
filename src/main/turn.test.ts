@@ -123,6 +123,104 @@ describe('a round with mixed outcomes', () => {
   })
 })
 
+describe('saving before dispatch', () => {
+  it('a call is saved as running before it is sent, and a crash then reads as unknown', async () => {
+    const c = conv()
+    const { save, copies } = saved()
+    const calls = [
+      call('q', 'spotify__add_to_queue', true, { uris: ['x'] }),
+      call('r', 'vault_read')
+    ]
+    const log = startTurn(c, save, calls)
+    const onDisk: Record<string, Conversation> = {}
+    await log.runRound(
+      calls,
+      async (x) => {
+        // What is on disk at the moment the call is dispatched.
+        onDisk[x.id] = copies[copies.length - 1]
+        return { content: 'ok', isError: false }
+      },
+      new AbortController().signal
+    )
+    expect(onDisk.q.actions!.q.status).toBe('running')
+    expect(onDisk.r.actions!.r.status).toBe('running')
+    // Custard dies while each call is out: reopening finds them unfinished.
+    const crashedAtQ = JSON.parse(JSON.stringify(onDisk.q)) as Conversation
+    expect(repairInterrupted(crashedAtQ)).toBe(true)
+    expect(crashedAtQ.actions!.q.status).toBe('unknown')
+    expect(crashedAtQ.actions!.r.status).toBe('not-run')
+    const crashedAtR = JSON.parse(JSON.stringify(onDisk.r)) as Conversation
+    repairInterrupted(crashedAtR)
+    expect(crashedAtR.actions!.q.status).toBe('completed')
+    // A read cut off mid-call failed; it changed nothing.
+    expect(crashedAtR.actions!.r.status).toBe('failed')
+  })
+})
+
+describe('after a mixed round', () => {
+  it('the next turn (such as Continue) runs only what the model asks for now', async () => {
+    const c = conv()
+    const calls = [call('a', 'vault_append', true, { text: 'hi' }), call('b', 'vault_read')]
+    const log = startTurn(c, () => undefined, calls)
+    await log.runRound(
+      calls,
+      async (x) =>
+        x.id === 'a' ? { content: 'Added', isError: false } : { content: 'Missing', isError: true },
+      new AbortController().signal
+    )
+    log.addAssistant([{ type: 'text', text: 'Partly done, and cut' }])
+    log.notice('cut-off', 'cut off')
+    // Continue is a new turn on the same chat.
+    const next = new TurnLog(c, () => undefined)
+    c.messages.push({ role: 'user', content: 'Continue from where you were cut off.' })
+    const ran: string[] = []
+    next.addAssistant([{ type: 'tool_use', id: 'c', name: 'vault_read', input: {} }])
+    await next.runRound(
+      [call('c', 'vault_read')],
+      async (x) => {
+        ran.push(x.id)
+        return { content: 'ok', isError: false }
+      },
+      new AbortController().signal
+    )
+    expect(ran).toEqual(['c'])
+    expect(c.actions!.a.status).toBe('completed')
+    expect(c.actions!.b.status).toBe('failed')
+    // The earlier results stay in the history the model sees.
+    const firstResults = c.messages[2].content as BetaToolResultBlockParam[]
+    expect(firstResults.map((r) => [r.tool_use_id, r.content])).toEqual([
+      ['a', 'Added'],
+      ['b', 'Missing']
+    ])
+  })
+})
+
+describe('repeats after a crash', () => {
+  it('are still recognised once the chat is reopened', () => {
+    const input = { uris: ['x'] }
+    const c = conv()
+    c.messages = [
+      { role: 'user', content: 'queue it' },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'q', name: 'spotify__add_to_queue', input }]
+      }
+    ]
+    c.actions = {
+      q: {
+        name: 'spotify__add_to_queue',
+        label: 'Queue',
+        write: true,
+        status: 'running',
+        key: actionKey('spotify__add_to_queue', input)
+      }
+    }
+    repairInterrupted(c)
+    const log = new TurnLog(c, () => undefined)
+    expect(log.unknownRepeat(call('q2', 'spotify__add_to_queue', true, { uris: ['x'] }))).toBe(true)
+  })
+})
+
 describe('stopping', () => {
   it('during an action: it becomes unknown, the rest never start', async () => {
     const c = conv()

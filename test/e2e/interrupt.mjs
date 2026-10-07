@@ -174,6 +174,64 @@ try {
     'Continue sent a message and went away'
   )
 
+  step('A mixed round keeps its success, and Continue repeats nothing')
+  await w.click('button[title="Chat history"]')
+  await w.click('button:has-text("New chat")')
+  await send('mixed test')
+  await w.waitForSelector('[role=status]:has-text("cut off")', { timeout: 30000 })
+  await idle()
+  const c3 = conversations().find((c) => c.title === 'mixed test')
+  check(
+    JSON.stringify(Object.values(c3.actions).map((a) => a.status)) ===
+      JSON.stringify(['completed', 'failed']),
+    'saved statuses: the write completed, the read failed'
+  )
+  await w.click('[role=status] button:text-is("Continue")')
+  await w.waitForSelector('text=and here is the rest.', { timeout: 30000 })
+  await idle()
+  const logAfter = fs.readFileSync(OUT + '/vault/Log.md', 'utf8')
+  check(
+    logAfter.split('mixed').length === 2,
+    `the write ran once, not again on Continue (Log.md: ${JSON.stringify(logAfter)})`
+  )
+  const lastReq = JSON.parse(fs.readFileSync(OUT + '/anthropic.json', 'utf8')).at(-1)
+  check(
+    JSON.stringify(lastReq.messages).includes('mixed') &&
+      lastReq.messages.some(
+        (m) =>
+          Array.isArray(m.content) &&
+          m.content.some((b) => b.type === 'tool_result' && b.is_error === false)
+      ),
+    'the Continue request still carries the completed result'
+  )
+  check(
+    Object.keys(conversations().find((c) => c.title === 'mixed test').actions).length === 2,
+    'no new actions were recorded on Continue'
+  )
+
+  step('The step limit ends the turn explicitly and keeps the progress')
+  await w.click('button[title="Chat history"]')
+  await w.click('button:has-text("New chat")')
+  await send('loop test')
+  await w.waitForSelector('[role=status]:has-text("Stopped after 25 steps")', { timeout: 60000 })
+  await idle()
+  await shot('step1-05-step-limit')
+  const c4 = conversations().find((c) => c.title === 'loop test')
+  const loopActions = Object.values(c4.actions)
+  check(
+    loopActions.length === 25 && loopActions.every((a) => a.status === 'completed'),
+    `all 25 reads are kept as completed (${loopActions.length})`
+  )
+  check(
+    c4.notices?.at(-1)?.kind === 'step-limit' && c4.notices.at(-1).after === c4.messages.length,
+    'a step-limit notice is saved at the end of the chat'
+  )
+  check((await w.inputValue('textarea')) === '', 'the message was not put back in the box')
+  await send('thanks')
+  await w.waitForSelector('text=OK.', { timeout: 30000 })
+  await idle()
+  check(true, 'the chat carries on after the step limit')
+
   step('Custard is killed mid-action, then reopened')
   await w.click('button[title="Chat history"]')
   await w.click('button:has-text("New chat")')
@@ -209,6 +267,24 @@ try {
         .at(-1)
         .content.some((b) => b.type === 'tool_result' && /^Outcome unknown/.test(b.content)),
     'the saved history is valid again, with an "Outcome unknown" result'
+  )
+
+  step('Declining the repeat after reopening sends nothing')
+  await send('try again')
+  await w.waitForSelector(card, { timeout: 30000 })
+  check(
+    /outcome is unknown/.test(await w.locator(card).textContent()),
+    'the repeat asks with a warning after a crash too'
+  )
+  await w.click(`${card} button:has-text("Don't allow")`)
+  await w.waitForSelector('text=I did not queue it again.', { timeout: 30000 })
+  await idle()
+  await new Promise((r) => setTimeout(r, 1000))
+  check(queuePosts() === 2, 'nothing more was sent to Spotify')
+  const c5 = conversations().find((c) => c.title === 'crash test')
+  check(
+    Object.values(c5.actions).at(-1).status === 'not-run',
+    'the declined repeat is saved as not run'
   )
 } catch (e) {
   await shot('step1-fail').catch(() => {})

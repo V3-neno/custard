@@ -95,7 +95,11 @@ http
                 ? 'rest'
                 : /crash test/.test(ask)
                   ? 'crash'
-                  : 'plain'
+                  : /mixed test/.test(ask)
+                    ? 'mixed'
+                    : /loop test/.test(ask)
+                      ? 'loop'
+                      : 'plain'
       if (key === 'error' && step === 1)
         return j(400, {
           type: 'error',
@@ -150,6 +154,16 @@ http
           () => tool('spotify__search', { query: 'Nils Frahm Says' }),
           () => tool('spotify__add_to_queue', { uris: [T1] })
         ],
+        // One write that works and one read that fails, then a cut-off reply.
+        mixed: [
+          () => {
+            tool('vault_append', { path: 'Log.md', content: 'mixed' })
+            tool('vault_read', { path: 'Missing.md' })
+          },
+          'Logged it, and the other note'
+        ],
+        // Never gives a final answer, to reach the step limit.
+        loop: [() => tool('vault_read', { path: 'Log.md' })],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]
@@ -157,7 +171,7 @@ http
       if (typeof s === 'function') s()
       else {
         text(s)
-        stop = key === 'cut' ? 'max_tokens' : 'end_turn'
+        stop = key === 'cut' || key === 'mixed' ? 'max_tokens' : 'end_turn'
       }
       send('message_delta', {
         delta: { stop_reason: stop, stop_sequence: null },
