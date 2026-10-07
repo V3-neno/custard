@@ -51,6 +51,13 @@ export const CloseIcon = ({ className }: IconProps): React.JSX.Element => (
   </svg>
 )
 
+// A dashed circle: a chat that leaves nothing behind.
+export const TemporaryIcon = ({ className }: IconProps): React.JSX.Element => (
+  <svg {...base} className={className}>
+    <circle cx="12" cy="12" r="8" strokeDasharray="3.2 3.2" />
+  </svg>
+)
+
 export const VaultIcon = ({ className }: IconProps): React.JSX.Element => (
   <svg {...base} className={className}>
     <path d="M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6l-8-4z" />

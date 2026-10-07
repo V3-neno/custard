@@ -20,6 +20,11 @@ function App(): React.JSX.Element {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [settings, setSettings] = useState<ChatSettings>(defaultChatSettings)
   const [labels, setLabels] = useState<Record<string, string>>({})
+  // Whether the chat on screen (or the next new one) is temporary. Switching
+  // it in a chat that has started opens a new chat of the other kind.
+  const [temporary, setTemporary] = useState(false)
+  const [newChat, setNewChat] = useState(0)
+  const [busy, setBusy] = useState(false)
   const provider = providerOf(settings.model)
 
   useEffect(() => {
@@ -52,6 +57,12 @@ function App(): React.JSX.Element {
           <TopBar
             modeLabel={modes.find((m) => m.id === mode)?.label ?? 'Chat'}
             vaultConnected={vaultConnected}
+            temporary={temporary}
+            busy={busy}
+            onTemporary={() => {
+              setTemporary((t) => !t)
+              setNewChat((n) => n + 1)
+            }}
             onHistory={() => setHistoryOpen(true)}
             onSettings={() => setSettingsOpen(true)}
           />
@@ -66,6 +77,10 @@ function App(): React.JSX.Element {
             onOpenSettings={() => setSettingsOpen(true)}
             historyOpen={historyOpen}
             onCloseHistory={() => setHistoryOpen(false)}
+            temporary={temporary}
+            onTemporary={setTemporary}
+            newChat={newChat}
+            onBusy={setBusy}
           />
           {settingsOpen && (
             <SettingsDialog

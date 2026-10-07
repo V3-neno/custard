@@ -53,6 +53,8 @@ export type ConversationSummary = {
   mode: Mode
   title: string
   updatedAt: number
+  // A temporary chat: never remembered.
+  temporary?: boolean
 }
 
 // What became of one tool call. Saved as it changes, so a chat reloaded after
@@ -125,8 +127,10 @@ export type CaptureJob = {
 }
 
 export type ChatMemory = {
-  // "Don't remember this chat".
+  // Not remembered from now on.
   off?: boolean
+  // Started as a temporary chat: never remembered, from its first message.
+  temporary?: boolean
   // "Forget this chat": its capture notes were deleted and it is never
   // remembered again. Nothing of what was forgotten is kept.
   forgotten?: boolean
@@ -193,6 +197,8 @@ export type SendChatRequest = {
   settings: ChatSettings
   // For a new Code-mode conversation.
   workspace?: Workspace
+  // Start the new conversation as a temporary chat, never remembered.
+  temporary?: boolean
 }
 
 export type ApprovalDecision = 'once' | 'chat' | 'deny'

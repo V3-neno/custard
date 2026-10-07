@@ -18,7 +18,6 @@ import Composer from './Composer'
 import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
-import MemoryBar from './MemoryBar'
 import type { Workspace } from '../../../../shared/plugins'
 type Live = { requestId: string; userText: string; segments: Segment[]; approvals: Approval[] }
 
@@ -68,11 +67,16 @@ type Props = {
   onOpenSettings: () => void
   historyOpen: boolean
   onCloseHistory: () => void
+  // A temporary chat is never remembered; see App.
+  temporary: boolean
+  onTemporary: (temporary: boolean) => void
+  newChat: number
+  onBusy: (busy: boolean) => void
 }
 
 function ChatView(props: Props): React.JSX.Element {
   const { mode, onModeChange, hasKey, settings, onSettings, onOpenSettings } = props
-  const { historyOpen, onCloseHistory } = props
+  const { historyOpen, onCloseHistory, temporary, onTemporary, newChat, onBusy } = props
   const [list, setList] = useState<ConversationSummary[]>([])
   const [current, setCurrent] = useState<Conversation | null>(null)
   const [live, setLive] = useState<Live | null>(null)
@@ -171,16 +175,28 @@ function ChatView(props: Props): React.JSX.Element {
     []
   )
 
-  const setChatMemory = async (off: boolean): Promise<void> => {
-    if (!current) return
-    const memory = await window.custard.memory.setChat(current.id, off)
-    setCurrent((c) => (c && c.id === current.id ? { ...c, memory: memory ?? undefined } : c))
+  // Asks first in the main process, listing the notes it will delete.
+  const forgetChat = async (id: string): Promise<void> => {
+    const memory = await window.custard.memory.forgetChat(id)
+    setCurrent((c) => (c && c.id === id ? { ...c, memory: memory ?? undefined } : c))
   }
-  const forgetChat = async (): Promise<void> => {
-    if (!current) return
-    const memory = await window.custard.memory.forgetChat(current.id)
-    setCurrent((c) => (c && c.id === current.id ? { ...c, memory: memory ?? undefined } : c))
-  }
+
+  useEffect(() => onBusy(!!live), [live, onBusy])
+
+  // The header's Temporary switch: a chat that has started gives way to a
+  // new one of the chosen kind.
+  const firstNewChat = useRef(newChat)
+  useEffect(() => {
+    if (newChat === firstNewChat.current) return
+    setCurrent(null)
+    setError(null)
+  }, [newChat])
+
+  // An opened chat decides the switch; a new one keeps what was chosen.
+  const currentTemporary = current ? !!current.memory?.temporary : null
+  useEffect(() => {
+    if (currentTemporary !== null) onTemporary(currentTemporary)
+  }, [currentTemporary, onTemporary])
 
   useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [current, live])
 
@@ -196,7 +212,8 @@ function ChatView(props: Props): React.JSX.Element {
       mode,
       text,
       settings,
-      ...(mode === 'code' && !current && workspace ? { workspace } : {})
+      ...(mode === 'code' && !current && workspace ? { workspace } : {}),
+      ...(!current && temporary ? { temporary: true } : {})
     })
   }
 
@@ -209,6 +226,7 @@ function ChatView(props: Props): React.JSX.Element {
 
   const startNew = (): void => {
     if (live) return
+    onTemporary(false)
     setCurrent(null)
     setError(null)
     onCloseHistory()
@@ -341,14 +359,6 @@ function ChatView(props: Props): React.JSX.Element {
             disabled={!!live}
           />
         )}
-        {current && (
-          <MemoryBar
-            memory={current.memory}
-            disabled={!!live}
-            onToggle={setChatMemory}
-            onForget={forgetChat}
-          />
-        )}
         <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
         <Composer
           busy={!!live}
@@ -370,6 +380,7 @@ function ChatView(props: Props): React.JSX.Element {
           onOpen={open}
           onNew={startNew}
           onDelete={remove}
+          onForget={forgetChat}
           onClose={onCloseHistory}
         />
       )}

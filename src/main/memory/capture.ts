@@ -165,7 +165,11 @@ export class Capture {
     const to = c.messages.length
     if (to <= from) return
     if (!this.deps.settings().auto || m.off) {
-      const why = m.off ? 'Memory is off for this chat.' : 'Remember automatically is off.'
+      const why = m.temporary
+        ? 'This is a temporary chat.'
+        : m.off
+          ? 'Memory is off for this chat.'
+          : 'Remember automatically is off.'
       this.set(id, (m) => {
         m.job = {
           id: `${id}:${from}-${to}`,
@@ -444,9 +448,10 @@ export class Capture {
   // "Don't remember this chat" (off) or back on. Turning it off cancels a
   // waiting capture and moves the watermark to the end, so nothing said so
   // far is captured later, even after turning it back on.
-  // A forgotten chat stays off.
+  // A forgotten or temporary chat stays off.
   setChatMemory(id: string, off: boolean): Conversation | null {
-    if (!off && this.deps.load(id)?.memory?.forgotten) return this.deps.load(id)
+    const m = this.deps.load(id)?.memory
+    if (!off && (m?.forgotten || m?.temporary)) return this.deps.load(id)
     const c = this.set(id, (m, c) => {
       m.off = off
       if (off) {
