@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import Markdown from '../Markdown'
+import Orb from '../Orb'
 import { toolLabel } from '../../../../shared/vault'
 
+// The orb is the "buffer": it glows while Claude works and holds the
+// collapsible thinking summary once there is one.
 export function Thinking({
   text,
   live
@@ -13,12 +16,18 @@ export function Thinking({
   const [open, setOpen] = useState(false)
   if (!text && !live) return null
   return (
-    <div className="mb-2 text-sm">
-      <button onClick={() => setOpen(!open)} className="text-ink-300 hover:text-custard-300">
-        {live && !text ? 'Thinking…' : `${open ? '▾' : '▸'} Thought process`}
+    <div className="mb-3">
+      <button
+        onClick={() => text && setOpen(!open)}
+        className="flex items-center gap-2.5 text-sm text-ash-400 hover:text-molten-300"
+      >
+        <Orb size={18} state={live ? 'thinking' : 'idle'} />
+        <span className={live ? 'animate-pulse' : ''}>
+          {live ? 'Thinking' : open ? 'Hide thinking' : 'Show thinking'}
+        </span>
       </button>
       {open && text && (
-        <div className="mt-2 border-l-2 border-ink-700 pl-3 whitespace-pre-wrap text-ink-300">
+        <div className="mt-2 ml-2 border-l border-molten-500/40 pl-4 text-sm whitespace-pre-wrap text-ash-400">
           {text}
         </div>
       )}
@@ -27,7 +36,7 @@ export function Thinking({
 }
 
 export function FallbackNote({ to }: { to: string }): React.JSX.Element {
-  return <div className="mb-2 text-xs text-ink-500">Answer continued by {to}.</div>
+  return <div className="mb-2 text-xs text-ash-500">Answer continued by {to}.</div>
 }
 
 export function ToolLine({
@@ -37,11 +46,19 @@ export function ToolLine({
   label: string
   status?: 'running' | 'done' | 'error'
 }): React.JSX.Element {
-  const icon = status === 'running' ? '◌' : status === 'error' ? '✕' : '✓'
   return (
-    <div className={`mb-2 text-xs ${status === 'error' ? 'text-red-300' : 'text-ink-300'}`}>
-      <span className="mr-2 text-custard-400">{icon}</span>
+    <div
+      className={`mb-2 flex items-center gap-2.5 text-xs ${status === 'error' ? 'text-ember-600' : 'text-ash-400'}`}
+    >
+      {status === 'running' ? (
+        <Orb size={10} state="thinking" />
+      ) : (
+        <span
+          className={`h-2 w-2 rounded-full ${status === 'error' ? 'bg-ember-600' : 'bg-molten-400 shadow-[0_0_8px_rgb(245_174_63/0.6)]'}`}
+        />
+      )}
       {label}
+      {status === 'error' && <span className="text-ash-500">· failed</span>}
     </div>
   )
 }
@@ -49,7 +66,9 @@ export function ToolLine({
 export function UserBubble({ text }: { text: string }): React.JSX.Element {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[80%] rounded-2xl bg-ink-700 px-4 py-2 whitespace-pre-wrap">{text}</div>
+      <div className="max-w-[80%] rounded-3xl rounded-br-lg border border-forge-700 bg-forge-800 px-4 py-2.5 text-[15px] whitespace-pre-wrap text-ash-100">
+        {text}
+      </div>
     </div>
   )
 }

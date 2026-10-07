@@ -5,6 +5,7 @@ import type {
   ChatSettings,
   Conversation,
   ConversationSummary,
+  Mode,
   SendChatRequest
 } from '../shared/chat'
 import type { VaultInfo } from '../shared/vault'
@@ -29,7 +30,8 @@ const custard = {
     clear: (): Promise<void> => ipcRenderer.invoke('vault:clear')
   },
   conversations: {
-    list: (): Promise<ConversationSummary[]> => ipcRenderer.invoke('conversations:list'),
+    list: (mode: Mode): Promise<ConversationSummary[]> =>
+      ipcRenderer.invoke('conversations:list', mode),
     get: (id: string): Promise<Conversation | null> => ipcRenderer.invoke('conversations:get', id),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id)
   },

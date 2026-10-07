@@ -15,8 +15,17 @@ export type ChatSettings = { model: ChatModel; effort: Effort }
 
 export const defaultChatSettings: ChatSettings = { model: 'claude-opus-5-5', effort: 'medium' }
 
+export const modes = [
+  { id: 'chat', label: 'Chat', hint: 'Talk anything through' },
+  { id: 'code', label: 'Code', hint: 'Write, debug and explain code' },
+  { id: 'design', label: 'Design', hint: 'Shape interfaces and visuals' }
+] as const
+
+export type Mode = (typeof modes)[number]['id']
+
 export type ConversationSummary = {
   id: string
+  mode: Mode
   title: string
   updatedAt: number
 }
@@ -45,6 +54,7 @@ export type ChatEvent =
 export type SendChatRequest = {
   requestId: string
   conversationId: string | null
+  mode: Mode
   text: string
   settings: ChatSettings
 }

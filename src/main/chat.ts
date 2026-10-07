@@ -11,12 +11,29 @@ import { existsSync } from 'fs'
 import { getApiKey } from './apiKey'
 import { getConversation, getVaultPath, newConversation, saveConversation } from './store'
 import { runVaultTool, vaultSystemPrompt, vaultTools } from './vault'
-import { chatModels, type ChatEvent, type Conversation, type SendChatRequest } from '../shared/chat'
+import {
+  chatModels,
+  type ChatEvent,
+  type Conversation,
+  type Mode,
+  type SendChatRequest
+} from '../shared/chat'
 import { toolLabel } from '../shared/vault'
 
 const SYSTEM_PROMPT =
-  'You are Claude, chatting with the user through Custard, their personal desktop client. ' +
+  'You are Claude, working with the user through Custard, their personal desktop client. ' +
   'Format responses in Markdown when it helps readability.'
+
+// Each mode keeps its own history and nudges Claude toward that kind of work.
+const MODE_PROMPTS: Record<Mode, string> = {
+  chat: 'The user is in Chat mode: a general conversation.',
+  code:
+    'The user is in Code mode. Act as a senior software engineer: give complete, working code in fenced blocks with the language named, ' +
+    'explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
+  design:
+    'The user is in Design mode. Act as a product and visual designer: think about layout, hierarchy, color, typography, spacing and interaction states. ' +
+    'When showing UI, give self-contained HTML with inline CSS (or React with Tailwind when asked) in fenced code blocks, and describe the design choices.'
+}
 
 // Upper bound on model calls per user message, so a tool loop can't run away.
 const MAX_STEPS = 25
@@ -51,13 +68,16 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
 
   const conversation: Conversation =
-    (req.conversationId && getConversation(req.conversationId)) || newConversation(req.text)
+    (req.conversationId && getConversation(req.conversationId)) ||
+    newConversation(req.mode, req.text)
   const startLength = conversation.messages.length
   conversation.messages.push({ role: 'user', content: req.text })
 
   const vault = getVaultPath()
   const vaultReady = vault !== null && existsSync(vault)
-  const system: BetaTextBlockParam[] = [{ type: 'text', text: SYSTEM_PROMPT }]
+  const system: BetaTextBlockParam[] = [
+    { type: 'text', text: `${SYSTEM_PROMPT}\n\n${MODE_PROMPTS[conversation.mode]}` }
+  ]
   if (vaultReady) system.push({ type: 'text', text: vaultSystemPrompt(vault) })
 
   const model = chatModels.find((m) => m.id === req.settings.model) ?? chatModels[0]

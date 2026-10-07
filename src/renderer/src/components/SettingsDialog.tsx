@@ -50,8 +50,8 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
   }
 
   const button = 'rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-40'
-  const primary = `${button} bg-custard-400 text-ink-900 hover:bg-custard-300`
-  const secondary = `${button} border border-ink-700 text-ink-300 hover:text-custard-50`
+  const primary = `${button} molten-fill text-forge-950`
+  const secondary = `${button} border border-forge-700 text-ash-300 hover:text-molten-200`
 
   return (
     <div
@@ -59,16 +59,16 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
       onClick={onClose}
     >
       <div
-        className="w-[480px] rounded-2xl border border-ink-700 bg-ink-800 p-6"
+        className="w-[480px] rounded-3xl border border-forge-700 bg-forge-850 p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-5 text-base font-semibold">Settings</h2>
 
         <section className="mb-6">
           <h3 className="mb-1 text-sm font-medium">
-            Claude API key {hasKey && <span className="text-custard-300">· saved</span>}
+            Claude API key {hasKey && <span className="text-molten-300">· saved</span>}
           </h3>
-          <p className="mb-3 text-sm text-ink-300">
+          <p className="mb-3 text-sm text-ash-300">
             Encrypted with Windows secure storage and kept on this computer. Get one at
             console.anthropic.com.
           </p>
@@ -79,16 +79,16 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
               onChange={(e) => setKey(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && key.trim() && saveKey()}
               placeholder={hasKey ? 'Paste a new key to replace it' : 'sk-ant-…'}
-              className="flex-1 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm outline-none focus:border-custard-400/60"
+              className="flex-1 rounded-lg border border-forge-700 bg-forge-900 px-3 py-2 text-sm outline-none focus:border-molten-500/60"
               autoFocus={!hasKey}
             />
             <button onClick={saveKey} disabled={!key.trim()} className={primary}>
               Save
             </button>
           </div>
-          {error && <p className="mt-2 text-sm text-red-300">{error}</p>}
+          {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
           {hasKey && (
-            <button onClick={clearKey} className="mt-2 text-xs text-ink-500 hover:text-red-300">
+            <button onClick={clearKey} className="mt-2 text-xs text-ash-500 hover:text-ember-600">
               Remove key
             </button>
           )}
@@ -96,25 +96,25 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
 
         <section>
           <h3 className="mb-1 text-sm font-medium">
-            Obsidian vault {vault && <span className="text-custard-300">· connected</span>}
+            Obsidian vault {vault && <span className="text-molten-300">· connected</span>}
           </h3>
-          <p className="mb-3 text-sm text-ink-300">
+          <p className="mb-3 text-sm text-ash-300">
             The brain behind Custard. Claude can search and read your notes, create new ones and add
             to existing ones, but never overwrites or deletes anything. It keeps its memory of you
-            in <code className="text-custard-100">{MEMORY_NOTE}</code>.
+            in <code className="text-molten-200">{MEMORY_NOTE}</code>.
           </p>
           {vault ? (
             <>
-              <div className="truncate rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm">
+              <div className="truncate rounded-lg border border-forge-700 bg-forge-900 px-3 py-2 text-sm">
                 {vault.path}
               </div>
-              <p className="mt-2 text-xs text-ink-500">
+              <p className="mt-2 text-xs text-ash-500">
                 {vault.skills.length
                   ? `Skills: ${vault.skills.join(', ')}`
                   : 'No skills yet. Add them in Custard/Skills.'}
               </p>
               {!vault.isObsidian && (
-                <p className="mt-2 text-xs text-custard-300">
+                <p className="mt-2 text-xs text-molten-300">
                   This folder has no .obsidian folder, so it may not be an Obsidian vault. It still
                   works as a notes folder.
                 </p>
@@ -123,7 +123,7 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
                 <button onClick={pickVault} className={secondary}>
                   Change folder
                 </button>
-                <button onClick={clearVault} className="text-xs text-ink-500 hover:text-red-300">
+                <button onClick={clearVault} className="text-xs text-ash-500 hover:text-ember-600">
                   Disconnect
                 </button>
               </div>
@@ -138,7 +138,7 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
               </button>
             </div>
           )}
-          {vaultError && <p className="mt-2 text-sm text-red-300">{vaultError}</p>}
+          {vaultError && <p className="mt-2 text-sm text-ember-600">{vaultError}</p>}
         </section>
 
         <div className="mt-6 flex justify-end">

@@ -15,6 +15,7 @@ import {
   setVaultPath
 } from './store'
 import type { VaultInfo } from '../shared/vault'
+import type { Mode } from '../shared/chat'
 import { listSkills } from './vault'
 import { createStarterVault } from './vaultTemplate'
 
@@ -82,7 +83,7 @@ app.whenReady().then(() => {
   ipcMain.handle('apiKey:clear', () => clearApiKey())
   ipcMain.handle('settings:get', () => getChatSettings())
   ipcMain.handle('settings:set', (_, s) => setChatSettings(s))
-  ipcMain.handle('conversations:list', () => listConversations())
+  ipcMain.handle('conversations:list', (_, mode: Mode) => listConversations(mode))
   ipcMain.handle('conversations:get', (_, id: string) => getConversation(id))
   ipcMain.handle('conversations:delete', (_, id: string) => deleteConversation(id))
   ipcMain.handle('vault:get', () => vaultInfo())

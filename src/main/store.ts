@@ -6,7 +6,8 @@ import {
   defaultChatSettings,
   type ChatSettings,
   type Conversation,
-  type ConversationSummary
+  type ConversationSummary,
+  type Mode
 } from '../shared/chat'
 
 // Conversations are plain JSON files in the app's data folder, one per chat.
@@ -18,13 +19,18 @@ const dir = (): string => {
 const file = (id: string): string => join(dir(), `${id.replace(/[^\w-]/g, '')}.json`)
 const settingsFile = (): string => join(app.getPath('userData'), 'settings.json')
 
-export function listConversations(): ConversationSummary[] {
+// Conversations saved before modes existed belong to Chat.
+const withMode = (c: Conversation): Conversation => ({ ...c, mode: c.mode ?? 'chat' })
+
+export function listConversations(mode: Mode): ConversationSummary[] {
   return readdirSync(dir())
     .filter((f) => f.endsWith('.json'))
     .flatMap((f) => {
       try {
-        const c = JSON.parse(readFileSync(join(dir(), f), 'utf8')) as Conversation
-        return [{ id: c.id, title: c.title, updatedAt: c.updatedAt }]
+        const c = withMode(JSON.parse(readFileSync(join(dir(), f), 'utf8')))
+        return c.mode === mode
+          ? [{ id: c.id, mode: c.mode, title: c.title, updatedAt: c.updatedAt }]
+          : []
       } catch {
         return []
       }
@@ -34,13 +40,13 @@ export function listConversations(): ConversationSummary[] {
 
 export function getConversation(id: string): Conversation | null {
   if (!existsSync(file(id))) return null
-  return JSON.parse(readFileSync(file(id), 'utf8')) as Conversation
+  return withMode(JSON.parse(readFileSync(file(id), 'utf8')))
 }
 
-export function newConversation(firstMessage: string): Conversation {
+export function newConversation(mode: Mode, firstMessage: string): Conversation {
   const now = Date.now()
   const title = firstMessage.trim().replace(/\s+/g, ' ').slice(0, 60) || 'New chat'
-  return { id: randomUUID(), title, createdAt: now, updatedAt: now, messages: [] }
+  return { id: randomUUID(), mode, title, createdAt: now, updatedAt: now, messages: [] }
 }
 
 export function saveConversation(c: Conversation): void {

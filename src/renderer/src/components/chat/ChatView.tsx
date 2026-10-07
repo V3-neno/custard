@@ -2,10 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import {
   defaultChatSettings,
+  modes,
   type ChatSettings,
   type Conversation,
-  type ConversationSummary
+  type ConversationSummary,
+  type Mode
 } from '../../../../shared/chat'
+import HistoryDrawer from '../HistoryDrawer'
+import ModeBubbles from '../ModeBubbles'
+import Orb from '../Orb'
 import Composer from './Composer'
 import MessageView, { FallbackNote, Thinking, ToolLine, UserBubble } from './MessageView'
 import Markdown from '../Markdown'
@@ -32,13 +37,23 @@ function upsertTool(segments: Segment[], tool: Extract<Segment, { kind: 'tool' }
   return i < 0 ? [...segments, tool] : segments.map((s, j) => (j === i ? tool : s))
 }
 
-function ChatView({
-  hasKey,
-  onOpenSettings
-}: {
+const copy: Record<Mode, { headline: string; placeholder: string }> = {
+  chat: { headline: "What's on your mind?", placeholder: 'Message Claude…' },
+  code: { headline: 'What are we building?', placeholder: 'Describe the code you need…' },
+  design: { headline: 'What should we shape?', placeholder: 'Describe what you want to design…' }
+}
+
+type Props = {
+  mode: Mode
+  onModeChange: (mode: Mode) => void
   hasKey: boolean
   onOpenSettings: () => void
-}): React.JSX.Element {
+  historyOpen: boolean
+  onCloseHistory: () => void
+}
+
+function ChatView(props: Props): React.JSX.Element {
+  const { mode, onModeChange, hasKey, onOpenSettings, historyOpen, onCloseHistory } = props
   const [list, setList] = useState<ConversationSummary[]>([])
   const [current, setCurrent] = useState<Conversation | null>(null)
   const [live, setLive] = useState<Live | null>(null)
@@ -49,11 +64,17 @@ function ChatView({
   // The request in flight, read by the event listener without re-subscribing.
   const pending = useRef<{ requestId: string; userText: string } | null>(null)
 
-  const refreshList = useCallback(() => window.custard.conversations.list().then(setList), [])
+  const refreshList = useCallback(
+    () => window.custard.conversations.list(mode).then(setList),
+    [mode]
+  )
+
+  useEffect(() => {
+    window.custard.settings.get().then(setSettings)
+  }, [])
 
   useEffect(() => {
     refreshList()
-    window.custard.settings.get().then(setSettings)
   }, [refreshList])
 
   useEffect(
@@ -109,13 +130,27 @@ function ChatView({
     setDraft('')
     pending.current = { requestId, userText: text }
     setLive({ requestId, userText: text, segments: [] })
-    window.custard.chat.send({ requestId, conversationId: current?.id ?? null, text, settings })
+    window.custard.chat.send({
+      requestId,
+      conversationId: current?.id ?? null,
+      mode,
+      text,
+      settings
+    })
   }
 
   const open = async (id: string): Promise<void> => {
     if (live) return
     setError(null)
     setCurrent(await window.custard.conversations.get(id))
+    onCloseHistory()
+  }
+
+  const startNew = (): void => {
+    if (live) return
+    setCurrent(null)
+    setError(null)
+    onCloseHistory()
   }
 
   const remove = async (id: string): Promise<void> => {
@@ -139,90 +174,69 @@ function ChatView({
   }, [current])
 
   const empty = !current && !live
+  const modeLabel = modes.find((m) => m.id === mode)?.label ?? 'Chat'
+  const lastKind = live?.segments[live.segments.length - 1]?.kind
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <div className="flex w-60 shrink-0 flex-col border-r border-ink-700">
-        <button
-          onClick={() => !live && (setCurrent(null), setError(null))}
-          className="m-3 rounded-lg border border-ink-700 px-3 py-2 text-left text-sm hover:border-custard-400/60"
-        >
-          + New chat
-        </button>
-        <div className="flex-1 overflow-y-auto px-2 pb-3">
-          {list.map((c) => (
-            <div
-              key={c.id}
-              className={`group flex items-center rounded-lg text-sm ${
-                current?.id === c.id
-                  ? 'bg-ink-700 text-custard-50'
-                  : 'text-ink-300 hover:bg-ink-800'
-              }`}
-            >
-              <button onClick={() => open(c.id)} className="flex-1 truncate px-3 py-2 text-left">
-                {c.title}
-              </button>
-              <button
-                onClick={() => remove(c.id)}
-                title="Delete chat"
-                className="hidden px-2 text-ink-500 group-hover:block hover:text-custard-300"
-              >
-                ×
-              </button>
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="flex-1 overflow-y-auto">
+        {empty ? (
+          <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
+            <Orb size={112} state="active" />
+            <div className="text-center">
+              <h1 className="text-3xl font-semibold tracking-tight text-molten-200">
+                {copy[mode].headline}
+              </h1>
+              <p className="mt-2 text-sm text-ash-400">
+                {hasKey ? (
+                  modes.find((m) => m.id === mode)?.hint
+                ) : (
+                  <button onClick={onOpenSettings} className="text-molten-300 hover:underline">
+                    Add your Claude API key to get started
+                  </button>
+                )}
+              </p>
             </div>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 pt-8 pb-6">
+            {current?.messages.map((m, i) =>
+              isToolResults(m) ? null : (
+                // A reply that continues after vault actions sits flush with the part before it.
+                <div key={i} className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
+                  <MessageView message={m} failedTools={failedTools} />
+                </div>
+              )
+            )}
+            {live && (
+              <>
+                <UserBubble text={live.userText} />
+                <div>
+                  {live.segments.map((seg, i) => {
+                    if (seg.kind === 'thinking')
+                      return (
+                        <Thinking key={i} text={seg.text} live={i === live.segments.length - 1} />
+                      )
+                    if (seg.kind === 'fallback') return <FallbackNote key={i} to={seg.to} />
+                    if (seg.kind === 'tool')
+                      return <ToolLine key={i} label={seg.label} status={seg.status} />
+                    return <Markdown key={i} text={seg.text} />
+                  })}
+                  {lastKind !== 'text' && lastKind !== 'thinking' && <Thinking text="" live />}
+                </div>
+              </>
+            )}
+            <div ref={bottom} />
+          </div>
+        )}
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex-1 overflow-y-auto">
-          {empty ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 text-ink-500">
-              <span className="text-4xl">🍮</span>
-              {hasKey ? (
-                <span>What are we talking about today?</span>
-              ) : (
-                <button onClick={onOpenSettings} className="text-custard-300 hover:underline">
-                  Add your Claude API key to start chatting
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-6">
-              {current?.messages.map((m, i) =>
-                isToolResults(m) ? null : (
-                  // A reply that continues after vault actions sits flush with the part before it.
-                  <div key={i} className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
-                    <MessageView message={m} failedTools={failedTools} />
-                  </div>
-                )
-              )}
-              {live && (
-                <>
-                  <UserBubble text={live.userText} />
-                  <div>
-                    {live.segments.map((seg, i) => {
-                      if (seg.kind === 'thinking') return <Thinking key={i} text={seg.text} />
-                      if (seg.kind === 'fallback') return <FallbackNote key={i} to={seg.to} />
-                      if (seg.kind === 'tool')
-                        return <ToolLine key={i} label={seg.label} status={seg.status} />
-                      return <Markdown key={i} text={seg.text} />
-                    })}
-                    {live.segments[live.segments.length - 1]?.kind !== 'text' && (
-                      <Thinking text="" live />
-                    )}
-                  </div>
-                </>
-              )}
-              <div ref={bottom} />
-            </div>
-          )}
-        </div>
-        {error && (
-          <div className="mx-auto mb-2 w-full max-w-3xl px-6 text-sm text-red-300">{error}</div>
-        )}
+      <div className="mx-auto w-full max-w-3xl px-6 pb-6">
+        {error && <div className="mb-2 px-2 text-sm text-ember-600">{error}</div>}
+        <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
         <Composer
           busy={!!live}
+          placeholder={copy[mode].placeholder}
           settings={settings}
           onSettings={updateSettings}
           onSend={send}
@@ -231,6 +245,18 @@ function ChatView({
           setDraft={setDraft}
         />
       </div>
+
+      {historyOpen && (
+        <HistoryDrawer
+          modeLabel={modeLabel}
+          conversations={list}
+          currentId={current?.id ?? null}
+          onOpen={open}
+          onNew={startNew}
+          onDelete={remove}
+          onClose={onCloseHistory}
+        />
+      )}
     </div>
   )
 }
