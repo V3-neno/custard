@@ -1,17 +1,17 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import type { CaptureJob, ChatMemory, Conversation, Provider } from '../../shared/chat'
 import type { MemorySettings } from '../../shared/memory'
-import { MEMORY_NOTE } from '../../shared/vault'
-import { buildEvidence, eligible, evidenceText } from './evidence'
-import { render, type Rendered } from './render'
+import { buildEvidence, eligible, evidenceText, type Evidence } from './evidence'
+import { noteText, render, type Item, type Provenance, type Section } from './render'
 import type { Summarizer } from './summarize'
-import { ACTIVITY_NOTE, addEntries, notesWithMarker, vaultId } from './write'
+import { CAPTURES, captureName, chatCaptures, deleteNotes, vaultId, writeCapture } from './write'
 
 // Automatic memory: after a turn ends, a deterministic check decides whether
 // the chat since the last capture is worth remembering. If so, one capture
 // job is queued for the chat. A job summarizes that part of the chat with one
-// tool-less model call and writes the result into the vault. It only writes
-// notes: it never runs, repeats or resumes an action.
+// tool-less model call and writes the result as a new note in the vault
+// (Custard/Captures). It only creates notes, never edits one, and it never
+// runs, repeats or resumes an action.
 //
 // Jobs live on the conversation (ChatMemory) and a small queue file holds the
 // ids of chats with a job waiting, so a job survives a restart or a vault
@@ -30,17 +30,29 @@ export type CaptureDeps = {
   summarizer: (provider: Provider) => Summarizer | null
   queueFile: string
   pluginName: (id: string) => string
-  // Where a plugin's activity goes (plugin knowledge); null for the main
-  // Activity note.
-  pluginNote?: (vault: string, pluginId: string, note: 'Activity' | 'Preferences') => string | null
+  // The folder for a plugin's own capture notes (plugin knowledge); null to
+  // keep its parts in the main capture note.
+  pluginFolder?: (vault: string, pluginId: string) => string | null
   notify?: (c: Conversation) => void
   now?: () => number
 }
 
+const pad = (n: number): string => String(n).padStart(2, '0')
 const localDate = (t: number): string => {
   const d = new Date(t)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
+const localTime = (t: number): string => {
+  const d = new Date(t)
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// What the chat said about not being remembered, as a skip reason. Asking to
+// forget the whole chat also turns memory off for it.
+const dontRememberReason = (e: Evidence): string =>
+  e.forgetChat
+    ? `Your message said "${e.dontRemember}", so Custard stopped remembering this chat. To delete what it saved earlier, use Forget.`
+    : `Your message said "${e.dontRemember}", so this part wasn't saved.`
 
 // A job is tied to the vault it was queued for: its id file, or its folder
 // when it has no id yet.
@@ -127,7 +139,7 @@ export class Capture {
       ...(notes ? { notes } : {})
     }
     delete m.job.plan
-    if (status !== 'failed' && status !== 'skipped') delete m.job.reason
+    if (status === 'saved' || status === 'pending') delete m.job.reason
   }
 
   // After a turn ends (finished, stopped, failed, cut off). Never throws.
@@ -188,11 +200,8 @@ export class Capture {
           attempts: 0,
           at: this.now()
         }
-        this.end(
-          m,
-          'skipped',
-          `Your message said "${evidence.dontRemember}", so this part wasn't saved.`
-        )
+        this.end(m, 'skipped', dontRememberReason(evidence))
+        if (evidence.forgetChat) m.off = true
       })
       this.dequeue(id)
       return
@@ -323,13 +332,10 @@ export class Capture {
     if (!plan) {
       const evidence = buildEvidence(c, job.from, job.to, this.deps.settings().offPlugins)
       if (evidence.dontRemember) {
-        this.set(id, (m) =>
-          this.end(
-            m,
-            'skipped',
-            `Your message said "${evidence.dontRemember}", so this part wasn't saved.`
-          )
-        )
+        this.set(id, (m) => {
+          this.end(m, 'skipped', dontRememberReason(evidence))
+          if (evidence.forgetChat) m.off = true
+        })
         return false
       }
       const summarize = this.deps.summarizer(job.provider ?? 'claude')
@@ -368,13 +374,7 @@ export class Capture {
         this.set(id, (m) => this.end(m, 'skipped', 'Nothing in it needed remembering.'))
         return false
       }
-      plan = render(
-        summary,
-        evidence,
-        job.id,
-        { title: c.title, date: localDate(job.at), chatId: c.id },
-        this.deps.pluginName
-      )
+      plan = render(summary, evidence, this.deps.pluginName)
       const p = plan
       this.set(id, (m) => {
         if (m.job?.id === job.id) m.job.plan = p
@@ -383,7 +383,7 @@ export class Capture {
     if (!still()) return false
     let written: string[]
     try {
-      written = this.write(vault, job.id, plan)
+      written = this.write(vault, c, job.id, job.at, plan as Item[])
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       const attempt = job.attempts + (job.plan ? 1 : 0)
@@ -402,47 +402,51 @@ export class Capture {
     return false
   }
 
-  // Writes a plan's entries. Each note is written at most once per job: a
-  // note that already has this job's marker (a crash after writing, before
-  // the job was recorded) is counted as written and left alone.
-  private write(vault: string, marker: string, plan: Rendered): string[] {
+  // Writes a capture as new notes: one in Custard/Captures, plus one per
+  // plugin that has its own folder. Each is created only if its name is
+  // free and is never written again; a note already holding this job (a
+  // crash after writing, before the job was recorded) counts as written.
+  private write(vault: string, c: Conversation, jobId: string, at: number, plan: Item[]): string[] {
+    const from: Provenance = {
+      title: c.title,
+      date: localDate(at),
+      time: localTime(at),
+      chatId: c.id
+    }
+    const parts = new Map<string, { folder: string; items: Item[] }>()
     const off = this.deps.settings().offPlugins
-    // Plugin entries go to the plugin's own notes (created on this first
-    // use), unless remembering that plugin was turned off meanwhile.
-    const group = (
-      items: { plugin: string; text: string }[],
-      kind: 'Activity' | 'Preferences',
-      fallback: string
-    ): Map<string, string[]> => {
-      const out = new Map<string, string[]>()
-      for (const i of items) {
-        if (i.plugin && off.includes(i.plugin)) continue
-        const note = (i.plugin && this.deps.pluginNote?.(vault, i.plugin, kind)) || fallback
-        out.set(note, [...(out.get(note) ?? []), i.text])
-      }
-      return out
+    for (const i of plan) {
+      // Remembering this plugin was turned off after it was summarized.
+      if (i.plugin && off.includes(i.plugin)) continue
+      const folder = (i.plugin && this.deps.pluginFolder?.(vault, i.plugin)) || null
+      const key = folder ? i.plugin : ''
+      const part = parts.get(key) ?? { folder: folder ?? CAPTURES, items: [] }
+      part.items.push({ ...i, section: i.section as Section })
+      parts.set(key, part)
     }
-    const notes: string[] = []
-    const lists = group(
-      plan.memory.map((m) => (typeof m === 'string' ? { plugin: '', text: m } : m)),
-      'Preferences',
-      MEMORY_NOTE
+    const name = captureName(from.date, from.time, c.title)
+    return [...parts].map(([plugin, part]) =>
+      writeCapture(
+        vault,
+        part.folder,
+        name,
+        noteText(part.items, from, {
+          'custard-capture': jobId,
+          chat: c.id,
+          date: from.date,
+          ...(plugin ? { plugin } : {})
+        }),
+        { job: jobId, plugin }
+      )
     )
-    for (const [note, items] of lists) {
-      addEntries(vault, note, 'memory', marker, items)
-      notes.push(note)
-    }
-    for (const [note, items] of group(plan.activity, 'Activity', ACTIVITY_NOTE)) {
-      addEntries(vault, note, 'activity', marker, items)
-      notes.push(note)
-    }
-    return notes.filter((n) => notesWithMarker(vault, [n], marker).length)
   }
 
   // "Don't remember this chat" (off) or back on. Turning it off cancels a
   // waiting capture and moves the watermark to the end, so nothing said so
   // far is captured later, even after turning it back on.
+  // A forgotten chat stays off.
   setChatMemory(id: string, off: boolean): Conversation | null {
+    if (!off && this.deps.load(id)?.memory?.forgotten) return this.deps.load(id)
     const c = this.set(id, (m, c) => {
       m.off = off
       if (off) {
@@ -452,6 +456,37 @@ export class Capture {
     })
     if (off) this.dequeue(id)
     return c
+  }
+
+  // The notes "Forget this chat" would delete.
+  savedNotes(id: string): string[] {
+    const vault = this.deps.vaultPath()
+    return vault ? chatCaptures(vault, id) : []
+  }
+
+  // "Forget this chat": memory goes off for good, nothing waiting is written,
+  // and every capture note saved from it is deleted. Only the chat's own
+  // record that it was forgotten is kept, none of what was in it. Returns
+  // the notes deleted and any that couldn't be.
+  forget(id: string): { deleted: string[]; left: string[] } {
+    this.set(id, (m, c) => {
+      m.off = true
+      m.forgotten = true
+      m.watermark = c.messages.length
+      if (m.job) {
+        delete m.job.plan
+        delete m.job.notes
+        delete m.job.reason
+      }
+      this.end(m, 'off', 'You asked Custard to forget this chat.')
+    })
+    this.dequeue(id)
+    this.again.delete(id)
+    const vault = this.deps.vaultPath()
+    if (!vault) return { deleted: [], left: [] }
+    const notes = chatCaptures(vault, id)
+    const deleted = deleteNotes(vault, notes)
+    return { deleted, left: notes.filter((n) => !deleted.includes(n)) }
   }
 
   // Remember automatically turned off: every waiting capture is cancelled.

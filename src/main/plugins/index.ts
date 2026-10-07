@@ -106,9 +106,9 @@ export function registerPluginHandlers(): void {
   handle('plugins:status', (_, id: string) => h().status(id))
   handle('plugins:review', (_, id: string) => h().review(id))
   handle('plugins:test', (_, id: string) => h().test(id))
-  // Plugin notes in the vault follow the plugin's name and state.
-  const noted = <T>(id: string, s: T): T => {
-    pluginNotesChanged(id)
+  // What the model is told about plugins follows their name and state.
+  const noted = <T>(_id: string, s: T): T => {
+    pluginNotesChanged()
     return s
   }
   handle('plugins:activate', async (_, id: string, buildId: string, approved: string[]) =>
@@ -133,7 +133,7 @@ export function registerPluginHandlers(): void {
     const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
     if (r.response !== 1) return h().status(id)
     h().uninstall(id)
-    pluginNotesChanged(id, 'uninstalled')
+    pluginNotesChanged()
     return h().status(id)
   })
   handle('plugins:setConfig', (_, id: string, values: Record<string, unknown>) =>

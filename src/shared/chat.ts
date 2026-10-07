@@ -115,12 +115,9 @@ export type CaptureJob = {
   // model summarizes it.
   vault?: string
   provider?: Provider
-  // The note text, once summarized, so a retry after a crash writes the same
-  // entries instead of asking the model again. Removed once saved.
-  plan?: {
-    memory: { plugin: string; text: string }[]
-    activity: { plugin: string; text: string }[]
-  }
+  // The note's parts, once summarized, so a retry after a crash writes the
+  // same note instead of asking the model again. Removed once saved.
+  plan?: { plugin: string; section: string; text: string }[]
   notes?: string[]
   // Why it was skipped or failed, in words for the user.
   reason?: string
@@ -130,6 +127,9 @@ export type CaptureJob = {
 export type ChatMemory = {
   // "Don't remember this chat".
   off?: boolean
+  // "Forget this chat": its capture notes were deleted and it is never
+  // remembered again. Nothing of what was forgotten is kept.
+  forgotten?: boolean
   // Messages before this index are never captured again.
   watermark: number
   job?: CaptureJob

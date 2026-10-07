@@ -4,6 +4,7 @@ type Props = {
   memory?: ChatMemory
   disabled: boolean
   onToggle: (off: boolean) => void
+  onForget: () => void
 }
 
 // What became of the latest capture. The switch says whether this chat is
@@ -13,11 +14,18 @@ type Last = { text: string; detail?: string; title?: string }
 
 function lastCapture(m?: ChatMemory): Last | null {
   const job = m?.job
+  if (m?.forgotten)
+    return {
+      text: 'Forgotten',
+      detail: 'start a new chat to be remembered',
+      title:
+        "Custard deleted the notes it saved from this chat and won't remember it again. The chat stays in your history until you delete it."
+    }
   if (m?.off)
     return job?.notes?.length && job.status === 'saved'
       ? {
           text: 'Earlier saves stay in your vault',
-          title: `Saved earlier in ${job.notes.join(', ')}. Edit or delete them in Obsidian.`
+          title: `Saved earlier in ${job.notes.join(', ')}. Edit or delete them in Obsidian, or use Forget.`
         }
       : null
   if (!job) return null
@@ -37,8 +45,9 @@ function lastCapture(m?: ChatMemory): Last | null {
   }
 }
 
-function MemoryBar({ memory, disabled, onToggle }: Props): React.JSX.Element {
+function MemoryBar({ memory, disabled, onToggle, onForget }: Props): React.JSX.Element {
   const on = !memory?.off
+  const forgotten = !!memory?.forgotten
   const last = lastCapture(memory)
   return (
     <div className="mb-2 flex items-center justify-center gap-2 text-xs">
@@ -46,7 +55,7 @@ function MemoryBar({ memory, disabled, onToggle }: Props): React.JSX.Element {
         role="switch"
         aria-checked={on}
         aria-label="Remember this chat"
-        disabled={disabled}
+        disabled={disabled || forgotten}
         onClick={() => onToggle(on)}
         title={
           on
@@ -74,6 +83,16 @@ function MemoryBar({ memory, disabled, onToggle }: Props): React.JSX.Element {
           {last.text}
           {last.detail && <span className="text-ash-500/70"> · {last.detail}</span>}
         </span>
+      )}
+      {!forgotten && (
+        <button
+          onClick={onForget}
+          disabled={disabled}
+          title="Delete the notes Custard saved from this chat and never remember it again. Asks first."
+          className="rounded-full px-1.5 py-1 text-ash-500 transition-colors hover:text-molten-200 disabled:opacity-40"
+        >
+          Forget
+        </button>
       )}
     </div>
   )

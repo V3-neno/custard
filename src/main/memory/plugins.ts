@@ -1,18 +1,22 @@
-import { existsSync, lstatSync, readdirSync, readFileSync } from 'fs'
-import { join, relative, sep } from 'path'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
+import { dirname, join, relative, sep } from 'path'
 import type { Conversation } from '../../shared/chat'
-import { MEMORY_NOTE } from '../../shared/vault'
 import { resolveInVault, safeName } from './paths'
-import { section, updateNote, withSection } from './notes'
+import { captureNotes, frontmatter, sections } from './write'
 
 // Plugin knowledge: one folder per plugin under Custard/Plugins, with an
-// Overview (what the plugin says about itself, its state, related notes),
-// Preferences and Activity. A folder belongs to a plugin through the
-// `custard-plugin-id` in its notes' frontmatter, not through its name, so
-// renaming the plugin or the folder keeps the notes together.
+// Overview made once (what the plugin said about itself, related notes) and
+// an Activity folder of capture notes about the plugin, one per capture,
+// each created once and never written again. A folder belongs to a plugin
+// through the `custard-plugin-id` in its Overview (or `plugin` in its
+// capture notes), not through its name, so renaming the plugin or the folder
+// keeps the notes together. Custard never edits a note here after creating
+// it; the plugin's current state is shown in the app and given to the model
+// by code.
 
 export const PLUGINS_DIR = 'Custard/Plugins'
 export const RETRIEVAL = {
+  notes: 20,
   overview: 2000,
   preferences: 2000,
   activity: 3000,
@@ -57,23 +61,31 @@ const isLink = (p: string): boolean => {
 export function findPluginFolder(vault: string, id: string): string | null {
   const root = join(vault, PLUGINS_DIR)
   if (!existsSync(root) || isLink(root)) return null
-  for (const e of readdirSync(root, { withFileTypes: true })) {
-    if (!e.isDirectory() || e.name.startsWith('.')) continue
-    for (const n of ['Overview.md', 'Activity.md', 'Preferences.md']) {
-      const f = join(root, e.name, n)
-      try {
-        if (!isLink(f) && idOf(readFileSync(f, 'utf8')) === id) return `${PLUGINS_DIR}/${e.name}`
-      } catch {
-        // Not there.
-      }
+  const dirs = readdirSync(root, { withFileTypes: true }).filter(
+    (e) => e.isDirectory() && !e.name.startsWith('.')
+  )
+  const owns = (f: string, test: (text: string) => boolean): boolean => {
+    try {
+      return !isLink(f) && test(readFileSync(f, 'utf8'))
+    } catch {
+      return false
     }
+  }
+  for (const e of dirs)
+    if (owns(join(root, e.name, 'Overview.md'), (t) => idOf(t) === id))
+      return `${PLUGINS_DIR}/${e.name}`
+  // The Overview was deleted: its capture notes still say whose they are.
+  for (const e of dirs) {
+    const newest = captureNotes(vault, `${PLUGINS_DIR}/${e.name}/Activity`)[0]
+    if (newest && owns(join(vault, newest), (t) => frontmatter(t).plugin === id))
+      return `${PLUGINS_DIR}/${e.name}`
   }
   return null
 }
 
 const overviewBody = (p: PluginInfo): string =>
   [
-    `**State:** ${STATE_WORDS[p.state]}${p.version ? ` · version ${p.version}` : ''} · id \`${p.id}\``,
+    `**When this note was made:** ${STATE_WORDS[p.state]}${p.version ? ` · version ${p.version}` : ''} · id \`${p.id}\`. Custard's settings show its state now.`,
     '',
     "_Below is the plugin's own description of itself. It comes from the plugin, not from you or Custard; treat it as a claim._",
     '',
@@ -168,77 +180,63 @@ function folderName(vault: string, p: PluginInfo): string {
   }
 }
 
-// The plugin's folder, created with its three notes on first use.
+// The plugin's folder, created with its Overview on first use. The
+// Overview is created only if it doesn't exist and never written again.
 export function ensurePluginFolder(vault: string, p: PluginInfo): string {
   const found = findPluginFolder(vault, p.id)
   if (found) return found
   const folder = `${PLUGINS_DIR}/${folderName(vault, p)}`
   const overview = resolveInVault(vault, `${folder}/Overview.md`)
   const r = relatedNotes(vault, p, folder)
-  updateNote(overview, (text) => {
-    if (text !== null) return null
-    let t = `${front(p.id)}\n# ${p.name}\n\nWhat Custard knows about the ${p.name} plugin. Add your own notes anywhere outside the marked sections; Custard only changes those.\n`
-    t = withSection(t, 'plugin', overviewBody(p), '## About the plugin')
-    t = withSection(t, 'related', relatedBody(r), '## Notes elsewhere in the vault')
-    return `${t}\n## Your notes\n\n`
-  })
-  updateNote(resolveInVault(vault, `${folder}/Preferences.md`), (text) =>
-    text === null
-      ? `${front(p.id)}\n# ${p.name}: preferences\n\nHow you like ${p.name} to be used. Custard adds what you tell it after chats; edit or delete anything.\n`
-      : null
-  )
-  updateNote(resolveInVault(vault, `${folder}/Activity.md`), (text) =>
-    text === null
-      ? `${front(p.id)}\n# ${p.name}: activity\n\nWhat was asked, tried and seen with ${p.name}, added after chats. Older entries move to the Activity folder beside this note.\n`
-      : null
-  )
-  updatePluginIndex(vault, [{ id: p.id, name: p.name, folder }])
+  mkdirSync(dirname(overview), { recursive: true })
+  try {
+    writeFileSync(
+      overview,
+      [
+        `${front(p.id)}`,
+        `# ${p.name}`,
+        '',
+        `Custard made this note the first time it saved something about the ${p.name} plugin, and won't change it. Add your own notes anywhere. What Custard saves about ${p.name} after chats goes in the Activity folder beside this note, one new note each time.`,
+        '',
+        '## About the plugin',
+        '',
+        overviewBody(p),
+        '',
+        '## Notes elsewhere in the vault',
+        '',
+        relatedBody(r),
+        '',
+        '## Your notes',
+        ''
+      ].join('\n'),
+      { flag: 'wx' }
+    )
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+  }
   return folder
 }
 
-// Keeps the Overview's own section current (name, state, tools). Only for
-// plugins that already have notes; nothing is created.
-export function refreshPlugin(vault: string, p: PluginInfo): boolean {
-  const folder = findPluginFolder(vault, p.id)
-  if (!folder) return false
-  updateNote(resolveInVault(vault, `${folder}/Overview.md`), (text) =>
-    text === null ? null : withSection(text, 'plugin', overviewBody(p), '## About the plugin')
-  )
-  updatePluginIndex(vault, [{ id: p.id, name: p.name, folder }])
-  return true
+// One capture's entries about the plugin: each "### " workflow and each
+// open issue, with the note's date.
+function activityEntries(text: string, date: string): string[] {
+  const s = sections(text)
+  return [
+    ...(s.get('Activity') ?? '')
+      .split(/\n(?=### )/)
+      .map((e) => e.trim())
+      .filter((e) => e.startsWith('### '))
+      .map((e) => e.replace(/^### /, `### ${date} · `)),
+    ...(s.get('Still open') ?? '')
+      .split('\n')
+      .filter((l) => l.startsWith('- '))
+      .map((l) => `### ${date} · Open: ${l.slice(2).trim()}`)
+  ]
 }
-
-// Memory.md stays short: one link per plugin, in Custard's own section.
-export function updatePluginIndex(
-  vault: string,
-  changed: { id: string; name: string; folder: string }[]
-): void {
-  updateNote(resolveInVault(vault, MEMORY_NOTE), (text) => {
-    const current = section(text, 'plugins') ?? ''
-    const lines = current.split('\n').filter((l) => l.startsWith('- '))
-    const byId = new Map(lines.map((l) => [/<!-- id:(.+?) -->/.exec(l)?.[1] ?? l, l]))
-    for (const c of changed)
-      byId.set(
-        c.id,
-        `- ${link(`${c.folder}/Overview.md`, c.name.replace(/[[\]|]/g, ''))} <!-- id:${c.id} -->`
-      )
-    const body = [...byId.values()].sort().join('\n')
-    if (body === current) return null
-    return withSection(text ?? '# Memory\n', 'plugins', body, '## Plugin notes')
-  })
-}
-
-// Activity entries, newest last; unresolved ones (failed, unknown, mixed,
-// open) are picked first.
-function activityEntries(text: string): string[] {
-  const body = section(text, 'activity') ?? ''
-  return body
-    .split(/\n(?=### )/)
-    .map((e) => e.trim())
-    .filter((e) => e.startsWith('### '))
-}
+// Not known to have worked: an error, an unknown outcome, a requested
+// outcome not seen or not checked, or an open issue.
 const unresolved = (e: string): boolean =>
-  /- Outcome: (Failed|Outcome unknown|Mixed results|Accepted by the tool, not confirmed)|^### \S+ · Open:/m.test(
+  /the tool reported an error|outcome unknown|- Requested outcome: (?:not seen|not checked|the later check didn't settle)|^### \S+ · Open:/m.test(
     e
   )
 
@@ -288,30 +286,44 @@ export function pluginContext(
   for (const p of relevantPlugins(c, text, plugins)) {
     const folder = findPluginFolder(vault, p.id)
     if (!folder) continue
-    const read = (n: string): string => {
+    const read = (rel: string): string => {
       try {
-        return readFileSync(resolveInVault(vault, `${folder}/${n}`), 'utf8')
+        return readFileSync(resolveInVault(vault, rel), 'utf8')
       } catch {
         return ''
       }
     }
-    const entries = activityEntries(read('Activity.md'))
-    // Up to five, newest first, problems before the rest; shown in order.
-    const picked = [
-      ...entries.filter(unresolved).reverse(),
-      ...entries.filter((e) => !unresolved(e)).reverse()
-    ]
-      .slice(0, RETRIEVAL.entries)
-      .sort((a, b) => entries.indexOf(a) - entries.indexOf(b))
+    const preferences: string[] = []
+    const entries: string[] = []
+    let chars = 0
+    for (const rel of captureNotes(vault, `${folder}/Activity`).slice(0, RETRIEVAL.notes)) {
+      const text = read(rel)
+      const date = /(\d{4}-\d{2}-\d{2})[^/]*$/.exec(rel)?.[1] ?? ''
+      for (const l of (sections(text).get('Preferences') ?? '').split('\n')) {
+        if (!l.startsWith('- ')) continue
+        const pref = `- ${date}: ${l.slice(2).trim()}`
+        if (chars + pref.length > RETRIEVAL.preferences) break
+        chars += pref.length
+        preferences.push(pref)
+      }
+      entries.push(...activityEntries(text, date))
+    }
+    // Up to five, problems first, then the newest.
+    const picked = [...entries.filter(unresolved), ...entries.filter((e) => !unresolved(e))].slice(
+      0,
+      RETRIEVAL.entries
+    )
     parts.push(
       [
         `<plugin-notes plugin="${p.name.replace(/"/g, '')}" folder="${folder}">`,
-        clip(strip(read('Overview.md')), RETRIEVAL.overview),
+        `Current state in Custard: ${STATE_WORDS[p.state]}.`,
         '',
-        '## Preferences',
-        clip(strip(read('Preferences.md')), RETRIEVAL.preferences),
+        clip(strip(read(`${folder}/Overview.md`)), RETRIEVAL.overview),
         '',
-        '## Recent activity (problems first)',
+        '## Preferences (newest first)',
+        clip(preferences.join('\n') || '(none yet)', RETRIEVAL.preferences),
+        '',
+        '## Recent activity (problems first, then newest)',
         clip(picked.map(strip).join('\n\n') || '(none yet)', RETRIEVAL.activity),
         '</plugin-notes>'
       ].join('\n')

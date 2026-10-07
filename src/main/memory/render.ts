@@ -1,46 +1,46 @@
 import type { ActionStatus } from '../../shared/chat'
 import type { Evidence, EvidenceAction } from './evidence'
-import type { Summary, WorkflowOutcome } from './summarize'
-import { markerComment } from './notes'
+import type { Requested, Summary } from './summarize'
 
 // Turns a summary into note text. Everything here is code: the model's words
-// fill in descriptions, but statuses come from Custard's own action records
-// and the outcome is checked against them, so a tool accepting a request is
-// never written down as it having worked.
+// fill in descriptions, but each action's status comes from Custard's own
+// records, and only later read-only checks count as observations. Whether an
+// action ran and whether the user's requested outcome was seen are written
+// as separate lines, so a tool accepting a request is never written down as
+// the request having worked, and a later check is never written down as the
+// action having failed.
 
-export type Provenance = { title: string; date: string; chatId: string }
+export type Provenance = { title: string; date: string; time: string; chatId: string }
 
-export type Entry = { text: string }
+export const SECTIONS = ['Preferences', 'Decisions', 'Activity', 'Resolved', 'Still open'] as const
+export type Section = (typeof SECTIONS)[number]
 
-export type Rendered = {
-  // Lines for the "Remembered by Custard" list in Memory.md.
-  // Lines for a "Remembered by Custard" list: Memory.md, or a plugin's
-  // Preferences.md when `plugin` is set.
-  memory: { plugin: string; text: string }[]
-  // Activity entries, by plugin id ('' for none).
-  activity: { plugin: string; text: string }[]
+// One piece of a capture note. `plugin` is the plugin it is about ('' for
+// none), so plugin knowledge can give it a note in the plugin's folder.
+export type Item = { plugin: string; section: Section; text: string }
+
+// What an action itself did, from Custard's record. Never judged by the model.
+export function executionWords(a: Pick<EvidenceAction, 'status' | 'write'>): string {
+  const words: Record<ActionStatus, string> = {
+    completed: a.write ? 'accepted: the tool reported success' : 'ran: the tool returned a result',
+    failed: 'the tool reported an error',
+    'not-run': 'not run',
+    unknown: 'outcome unknown: it was sent, but no result came back',
+    pending: 'outcome unknown: it was sent, but no result came back',
+    running: 'outcome unknown: it was sent, but no result came back'
+  }
+  return words[a.status]
 }
 
-const STATUS_WORDS: Record<ActionStatus, string> = {
-  completed: 'the tool reported success',
-  failed: 'the tool reported an error',
-  'not-run': 'not run',
-  unknown: 'outcome unknown',
-  pending: 'outcome unknown',
-  running: 'outcome unknown'
+const REQUESTED_WORDS: Record<Requested, string> = {
+  seen: 'seen at the later check',
+  'not-seen': 'not seen at the later check; whether it happened before then is unknown',
+  unclear: "the later check didn't settle it",
+  unchecked: 'not checked: nothing looked afterwards'
 }
 
-const OUTCOME_WORDS: Record<WorkflowOutcome, string> = {
-  worked: 'Worked: a later check confirmed it',
-  accepted: 'Accepted by the tool, not confirmed',
-  failed: 'Failed',
-  'not-run': 'Not run',
-  unknown: 'Outcome unknown',
-  mixed: 'Mixed results'
-}
-
-// Model text can't open or close Custard's markers, start a heading or break
-// out of its line.
+// Model text can't start a heading, a list or a comment, or break out of
+// its line.
 export const plain = (s: string): string =>
   s
     .replace(/<!--|-->/g, '')
@@ -48,33 +48,29 @@ export const plain = (s: string): string =>
     .replace(/^[#>\s-]+/, '')
     .trim()
 
-// The model's outcome, held to what the records allow.
-export function checkedOutcome(
-  claimed: WorkflowOutcome,
-  actions: EvidenceAction[],
-  observed: string
-): WorkflowOutcome {
-  if (actions.length === 0) return claimed === 'worked' && !observed ? 'accepted' : claimed
-  const statuses = actions.map((a) => a.status)
-  if (statuses.every((s) => s === 'not-run')) return 'not-run'
-  const sent = statuses.filter((s) => s !== 'not-run')
-  if (claimed === 'worked') {
-    if (!observed) return sent.some((s) => s === 'completed') ? 'accepted' : 'unknown'
-    if (!sent.some((s) => s === 'completed')) return 'mixed'
-  }
-  if (claimed === 'not-run') return sent.length ? 'mixed' : 'not-run'
-  return claimed
+const num = (id: string): number => Number(id.slice(1))
+
+// The checks the model named that can actually show the state afterwards:
+// read-only, completed, not a content read (notes, files, pages), and after
+// the workflow's last action. Anything else is not an observation.
+export function validChecks(
+  checkIds: string[],
+  actionIds: string[],
+  evidence: Evidence
+): EvidenceAction[] {
+  const after = Math.max(0, ...actionIds.map(num))
+  const byId = new Map(evidence.actions.map((a) => [a.id, a]))
+  return [...new Set(checkIds)]
+    .filter((id) => !actionIds.includes(id) && num(id) > after)
+    .flatMap((id) => byId.get(id) ?? [])
+    .filter((a) => !a.write && a.status === 'completed' && !a.content)
 }
 
 export function render(
   summary: Summary,
   evidence: Evidence,
-  marker: string,
-  from: Provenance,
   pluginName: (id: string) => string
-): Rendered {
-  const mark = markerComment(marker)
-  const source = `From chat "${plain(from.title)}" on ${from.date} (chat ${from.chatId.slice(0, 8)})`
+): Item[] {
   // A preference goes with a plugin only when that plugin acted in this
   // part of the chat; the model's word alone doesn't pick a folder.
   const acted = [...new Set(evidence.actions.flatMap((a) => (a.plugin ? [a.plugin] : [])))]
@@ -82,55 +78,75 @@ export function render(
     const n = name.trim().toLowerCase()
     return (n && acted.find((id) => id === n || pluginName(id).toLowerCase() === n)) || ''
   }
-  const memory: Rendered['memory'] = [
+  const items: Item[] = [
     ...summary.preferences.map((p) => ({
       plugin: pluginFor(p.plugin),
-      text: `- ${from.date}: ${plain(p.text)}${p.replaces ? ` (changes an earlier preference: "${plain(p.replaces)}"; the earlier one is left as written)` : ''} ${mark}`
+      section: 'Preferences' as const,
+      text: `- ${plain(p.text)}${p.replaces ? ` (changes an earlier preference: "${plain(p.replaces)}"; the earlier note is left as written)` : ''}`
     })),
     ...summary.decisions.map((d) => ({
       plugin: '',
-      text: `- ${from.date}: Decided: ${plain(d)} ${mark}`
+      section: 'Decisions' as const,
+      text: `- ${plain(d)}`
     }))
   ]
   const byId = new Map(evidence.actions.map((a) => [a.id, a]))
-  const activity: Rendered['activity'] = []
   for (const w of summary.workflows) {
-    const actions = [...new Set(w.actions)].flatMap((id) => byId.get(id) ?? [])
+    const ids = [...new Set(w.actions)].filter((id) => byId.has(id))
+    const actions = ids.map((id) => byId.get(id)!)
+    const checks = validChecks(w.checks, ids, evidence)
     const plugin = actions.find((a) => a.plugin)?.plugin ?? ''
-    const outcome = checkedOutcome(w.outcome, actions, w.observed)
-    activity.push({
+    const attempted = actions.some((a) => a.status !== 'not-run')
+    // With no valid check there is no observation, whatever the model said.
+    const requested: Requested = checks.length ? w.requested : 'unchecked'
+    items.push({
       plugin,
+      section: 'Activity',
       text: [
-        `### ${from.date} · ${plain(w.title)}`,
-        mark,
+        `### ${plain(w.title)}`,
         plugin ? `- Plugin: ${plain(pluginName(plugin))}` : '',
         w.request ? `- Asked: ${plain(w.request)}` : '',
-        actions.length ? "- Tried (Custard's record of each action):" : '',
-        ...actions.map((a) => `  - ${plain(a.label)}: ${STATUS_WORDS[a.status]}`),
-        `- Observed afterwards: ${w.observed ? plain(w.observed) : 'nothing checked it'}`,
-        w.uncertain ? `- Still unsure: ${plain(w.uncertain)}` : '',
-        `- Outcome: ${OUTCOME_WORDS[outcome]}`,
-        `- ${source}`
+        actions.length ? "- Done (Custard's record of each action):" : '',
+        ...actions.map((a) => `  - ${plain(a.label)}: ${executionWords(a)}`),
+        checks.length
+          ? `- Checked afterwards (${checks.map((a) => plain(a.label)).join(', ')}): ${w.observed ? plain(w.observed) : 'no summary of what it showed'}`
+          : '- Checked afterwards: nothing checked it',
+        `- Requested outcome: ${actions.length && !attempted ? 'not attempted' : REQUESTED_WORDS[requested]}`,
+        w.uncertain ? `- Still unsure: ${plain(w.uncertain)}` : ''
       ]
         .filter(Boolean)
         .join('\n')
     })
   }
   for (const r of summary.resolutions)
-    activity.push({
+    items.push({
       plugin: '',
-      text: [
-        `### ${from.date} · Resolved: ${plain(r.issue)}`,
-        mark,
-        `- Resolution: ${plain(r.resolution)}`,
-        '- Earlier entries about this are left as they were.',
-        `- ${source}`
-      ].join('\n')
+      section: 'Resolved',
+      text: `- ${plain(r.issue)}: ${plain(r.resolution)} (earlier notes about it are left as they were)`
     })
   for (const u of summary.unresolved)
-    activity.push({
-      plugin: '',
-      text: [`### ${from.date} · Open: ${plain(u)}`, mark, `- ${source}`].join('\n')
-    })
-  return { memory, activity }
+    items.push({ plugin: '', section: 'Still open', text: `- ${plain(u)}` })
+  return items
+}
+
+// A capture note's text. Written once and never changed by Custard.
+export function noteText(
+  items: Item[],
+  from: Provenance,
+  frontmatter: Record<string, string>
+): string {
+  const fm = Object.entries(frontmatter)
+    .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+    .join('\n')
+  const body = SECTIONS.flatMap((s) => {
+    const list = items.filter((i) => i.section === s).map((i) => i.text)
+    if (!list.length) return []
+    return [`## ${s}\n\n${list.join(s === 'Activity' ? '\n\n' : '\n')}`]
+  })
+  return [
+    `---\n${fm}\n---`,
+    `# ${plain(from.title) || 'Chat'}`,
+    `_Saved by Custard from the chat "${plain(from.title)}" on ${from.date} at ${from.time}. Custard writes this note once and never changes it. Edit or delete it as you like; a deleted note is not written again._`,
+    ...body
+  ].join('\n\n')
 }

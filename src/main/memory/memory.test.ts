@@ -15,11 +15,10 @@ import type { ActionStatus, Conversation, Provider } from '../../shared/chat'
 import type { MemorySettings } from '../../shared/memory'
 import { Capture, QUEUE_LIMIT, type CaptureDeps } from './capture'
 import { buildEvidence, eligible, evidenceText, redact } from './evidence'
-import { ConflictError, updateNote, withSection } from './notes'
 import { resolveInVault, safeName } from './paths'
-import { checkedOutcome, render } from './render'
+import { executionWords, render, validChecks } from './render'
 import { parseSummary, summarizer, SUMMARY_SCHEMA, type Summary } from './summarize'
-import { addEntries, CAPS, recentActivity, vaultId } from './write'
+import { captureNotes, chatCaptures, readCaptures, vaultId, writeCapture } from './write'
 
 // --- A chat built the way chat.ts saves one --------------------------------
 
@@ -81,15 +80,22 @@ const summary = (s: Partial<Summary> = {}): Summary => ({
   ...s
 })
 
+// The model claims success but names no check: what a careless summary
+// looks like. Code must not write it down as an observation.
 const workflow = (w: Partial<Summary['workflows'][number]> = {}): Summary['workflows'][number] => ({
-  plugin: 'Spotify',
   title: 'Play Discover Weekly',
   request: 'Play my Discover Weekly',
   actions: ['A1'],
-  observed: '',
+  checks: [],
+  observed: 'It worked',
+  requested: 'seen',
   uncertain: '',
-  outcome: 'worked',
   ...w
+})
+const pref = (text: string, replaces = ''): Summary['preferences'][number] => ({
+  text,
+  replaces,
+  plugin: ''
 })
 
 // --- A test harness around Capture -----------------------------------------
@@ -128,7 +134,9 @@ function capture(extra: Partial<CaptureDeps> = {}): Capture {
 }
 
 const note = (p: string): string => readFileSync(join(vault, p), 'utf8')
-const activity = (): string => note('Custard/Activity.md')
+// Capture notes, oldest first, and the text of all of them.
+const notes = (): string[] => captureNotes(vault).reverse()
+const saved = (): string => notes().map(note).join('\n\n')
 const job = (id = 'chat-1'): NonNullable<NonNullable<Conversation['memory']>['job']> =>
   chats.get(id)!.memory!.job!
 
@@ -212,8 +220,42 @@ describe('evidence', () => {
     stopped.notices = [{ after: 2, kind: 'stopped', text: 'Stopped by you.' }]
     expect(eligible(buildEvidence(stopped, 0, stopped.messages.length))).toBe(true)
     const long = newChat()
-    for (let i = 0; i < 4; i++) turn(long, `thought ${i}`)
+    for (let i = 0; i < 10; i++) turn(long, `thought ${i}`)
     expect(eligible(buildEvidence(long, 0, long.messages.length))).toBe(true)
+  })
+
+  it('a lasting preference or decision is eligible in one message; small talk is not', () => {
+    const one = (text: string): boolean => {
+      const c = newChat()
+      turn(c, text)
+      return eligible(buildEvidence(c, 0, c.messages.length))
+    }
+    for (const durable of [
+      'I prefer short answers',
+      'From now on, answer in Swedish',
+      "We've decided to use Postgres for Custard",
+      "Let's go with the amber theme",
+      'My name is Neno',
+      "I'd prefer metric units",
+      'Remember that I work on Windows'
+    ])
+      expect(one(durable), durable).toBe(true)
+    for (const chat of [
+      'hi',
+      'how are you?',
+      'tell me a joke',
+      'thanks!',
+      'what time is it in Tokyo'
+    ])
+      expect(one(chat), chat).toBe(false)
+  })
+
+  it("labels the assistant's answer as its own words, not evidence", () => {
+    const c = newChat()
+    turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }], 'It is playing!')
+    expect(evidenceText(buildEvidence(c, 0, c.messages.length))).toContain(
+      "Assistant's last answer (its own words; not evidence of what happened):\nIt is playing!"
+    )
   })
 })
 
@@ -241,48 +283,60 @@ describe('summary', () => {
       JSON.stringify({
         save: true,
         preferences: Array(20).fill({ text: 'x'.repeat(1000), replaces: '' }),
-        workflows: [{ title: 'T', actions: ['A1', 'rm -rf', 'A2'], outcome: 'bogus' }]
+        workflows: [
+          { title: 'T', actions: ['A1', 'rm -rf', 'A2'], checks: ['A3', 'x'], requested: 'bogus' }
+        ]
       })
     )
     expect(s.preferences).toHaveLength(6)
     expect(s.preferences[0].text).toHaveLength(300)
     expect(s.workflows[0].actions).toEqual(['A1', 'A2'])
-    expect(s.workflows[0].outcome).toBe('unknown')
+    expect(s.workflows[0].checks).toEqual(['A3'])
+    expect(s.workflows[0].requested).toBe('unchecked')
     expect(parseSummary(JSON.stringify({ save: true })).save).toBe(false)
   })
 
-  it('never writes "worked" without an observation, or for actions that did not run', () => {
-    const a = (status: ActionStatus): Parameters<typeof checkedOutcome>[1][number] => ({
-      id: 'A1',
-      label: 'x',
-      tool: 'x',
-      plugin: null,
-      write: true,
-      status,
-      result: ''
-    })
-    expect(checkedOutcome('worked', [a('completed')], '')).toBe('accepted')
-    expect(checkedOutcome('worked', [a('completed')], 'It was playing')).toBe('worked')
-    expect(checkedOutcome('worked', [a('not-run')], 'It was playing')).toBe('not-run')
-    expect(checkedOutcome('worked', [a('unknown')], '')).toBe('unknown')
-    expect(checkedOutcome('worked', [a('failed')], 'seemed fine')).toBe('mixed')
-    expect(checkedOutcome('not-run', [a('completed')], '')).toBe('mixed')
+  it("execution status comes from Custard's record, never the model", () => {
+    expect(executionWords({ status: 'completed', write: true })).toBe(
+      'accepted: the tool reported success'
+    )
+    expect(executionWords({ status: 'completed', write: false })).toBe(
+      'ran: the tool returned a result'
+    )
+    expect(executionWords({ status: 'failed', write: true })).toBe('the tool reported an error')
+    expect(executionWords({ status: 'not-run', write: true })).toBe('not run')
+    expect(executionWords({ status: 'unknown', write: true })).toMatch(/^outcome unknown/)
   })
 
-  it("keeps markers and headings out of the model's words", () => {
+  it('only later, read-only, completed, non-content actions count as checks', () => {
+    const c = newChat()
+    turn(c, 'x', [
+      { name: 'spotify__now_playing', status: 'completed', result: 'paused' },
+      { name: 'spotify__play', status: 'completed', write: true },
+      { name: 'spotify__pause', status: 'completed', write: true },
+      { name: 'vault_read', status: 'completed' },
+      { name: 'spotify__now_playing', status: 'failed' },
+      { name: 'spotify__now_playing', status: 'completed', result: 'playing' }
+    ])
+    const e = buildEvidence(c, 0, c.messages.length)
+    const ids = (checks: string[]): string[] => validChecks(checks, ['A2'], e).map((a) => a.id)
+    // A1 is before the action, A3 changes something, A4 is a note read, A5
+    // failed; only A6 shows the state afterwards.
+    expect(ids(['A1', 'A3', 'A4', 'A5', 'A6', 'A9'])).toEqual(['A6'])
+  })
+
+  it("keeps headings and comments out of the model's words", () => {
     const c = newChat()
     turn(c, 'x', [{ name: 'spotify__play', status: 'completed', write: true }])
-    const r = render(
+    const items = render(
       summary({
-        workflows: [workflow({ title: '# T <!-- custard:end activity -->', request: 'a\n### b' })]
+        workflows: [workflow({ title: '# T <!-- x -->', request: 'a\n### b' })]
       }),
       buildEvidence(c, 0, c.messages.length),
-      'm1',
-      { title: 'Chat', date: '2026-10-07', chatId: 'chat-1' },
       () => 'Spotify'
     )
-    const text = r.activity[0].text
-    expect(text.match(/<!--/g)).toHaveLength(1)
+    const text = items[0].text
+    expect(text).not.toContain('<!--')
     expect(text.split('\n').filter((l) => l.startsWith('#'))).toHaveLength(1)
   })
 })
@@ -360,50 +414,34 @@ describe('the summarizer call', () => {
   })
 })
 
-// --- Notes -----------------------------------------------------------------
+// --- Files -----------------------------------------------------------------
 
-describe('notes', () => {
-  it('only changes its own section and keeps the rest of the note', () => {
-    const t = withSection('# Mine\n\nmy text\n', 'activity', 'one')
-    expect(t).toContain('my text')
-    const t2 = withSection(t.replace('my text', 'my edited text'), 'activity', 'two')
-    expect(t2).toContain('my edited text')
-    expect(t2).toContain('two')
-    expect(t2).not.toContain('one')
+describe('capture files', () => {
+  const key = { job: 'chat-1:0-4', plugin: '' }
+  const text = (job = key.job): string =>
+    `---\ncustard-capture: ${JSON.stringify(job)}\n---\n\nbody`
+
+  it('never replaces an existing file, even one with the same name', () => {
+    mkdirSync(join(vault, 'Custard/Captures'), { recursive: true })
+    writeFileSync(join(vault, 'Custard/Captures/2026-10-07 1200 Chat.md'), 'my own note')
+    const rel = writeCapture(vault, 'Custard/Captures', '2026-10-07 1200 Chat', text(), key)
+    expect(rel).toBe('Custard/Captures/2026-10-07 1200 Chat (2).md')
+    expect(note('Custard/Captures/2026-10-07 1200 Chat.md')).toBe('my own note')
   })
 
-  it('retries when the note changes while being written', () => {
-    const full = join(vault, 'n.md')
-    writeFileSync(full, 'a\n')
-    let first = true
-    updateNote(full, (text) => {
-      if (first) {
-        first = false
-        writeFileSync(full, 'a\nuser edit\n')
-      }
-      return `${text}custard\n`
-    })
-    expect(readFileSync(full, 'utf8')).toBe('a\nuser edit\ncustard\n')
-  })
-
-  it('gives up after repeated conflicts instead of overwriting', () => {
-    const full = join(vault, 'n.md')
-    writeFileSync(full, 'a')
-    let n = 0
-    expect(() =>
-      updateNote(full, (text) => {
-        writeFileSync(full, `edit ${++n}`)
-        return `${text}!`
-      })
-    ).toThrow(ConflictError)
-    expect(readFileSync(full, 'utf8')).toBe('edit 3')
+  it('a note already holding this capture counts as written and is left as it is', () => {
+    const first = writeCapture(vault, 'Custard/Captures', 'n', text(), key)
+    writeFileSync(join(vault, first), `${text()}\nedited by the user`)
+    expect(writeCapture(vault, 'Custard/Captures', 'n', text(), key)).toBe(first)
+    expect(note(first)).toContain('edited by the user')
+    expect(captureNotes(vault)).toHaveLength(1)
   })
 
   it('refuses links that lead out of the vault', () => {
     const outside = join(root, 'outside')
     mkdirSync(outside)
     symlinkSync(outside, join(vault, 'Custard'))
-    expect(() => resolveInVault(vault, 'Custard/Activity.md')).toThrow(/link/)
+    expect(() => resolveInVault(vault, 'Custard/Captures/x.md')).toThrow(/link/)
   })
 
   it('makes safe names', () => {
@@ -412,25 +450,34 @@ describe('notes', () => {
     expect(safeName('...', 'x')).toBe('x')
   })
 
-  it('moves old entries to monthly archives word for word', () => {
-    const items = Array.from(
-      { length: CAPS.activity + 2 },
-      (_, i) => `### 2026-${i < 2 ? '09' : '10'}-01 · Entry ${i}\n<!-- custard:capture m${i} -->`
-    )
-    items.forEach((it, i) => addEntries(vault, 'Custard/Activity.md', 'activity', `m${i}`, [it]))
-    const main = activity()
-    expect(main).not.toContain('Entry 0\n')
-    expect(main).toContain(`Entry ${CAPS.activity + 1}`)
-    expect(note('Custard/Activity/2026-09.md')).toContain('Entry 0')
-    expect(note('Custard/Activity/2026-09.md')).toContain('Entry 1')
-    expect(recentActivity(vault, 1)).toEqual([`2026-10-01 · Entry ${CAPS.activity + 1}`])
+  it('reads back the newest notes as they are now, within limits', () => {
+    mkdirSync(join(vault, 'Custard/Captures'), { recursive: true })
+    for (let i = 0; i < 30; i++)
+      writeFileSync(
+        join(vault, `Custard/Captures/2026-10-${String(i + 1).padStart(2, '0')} 1200 C${i}.md`),
+        `# C${i}\n\n## Preferences\n\n- Pref ${i} ${'x'.repeat(50)}\n\n## Activity\n\n### Did ${i}\n- Asked: y`
+      )
+    const r = readCaptures(vault)
+    expect(r.remembered[0]).toMatch(/^2026-10-30: Pref 29/)
+    expect(r.remembered.join('').length).toBeLessThanOrEqual(2000)
+    expect(r.remembered.some((l) => l.includes('Pref 9 '))).toBe(false)
+    expect(r.activity).toEqual([
+      '2026-10-30 · Did 29',
+      '2026-10-29 · Did 28',
+      '2026-10-28 · Did 27',
+      '2026-10-27 · Did 26',
+      '2026-10-26 · Did 25'
+    ])
+    // The user's edit is what comes back.
+    writeFileSync(join(vault, 'Custard/Captures/2026-10-30 1200 C29.md'), '# C29\n\nemptied')
+    expect(readCaptures(vault).remembered[0]).toMatch(/^2026-10-29: Pref 28/)
   })
 })
 
 // --- Capture end to end ----------------------------------------------------
 
 describe('capture', () => {
-  it('fresh install: creates readable notes on first capture, without being asked', async () => {
+  it('fresh install: creates one readable note on first capture, without being asked', async () => {
     const c = newChat()
     turn(c, 'Play my Discover Weekly', [
       {
@@ -444,27 +491,32 @@ describe('capture', () => {
     answer = async () =>
       summary({
         workflows: [workflow()],
-        preferences: [{ text: 'Likes Discover Weekly on Mondays', replaces: '', plugin: '' }]
+        preferences: [pref('Likes Discover Weekly on Mondays')]
       })
     await captured(capture(), c)
     expect(job().status).toBe('saved')
-    expect(job().notes).toEqual(['Custard/Memory.md', 'Custard/Activity.md'])
+    expect(job().notes).toEqual(['Custard/Captures/2026-10-07 1200 Spotify test.md'])
     expect(job().plan).toBeUndefined()
-    const a = activity()
-    expect(a).toMatch(/^# Activity/)
-    expect(a).toContain('### 2026-10-07 · Play Discover Weekly')
+    const a = note(job().notes![0])
+    expect(a).toMatch(
+      /^---\ncustard-capture: "chat-1:0-4"\nchat: "chat-1"\ndate: "2026-10-07"\n---/
+    )
+    expect(a).toContain('# Spotify test')
+    expect(a).toContain('Custard writes this note once and never changes it.')
+    expect(a).toContain('## Preferences\n\n- Likes Discover Weekly on Mondays')
+    expect(a).toContain('### Play Discover Weekly')
     expect(a).toContain('- Plugin: Spotify')
-    expect(a).toContain('  - Play Discover Weekly: the tool reported success')
-    expect(a).toContain('- Observed afterwards: nothing checked it')
-    expect(a).toContain('- Outcome: Accepted by the tool, not confirmed')
-    expect(a).toContain('From chat "Spotify test" on 2026-10-07 (chat chat-1)')
-    expect(note('Custard/Memory.md')).toContain('## Remembered by Custard')
-    expect(note('Custard/Memory.md')).toContain('Likes Discover Weekly on Mondays')
+    expect(a).toContain('  - Play Discover Weekly: accepted: the tool reported success')
+    // The model said "seen" and "It worked" without naming a check.
+    expect(a).toContain('- Checked afterwards: nothing checked it')
+    expect(a).toContain('- Requested outcome: not checked: nothing looked afterwards')
+    expect(a).not.toContain('It worked')
+    expect(existsSync(join(vault, 'Custard/Memory.md'))).toBe(false)
     expect(chats.get('chat-1')!.memory!.watermark).toBe(c.messages.length)
     expect(existsSync(join(vault, 'Custard/.custard-vault-id'))).toBe(true)
   })
 
-  it('accepted, then observed paused: keeps both and does not call it a success', async () => {
+  it('accepted, then observed paused: the action is not called failed, and the gap is unknown', async () => {
     const c = newChat()
     turn(c, 'Play jazz', [
       {
@@ -485,17 +537,23 @@ describe('capture', () => {
       summary({
         workflows: [
           workflow({
-            actions: ['A1', 'A2'],
+            actions: ['A1'],
+            checks: ['A2'],
             observed: 'Playback was paused and nothing was playing',
-            outcome: 'failed'
+            requested: 'not-seen'
           })
         ]
       })
     await captured(capture(), c)
-    const a = activity()
-    expect(a).toContain('  - Play jazz: the tool reported success')
-    expect(a).toContain('- Observed afterwards: Playback was paused and nothing was playing')
-    expect(a).toContain('- Outcome: Failed')
+    const a = saved()
+    expect(a).toContain('  - Play jazz: accepted: the tool reported success')
+    expect(a).toContain(
+      '- Checked afterwards (Check playback): Playback was paused and nothing was playing'
+    )
+    expect(a).toContain(
+      '- Requested outcome: not seen at the later check; whether it happened before then is unknown'
+    )
+    expect(a).not.toMatch(/fail/i)
   })
 
   it('declined actions are recorded as not run, unknown ones as unknown', async () => {
@@ -518,32 +576,48 @@ describe('capture', () => {
         ]
       })
     await captured(capture(), c)
-    const a = activity()
-    expect(a).toContain('  - Skip track: not run')
+    const a = saved()
     expect(a).toMatch(
-      /Skip track: not run\n- Observed afterwards: nothing checked it\n- Outcome: Not run/
+      /Skip track: not run\n- Checked afterwards: nothing checked it\n- Requested outcome: not attempted/
     )
-    expect(a).toContain('  - Queue song: outcome unknown')
     expect(a).toMatch(
-      /Queue song: outcome unknown\n- Observed afterwards: nothing checked it\n- Outcome: Outcome unknown/
+      /Queue song: outcome unknown: it was sent, but no result came back\n- Checked afterwards: nothing checked it\n- Requested outcome: not checked/
     )
   })
 
   it('small talk is not captured and no model call is made', async () => {
     const c = newChat()
-    turn(c, 'hello')
-    await captured(capture(), c)
+    for (const t of ['hello', 'how are you?', 'tell me a joke', 'ha, thanks']) turn(c, t)
+    const cap = capture()
+    chats.set(c.id, c)
+    // After every one of the four turns.
+    for (let i = 1; i <= 4; i++) {
+      cap.afterTurn({ ...c, messages: c.messages.slice(0, i * 2) }, 'claude')
+      await cap.run()
+    }
     expect(calls).toHaveLength(0)
     expect(chats.get('chat-1')!.memory).toBeUndefined()
   })
 
-  it('"nothing to save" is skipped and moves on', async () => {
+  it('a lasting preference in a one-message chat is captured', async () => {
+    const c = newChat('chat-1', 'Answers')
+    turn(c, 'From now on I prefer short answers', [], 'Got it.')
+    answer = async () => summary({ preferences: [pref('Prefers short answers')] })
+    await captured(capture(), c)
+    expect(calls).toHaveLength(1)
+    expect(job().status).toBe('saved')
+    expect(saved()).toContain('## Preferences\n\n- Prefers short answers')
+  })
+
+  it('eligible but not worth keeping: the summarizer decides, nothing is written', async () => {
     const c = newChat()
-    turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
+    turn(c, 'I like that joke')
     answer = async () => summary({ save: false })
     await captured(capture(), c)
+    expect(calls).toHaveLength(1)
     expect(job().status).toBe('skipped')
-    expect(existsSync(join(vault, 'Custard/Activity.md'))).toBe(false)
+    expect(job().reason).toBe('Nothing in it needed remembering.')
+    expect(notes()).toEqual([])
   })
 
   it('a duplicate run of the same job writes once', async () => {
@@ -551,11 +625,12 @@ describe('capture', () => {
     turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
     const cap = capture()
     await captured(cap, c)
-    chats.get('chat-1')!.memory!.job!.status = 'pending'
-    chats.get('chat-1')!.memory!.watermark = 0
+    const m = chats.get('chat-1')!.memory!
+    m.job!.status = 'pending'
+    m.watermark = 0
     cap.afterTurn(c, 'claude')
     await cap.run()
-    expect(activity().match(/### /g)).toHaveLength(1)
+    expect(notes()).toHaveLength(1)
   })
 
   it('retries a failed summary, then gives up as failed', async () => {
@@ -591,54 +666,54 @@ describe('capture', () => {
   it('a crash after writing, before recording, is recorded as saved without writing again', async () => {
     const c = newChat()
     turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
-    await captured(capture(), c)
-    const written = activity()
-    // Put the chat back as it was saved just before the notes were written:
+    let plan: unknown
+    const first = capture({
+      update: (id, change) => {
+        const c = chats.get(id)!
+        change(c)
+        if (c.memory?.job?.plan) plan = c.memory.job.plan
+        return c
+      }
+    })
+    await captured(first, c)
+    const written = notes()
+    // Put the chat back as it was saved just before the note was written:
     // summarized (plan kept), still pending, still queued.
     const m = chats.get('chat-1')!.memory!
-    const plan = {
-      memory: [],
-      activity: [
-        {
-          plugin: 'spotify',
-          text: written.slice(written.indexOf('### '), written.indexOf('\n<!-- custard:end'))
-        }
-      ]
-    }
-    m.job = { ...m.job!, status: 'pending', plan, notes: undefined }
+    m.job = { ...m.job!, status: 'pending', plan: plan as never, notes: undefined }
     m.watermark = 0
     writeFileSync(join(root, 'queue.json'), JSON.stringify(['chat-1']))
     const restarted = capture()
     await restarted.run()
     expect(calls).toHaveLength(1)
-    expect(activity()).toBe(written)
+    expect(notes()).toEqual(written)
     expect(job().status).toBe('saved')
-    expect(job().notes).toEqual(['Custard/Activity.md'])
+    expect(job().notes).toEqual(written)
   })
 
   it('a crash after summarizing resumes from the saved plan without a new model call', async () => {
     const c = newChat()
     turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
-    chats.set(c.id, c)
-    const first = capture({ vaultPath: () => vault })
     // Make the first write fail once after the plan is stored.
-    mkdirSync(join(vault, 'Custard/Activity.md'), { recursive: true })
-    await captured(first, c)
+    mkdirSync(join(vault, 'Custard'), { recursive: true })
+    writeFileSync(join(vault, 'Custard/Captures'), 'not a folder')
+    await captured(capture(), c)
     expect(job().status).toBe('pending')
-    expect(job().plan?.activity).toHaveLength(1)
-    rmSync(join(vault, 'Custard/Activity.md'), { recursive: true })
+    expect(job().plan).toHaveLength(1)
+    rmSync(join(vault, 'Custard/Captures'))
     const restarted = capture()
     expect(restarted.pending()).toEqual(['chat-1'])
     await restarted.run()
     expect(calls).toHaveLength(1)
     expect(job().status).toBe('saved')
-    expect(activity().match(/### /g)).toHaveLength(1)
+    expect(notes()).toHaveLength(1)
   })
 
   it('failed writes end as failed after three attempts', async () => {
     const c = newChat()
     turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
-    mkdirSync(join(vault, 'Custard/Activity.md'), { recursive: true })
+    mkdirSync(join(vault, 'Custard'), { recursive: true })
+    writeFileSync(join(vault, 'Custard/Captures'), 'not a folder')
     const cap = capture()
     await captured(cap, c)
     await cap.run()
@@ -659,26 +734,26 @@ describe('capture', () => {
     await cap.run()
     await cap.run()
     expect(job().status).toBe('failed')
-    expect(existsSync(join(outside, 'Activity.md'))).toBe(false)
+    expect(existsSync(join(outside, 'Captures'))).toBe(false)
   })
 
-  it('keeps user edits inside and outside its section', async () => {
+  it("never edits a note again: the user's edits and their own notes stay as they are", async () => {
+    mkdirSync(join(vault, 'Custard'), { recursive: true })
+    writeFileSync(join(vault, 'Custard/Memory.md'), '# Memory\n\nmine\n')
     const c = newChat()
     turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
     const cap = capture()
     await captured(cap, c)
-    const edited = activity()
-      .replace('# Activity', '# Activity\n\nMy own intro.')
-      .replace('nothing checked it', 'nothing checked it (I checked: it played)')
-    writeFileSync(join(vault, 'Custard/Activity.md'), `${edited}\nMy footer.\n`)
+    const first = notes()[0]
+    const edited = `${note(first)}\n\nI checked: it played.`
+    writeFileSync(join(vault, first), edited)
     turn(c, 'pause', [{ name: 'spotify__pause', status: 'completed', write: true }])
     answer = async () => summary({ workflows: [workflow({ title: 'Pause' })] })
     await captured(cap, c)
-    const a = activity()
-    expect(a).toContain('My own intro.')
-    expect(a).toContain('(I checked: it played)')
-    expect(a).toContain('My footer.')
-    expect(a).toContain('### 2026-10-07 · Pause')
+    expect(note(first)).toBe(edited)
+    expect(notes()).toHaveLength(2)
+    expect(note(notes()[1])).toContain('### Pause')
+    expect(note('Custard/Memory.md')).toBe('# Memory\n\nmine\n')
   })
 
   it('missing vault: waits, then saves when the same vault is back', async () => {
@@ -711,7 +786,7 @@ describe('capture', () => {
     await cap.run()
     expect(job().status).toBe('skipped')
     expect(job().reason).toMatch(/different vault/)
-    expect(existsSync(join(other, 'Custard/Activity.md'))).toBe(false)
+    expect(existsSync(join(other, 'Custard/Captures'))).toBe(false)
     expect(calls).toHaveLength(0)
   })
 
@@ -756,26 +831,6 @@ describe('capture', () => {
     expect(calls[0]).toContain('spotify__pause')
   })
 
-  it("turning a chat off cancels its waiting capture, and turning it on doesn't bring it back", async () => {
-    const { renameSync } = await import('fs')
-    renameSync(vault, `${vault}-away`)
-    const c = newChat()
-    turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
-    const cap = capture()
-    await captured(cap, c)
-    expect(job().status).toBe('pending')
-    cap.setChatMemory('chat-1', true)
-    expect(job().status).toBe('off')
-    expect(cap.pending()).toEqual([])
-    renameSync(`${vault}-away`, vault)
-    cap.setChatMemory('chat-1', false)
-    await cap.run()
-    cap.afterTurn(chats.get('chat-1')!, 'claude')
-    await cap.run()
-    expect(calls).toHaveLength(0)
-    expect(existsSync(join(vault, 'Custard/Activity.md'))).toBe(false)
-  })
-
   it('turned off while the model is answering: nothing is written', async () => {
     const c = newChat()
     turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
@@ -786,10 +841,10 @@ describe('capture', () => {
     }
     await captured(cap, c)
     expect(job().status).toBe('off')
-    expect(existsSync(join(vault, 'Custard/Activity.md'))).toBe(false)
+    expect(notes()).toEqual([])
   })
 
-  it('"don\'t remember this" in the chat skips it without a model call', async () => {
+  it('"don\'t remember this" in the chat skips that part without a model call', async () => {
     const c = newChat()
     turn(c, "Play this, and don't remember it", [
       { name: 'spotify__play', status: 'completed', write: true }
@@ -799,6 +854,19 @@ describe('capture', () => {
     expect(job().reason).toBe(
       `Your message said "and don't remember it", so this part wasn't saved.`
     )
+    expect(chats.get('chat-1')!.memory!.off).toBeFalsy()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('"forget this chat" in the chat stops remembering it and points to Forget', async () => {
+    const c = newChat()
+    turn(c, 'I prefer jazz. Forget this chat', [])
+    await captured(capture(), c)
+    expect(job().status).toBe('skipped')
+    expect(job().reason).toMatch(
+      /stopped remembering this chat\. To delete what it saved earlier, use Forget\.$/
+    )
+    expect(chats.get('chat-1')!.memory!.off).toBe(true)
     expect(calls).toHaveLength(0)
   })
 
@@ -827,46 +895,35 @@ describe('capture', () => {
       expect(asks(explicit), explicit).toBe(words)
   })
 
-  it('what the user deleted is not captured again', async () => {
-    const c = newChat()
-    turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
-    const cap = capture()
-    await captured(cap, c)
-    const before = activity()
-    writeFileSync(
-      join(vault, 'Custard/Activity.md'),
-      before.slice(0, before.indexOf('### ')) + before.slice(before.indexOf('<!-- custard:end'))
-    )
-    turn(c, 'thanks')
-    await captured(cap, c)
-    turn(c, 'pause', [{ name: 'spotify__pause', status: 'completed', write: true }])
-    answer = async () => summary({ workflows: [workflow({ title: 'Pause' })] })
-    await captured(cap, c)
-    expect(activity()).not.toContain('Play Discover Weekly')
-    expect(calls.at(-1)).not.toContain('spotify__play')
-  })
-
-  it('a resolution is a new entry; the earlier one is left as written', async () => {
+  it('a resolution goes in a new note; the earlier note is left as written', async () => {
     const c = newChat()
     turn(c, 'play', [
       { name: 'spotify__play', status: 'failed', result: 'No active device', write: true }
     ])
     answer = async () =>
       summary({
-        workflows: [workflow({ outcome: 'failed' })],
+        workflows: [workflow({ requested: 'unchecked' })],
         unresolved: ['Spotify has no active device']
       })
     const cap = capture()
     await captured(cap, c)
-    const first = activity()
+    const first = notes()[0]
+    const before = note(first)
+    expect(before).toContain('## Still open\n\n- Spotify has no active device')
+    expect(before).toContain('the tool reported an error')
     turn(c, 'try again', [
       { name: 'spotify__play', status: 'completed', write: true },
-      { name: 'spotify__now_playing', status: 'completed', result: 'Playing' }
+      {
+        name: 'spotify__now_playing',
+        label: 'Check playback',
+        status: 'completed',
+        result: 'Playing'
+      }
     ])
     answer = async () =>
       summary({
         workflows: [
-          workflow({ actions: ['A1', 'A2'], observed: 'Now playing', outcome: 'worked' })
+          workflow({ actions: ['A1'], checks: ['A2'], observed: 'Now playing', requested: 'seen' })
         ],
         resolutions: [
           {
@@ -876,24 +933,25 @@ describe('capture', () => {
         ]
       })
     await captured(cap, c)
-    const a = activity()
-    expect(a).toContain(
-      first.slice(first.indexOf('### '), first.indexOf('<!-- custard:end')).trim()
+    expect(note(first)).toBe(before)
+    const second = note(notes()[1])
+    expect(second).toContain(
+      '## Resolved\n\n- Spotify has no active device: Opened Spotify on the laptop first'
     )
-    expect(a).toContain('### 2026-10-07 · Resolved: Spotify has no active device')
-    expect(a).toContain('- Outcome: Worked: a later check confirmed it')
+    expect(second).toContain('- Checked afterwards (Check playback): Now playing')
+    expect(second).toContain('- Requested outcome: seen at the later check')
+    expect(readCaptures(vault).activity).toContain(
+      '2026-10-07 · Open: Spotify has no active device'
+    )
   })
 
-  it('a contradicting preference is added beside the old one, not over it', async () => {
+  it('a contradicting preference is a new note beside the old one, not over it', async () => {
     const c = newChat()
     turn(c, 'I like jazz now, not rock', [], 'Noted.')
-    for (let i = 0; i < 3; i++) turn(c, `more ${i}`)
-    writeFileSync(join(vault, 'x.md'), '')
-    answer = async () =>
-      summary({ preferences: [{ text: 'Prefers jazz', replaces: 'Prefers rock', plugin: '' }] })
+    answer = async () => summary({ preferences: [pref('Prefers jazz', 'Prefers rock')] })
     await captured(capture(), c)
-    expect(note('Custard/Memory.md')).toContain(
-      'Prefers jazz (changes an earlier preference: "Prefers rock"; the earlier one is left as written)'
+    expect(saved()).toContain(
+      'Prefers jazz (changes an earlier preference: "Prefers rock"; the earlier note is left as written)'
     )
   })
 
@@ -916,7 +974,7 @@ describe('capture', () => {
     await running
     expect(calls).toHaveLength(2)
     expect(calls[1]).not.toContain('spotify__play')
-    expect(activity().match(/### /g)).toHaveLength(2)
+    expect(notes()).toHaveLength(2)
   })
 
   it('never runs an action: the only thing it can call is the tool-less summarizer', async () => {
@@ -928,6 +986,132 @@ describe('capture', () => {
     // are notes and the chat's memory record.
     expect(Object.keys(c.actions!)).toHaveLength(1)
     expect(c.messages).toHaveLength(4)
+  })
+})
+
+// --- Opting out, deleting and forgetting -----------------------------------
+
+describe('opt-out, deletion and forgetting', () => {
+  const played = (c: Conversation, what = 'play'): void =>
+    turn(c, what, [{ name: 'spotify__play', status: 'completed', write: true }])
+
+  it('opt-out: stops future captures, keeps earlier notes, and turning it on does not reach back', async () => {
+    const c = newChat()
+    played(c)
+    const cap = capture()
+    await captured(cap, c)
+    const kept = notes()
+    cap.setChatMemory('chat-1', true)
+    played(c, 'play again')
+    await captured(cap, c)
+    expect(calls).toHaveLength(1)
+    expect(notes()).toEqual(kept)
+    cap.setChatMemory('chat-1', false)
+    turn(c, 'thanks')
+    await captured(cap, c)
+    expect(calls).toHaveLength(1)
+  })
+
+  it("opt-out cancels a waiting capture, and turning it on doesn't bring it back", async () => {
+    const { renameSync } = await import('fs')
+    renameSync(vault, `${vault}-away`)
+    const c = newChat()
+    played(c)
+    const cap = capture()
+    await captured(cap, c)
+    expect(job().status).toBe('pending')
+    cap.setChatMemory('chat-1', true)
+    expect(job().status).toBe('off')
+    expect(cap.pending()).toEqual([])
+    renameSync(`${vault}-away`, vault)
+    cap.setChatMemory('chat-1', false)
+    await cap.run()
+    cap.afterTurn(chats.get('chat-1')!, 'claude')
+    await cap.run()
+    expect(calls).toHaveLength(0)
+    expect(notes()).toEqual([])
+  })
+
+  it('manual deletion: a deleted note is not written again, and that part is not captured again', async () => {
+    const c = newChat()
+    played(c)
+    const cap = capture()
+    await captured(cap, c)
+    rmSync(join(vault, notes()[0]))
+    turn(c, 'thanks')
+    await captured(cap, c)
+    played(c, 'pause')
+    answer = async () => summary({ workflows: [workflow({ title: 'Pause' })] })
+    await captured(cap, c)
+    expect(notes()).toHaveLength(1)
+    expect(saved()).not.toContain('Play Discover Weekly')
+    expect(calls.at(-1)).not.toContain(
+      'A1: spotify__play [spotify__play, plugin spotify, changes something] → completed\n- A2'
+    )
+    expect(calls.at(-1)).toMatch(/User requests \(oldest first\):\n1\. thanks\n2\. pause/)
+  })
+
+  it("forget: deletes only this chat's capture notes, and keeps nothing of them", async () => {
+    mkdirSync(join(vault, 'Custard/Plugins/Spotify/Activity'), { recursive: true })
+    const c = newChat()
+    played(c)
+    answer = async () =>
+      summary({ preferences: [pref('Secret preference')], workflows: [workflow()] })
+    const cap = capture()
+    await captured(cap, c)
+    // A capture note from this chat elsewhere under Custard (a plugin folder).
+    const elsewhere = 'Custard/Plugins/Spotify/Activity/x.md'
+    writeFileSync(
+      join(vault, elsewhere),
+      `---\ncustard-capture: "chat-1:9-10"\nchat: "chat-1"\n---\n`
+    )
+    const other = newChat('chat-2', 'Other')
+    played(other)
+    answer = async () => summary({ workflows: [workflow()] })
+    await captured(cap, other)
+    writeFileSync(join(vault, 'Custard/Captures/mine.md'), 'chat: "chat-1"\nmy own note')
+    expect(cap.savedNotes('chat-1')).toEqual([
+      'Custard/Captures/2026-10-07 1200 Spotify test.md',
+      elsewhere
+    ])
+    const r = cap.forget('chat-1')
+    expect(r.left).toEqual([])
+    expect(r.deleted).toHaveLength(2)
+    expect(chatCaptures(vault, 'chat-1')).toEqual([])
+    expect(notes()).toEqual([
+      'Custard/Captures/2026-10-07 1200 Other.md',
+      'Custard/Captures/mine.md'
+    ])
+    const m = chats.get('chat-1')!.memory!
+    expect(m).toMatchObject({ off: true, forgotten: true, watermark: c.messages.length })
+    expect(m.job!.plan).toBeUndefined()
+    expect(m.job!.notes).toBeUndefined()
+    expect(JSON.stringify(m)).not.toContain('Secret preference')
+    expect(readCaptures(vault).remembered.join()).not.toContain('Secret preference')
+  })
+
+  it('forget cannot be undone by later turns, the switch, a waiting job or a summary in flight', async () => {
+    const c = newChat()
+    played(c)
+    const cap = capture()
+    let release!: () => void
+    answer = () =>
+      new Promise((r) => (release = () => r(summary({ preferences: [pref('Secret preference')] }))))
+    chats.set(c.id, c)
+    cap.afterTurn(c, 'claude')
+    const running = cap.run()
+    await new Promise((r) => setTimeout(r, 10))
+    cap.forget('chat-1')
+    release()
+    await running
+    expect(notes()).toEqual([])
+    cap.setChatMemory('chat-1', false)
+    expect(chats.get('chat-1')!.memory!.off).toBe(true)
+    turn(chats.get('chat-1')!, 'I prefer jazz from now on')
+    await captured(cap, chats.get('chat-1')!)
+    expect(calls).toHaveLength(1)
+    expect(notes()).toEqual([])
+    expect(cap.pending()).toEqual([])
   })
 })
 

@@ -83,22 +83,26 @@ http
         })
         fs.writeFileSync(OUT + '/memory.json', JSON.stringify(memory, null, 1))
         const ids = [...evidence.matchAll(/^- (A\d+): /gm)].map((m) => m[1])
+        const preferences = [
+          ...(/warm jazz/.test(evidence) ? ['Prefers warm jazz'] : []),
+          ...(/short answers/.test(evidence) ? ['Prefers short answers'] : [])
+        ].map((text) => ({ text, replaces: '', plugin: '' }))
         const summary = {
-          save: ids.length > 0,
-          preferences: /warm jazz/.test(evidence)
-            ? [{ text: 'Prefers warm jazz', replaces: '' }]
-            : [],
+          save: ids.length > 0 || preferences.length > 0,
+          preferences,
           decisions: [],
+          // Claims the outcome was seen without naming a check; Custard must
+          // not write that down as an observation.
           workflows: ids.length
             ? [
                 {
-                  plugin: 'Spotify',
                   title: 'Looked up Nils Frahm',
                   request: 'Find Nils Frahm',
                   actions: ids,
-                  observed: '',
-                  uncertain: '',
-                  outcome: 'worked'
+                  checks: [],
+                  observed: 'it worked',
+                  requested: 'seen',
+                  uncertain: ''
                 }
               ]
             : [],
