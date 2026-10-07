@@ -188,7 +188,11 @@ export class Capture {
           attempts: 0,
           at: this.now()
         }
-        this.end(m, 'skipped', 'You asked Custard not to remember this.')
+        this.end(
+          m,
+          'skipped',
+          `Your message said "${evidence.dontRemember}", so this part wasn't saved.`
+        )
       })
       this.dequeue(id)
       return
@@ -319,7 +323,13 @@ export class Capture {
     if (!plan) {
       const evidence = buildEvidence(c, job.from, job.to, this.deps.settings().offPlugins)
       if (evidence.dontRemember) {
-        this.set(id, (m) => this.end(m, 'skipped', 'You asked Custard not to remember this.'))
+        this.set(id, (m) =>
+          this.end(
+            m,
+            'skipped',
+            `Your message said "${evidence.dontRemember}", so this part wasn't saved.`
+          )
+        )
         return false
       }
       const summarize = this.deps.summarizer(job.provider ?? 'claude')

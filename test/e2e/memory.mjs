@@ -90,7 +90,11 @@ const send = async (t) => {
   await w.keyboard.press('Enter')
 }
 const idle = () => w.waitForSelector('button[title=Send]', { timeout: 30000 })
-const status = () => w.locator('[aria-label="Memory status"]').textContent()
+const status = async () => {
+  const l = w.locator('[aria-label="Memory status"]')
+  return (await l.count()) ? l.textContent() : ''
+}
+const memorySwitch = '[aria-label="Remember this chat"]'
 const newChat = async () => {
   await w.click('button[title="Chat history"]')
   await w.click('button:has-text("New chat")')
@@ -196,10 +200,18 @@ try {
   check(summaries().length === 1, 'and asking about it is not itself summarized')
 
   step("Don't remember this chat")
-  await w.click("text=Don't remember this chat")
   check(
-    await until(async () => (await status()) === 'Not remembering this chat.'),
-    'the chat says it is not being remembered'
+    (await w.getAttribute(memorySwitch, 'aria-checked')) === 'true',
+    'a new chat is remembered by default'
+  )
+  await w.click(memorySwitch)
+  check(
+    await until(
+      async () =>
+        (await w.getAttribute(memorySwitch, 'aria-checked')) === 'false' &&
+        (await w.textContent(memorySwitch)).includes('Not remembering')
+    ),
+    'the switch says the chat is not being remembered'
   )
   await send('memory test: find Nils Frahm again')
   await idle()

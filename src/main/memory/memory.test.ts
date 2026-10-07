@@ -796,8 +796,35 @@ describe('capture', () => {
     ])
     await captured(capture(), c)
     expect(job().status).toBe('skipped')
-    expect(job().reason).toBe('You asked Custard not to remember this.')
+    expect(job().reason).toBe(
+      `Your message said "and don't remember it", so this part wasn't saved.`
+    )
     expect(calls).toHaveLength(0)
+  })
+
+  it('casual phrases are not requests to forget', () => {
+    const asks = (text: string): string | null => {
+      const c = newChat()
+      turn(c, text)
+      return buildEvidence(c, 0, c.messages.length).dontRemember
+    }
+    for (const casual of [
+      'Forget it, play something else',
+      "I don't remember that song's name",
+      "Don't keep the volume this low",
+      'forget that, use Spotify instead',
+      'We never save on Fridays',
+      'Never record a demo without a click track'
+    ])
+      expect(asks(casual), casual).toBeNull()
+    for (const [explicit, words] of [
+      ["Don't remember this.", "Don't remember this"],
+      ['please don’t save that', 'please don’t save that'],
+      ['Ok. Forget this chat', 'Forget this chat'],
+      ['This is off the record', 'off the record'],
+      ['keep this out of your memory', 'keep this out of your memory']
+    ])
+      expect(asks(explicit), explicit).toBe(words)
   })
 
   it('what the user deleted is not captured again', async () => {
