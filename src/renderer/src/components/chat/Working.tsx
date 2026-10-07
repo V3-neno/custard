@@ -12,7 +12,8 @@ type Stage = {
   orb: OrbState
 }
 
-const isWrite = (label: string): boolean => /^(Created|Added|Saved)/.test(label)
+const isWrite = (label: string): boolean =>
+  /^(Created|Added|Saved|Spotify queue|Opened|Moved|Started)/.test(label)
 
 // The latest line of the thinking summary, as a hint of what it's on now.
 function latestThought(text: string): string | undefined {

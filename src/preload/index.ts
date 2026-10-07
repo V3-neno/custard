@@ -10,6 +10,7 @@ import type {
   SendChatRequest
 } from '../shared/chat'
 import type { VaultInfo } from '../shared/vault'
+import type { SpotifyStatus } from '../shared/spotify'
 
 // API exposed to the renderer as window.custard. The renderer never sees the
 // API keys; all model calls happen in the main process.
@@ -28,7 +29,16 @@ const custard = {
     get: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:get'),
     pick: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:pick'),
     createStarter: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:createStarter'),
-    clear: (): Promise<void> => ipcRenderer.invoke('vault:clear')
+    clear: (): Promise<void> => ipcRenderer.invoke('vault:clear'),
+    addStarterSkills: (): Promise<{ added: string[]; vault: VaultInfo }> =>
+      ipcRenderer.invoke('vault:addStarterSkills')
+  },
+  spotify: {
+    status: (): Promise<SpotifyStatus> => ipcRenderer.invoke('spotify:status'),
+    setClientId: (id: string | null): Promise<SpotifyStatus> =>
+      ipcRenderer.invoke('spotify:setClientId', id),
+    connect: (): Promise<SpotifyStatus> => ipcRenderer.invoke('spotify:connect'),
+    disconnect: (): Promise<SpotifyStatus> => ipcRenderer.invoke('spotify:disconnect')
   },
   conversations: {
     list: (mode: Mode): Promise<ConversationSummary[]> =>

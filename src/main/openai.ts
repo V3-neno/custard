@@ -1,6 +1,7 @@
 import type {
   BetaContentBlockParam,
   BetaMessageParam,
+  BetaTool,
   BetaToolResultBlockParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import OpenAI from 'openai'
@@ -11,7 +12,6 @@ import type {
 } from 'openai/resources/responses/responses'
 import type { ChatEvent, Conversation, Effort } from '../shared/chat'
 import { saveConversation } from './store'
-import { vaultTools } from './vault'
 
 type Emit = (e: ChatEvent) => void
 
@@ -23,20 +23,24 @@ type Turn = {
   effort: Effort
   instructions: string
   conversation: Conversation
-  withTools: boolean
+  tools: BetaTool[]
   signal: AbortSignal
   emit: Emit
-  runTool: (id: string, name: string, input: unknown) => { content: string; isError: boolean }
+  runTool: (
+    id: string,
+    name: string,
+    input: unknown
+  ) => Promise<{ content: string; isError: boolean }>
   onText: (text: string) => void
 }
 
-const tools: FunctionTool[] = vaultTools.map((t) => ({
+const toFunctionTool = (t: BetaTool): FunctionTool => ({
   type: 'function',
   name: t.name,
   description: t.description ?? null,
   parameters: t.input_schema as Record<string, unknown>,
   strict: false
-}))
+})
 
 const textOf = (content: string | BetaToolResultBlockParam['content']): string =>
   typeof content === 'string'
@@ -106,10 +110,10 @@ export async function runOpenAI(turn: Turn): Promise<void> {
         input,
         reasoning: { effort: turn.effort, summary: 'auto' },
         // Nothing is stored at OpenAI; reasoning is passed back encrypted so
-        // the model keeps its train of thought across vault actions.
+        // the model keeps its train of thought across tool calls.
         store: false,
         include: ['reasoning.encrypted_content'],
-        ...(turn.withTools ? { tools } : {}),
+        ...(turn.tools.length ? { tools: turn.tools.map(toFunctionTool) } : {}),
         stream: true
       },
       { signal: turn.signal }
@@ -139,21 +143,23 @@ export async function runOpenAI(turn: Turn): Promise<void> {
 
     const calls = output.filter((o) => o.type === 'function_call')
     if (incomplete && calls.length > 0)
-      throw new Error('The reply was cut off in the middle of a vault action. Try again.')
+      throw new Error('The reply was cut off in the middle of a tool action. Try again.')
     const blocks = toBlocks(output)
     if (blocks.length > 0) conversation.messages.push({ role: 'assistant', content: blocks })
     if (calls.length === 0) return
 
-    const results: BetaToolResultBlockParam[] = calls.map((c) => {
+    // One after another, in order.
+    const results: BetaToolResultBlockParam[] = []
+    for (const c of calls) {
       const block = blocks.find((b) => b.type === 'tool_use' && b.id === c.call_id)
-      const r = turn.runTool(c.call_id, c.name, block?.type === 'tool_use' ? block.input : {})
-      return {
+      const r = await turn.runTool(c.call_id, c.name, block?.type === 'tool_use' ? block.input : {})
+      results.push({
         type: 'tool_result',
         tool_use_id: c.call_id,
         content: r.content,
         is_error: r.isError
-      }
-    })
+      })
+    }
     conversation.messages.push({ role: 'user', content: results })
     saveConversation(conversation)
     input.push(

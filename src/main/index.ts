@@ -5,6 +5,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { registerChatHandlers } from './chat'
+import { registerSpotifyHandlers } from './spotify'
 import {
   deleteConversation,
   getChatSettings,
@@ -17,7 +18,7 @@ import {
 import type { VaultInfo } from '../shared/vault'
 import type { Mode, Provider } from '../shared/chat'
 import { listSkills } from './vault'
-import { createStarterVault } from './vaultTemplate'
+import { addMissingStarterSkills, createStarterVault } from './vaultTemplate'
 
 function vaultInfo(): VaultInfo {
   const path = getVaultPath()
@@ -113,7 +114,13 @@ app.whenReady().then(() => {
     return vaultInfo()
   })
   ipcMain.handle('vault:clear', () => setVaultPath(null))
+  ipcMain.handle('vault:addStarterSkills', () => {
+    const path = getVaultPath()
+    if (!path || !existsSync(path)) throw new Error('Connect a vault first.')
+    return { added: addMissingStarterSkills(path), vault: vaultInfo() }
+  })
   registerChatHandlers()
+  registerSpotifyHandlers()
 
   createWindow()
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { providerNames, type Provider } from '../../../shared/chat'
+import { SPOTIFY_REDIRECT_URI, type SpotifyStatus } from '../../../shared/spotify'
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 
 type Props = { onClose: () => void; onChanged: () => void }
@@ -84,6 +85,92 @@ function KeySection({
   )
 }
 
+function SpotifySection(): React.JSX.Element {
+  const [status, setStatus] = useState<SpotifyStatus | null>(null)
+  const [clientId, setClientId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.custard.spotify.status().then((s) => {
+      setStatus(s)
+      setClientId(s.clientId ?? '')
+    })
+  }, [])
+
+  const run = async (action: () => Promise<SpotifyStatus>): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      setStatus(await action())
+    } catch (e) {
+      setError(cleanError(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const savedId = status?.clientId ?? ''
+  return (
+    <section className="mb-6">
+      <h3 className="mb-1 text-sm font-medium">
+        Spotify{' '}
+        {status?.connected && (
+          <span className="text-molten-300">
+            · connected{status.user ? ` as ${status.user}` : ''}
+          </span>
+        )}
+      </h3>
+      <p className="mb-3 text-sm text-ash-300">
+        Lets the model search Spotify, see what is playing and add songs to your queue. Create an
+        app at developer.spotify.com, add{' '}
+        <code className="text-molten-200 select-all">{SPOTIFY_REDIRECT_URI}</code> as its Redirect
+        URI, and paste its Client ID here. Needs Spotify Premium.
+      </p>
+      <div className="flex gap-2">
+        <input
+          aria-label="Spotify Client ID"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          placeholder="Client ID"
+          className="flex-1 rounded-lg border border-forge-700 bg-forge-900 px-3 py-2 font-mono text-xs outline-none focus:border-molten-500/60"
+        />
+        {clientId.trim() !== savedId ? (
+          <button
+            onClick={() => run(() => window.custard.spotify.setClientId(clientId))}
+            disabled={busy}
+            className={primary}
+          >
+            Save
+          </button>
+        ) : status?.connected ? (
+          <button
+            onClick={() => run(() => window.custard.spotify.disconnect())}
+            disabled={busy}
+            className={secondary}
+          >
+            Disconnect
+          </button>
+        ) : (
+          <button
+            onClick={() => run(() => window.custard.spotify.connect())}
+            disabled={busy || !savedId}
+            className={primary}
+          >
+            {busy ? 'Waiting for Spotify…' : 'Connect'}
+          </button>
+        )}
+      </div>
+      {busy && (
+        <p className="mt-2 text-xs text-ash-500">
+          Approve access in the browser window that opened, then come back here.
+        </p>
+      )}
+      {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
+    </section>
+  )
+}
+
 function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
   const [vault, setVault] = useState<VaultInfo>(null)
 
@@ -101,6 +188,20 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
       setVaultError(cleanError(e))
     }
   }
+  const [added, setAdded] = useState<string | null>(null)
+  const addSkills = async (): Promise<void> => {
+    try {
+      const r = await window.custard.vault.addStarterSkills()
+      setVault(r.vault)
+      setAdded(
+        r.added.length
+          ? `Added ${r.added.join(', ')}`
+          : 'Your vault already has every starter skill.'
+      )
+    } catch (e) {
+      setVaultError(cleanError(e))
+    }
+  }
   const clearVault = async (): Promise<void> => {
     await window.custard.vault.clear()
     setVault(null)
@@ -112,7 +213,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
       onClick={onClose}
     >
       <div
-        className="w-[480px] rounded-3xl border border-forge-700 bg-forge-850 p-6"
+        className="max-h-[90vh] w-[480px] overflow-y-auto rounded-3xl border border-forge-700 bg-forge-850 p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-5 text-base font-semibold">Settings</h2>
@@ -123,6 +224,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
         </p>
         <KeySection provider="claude" onChanged={onChanged} />
         <KeySection provider="openai" onChanged={onChanged} />
+        <SpotifySection />
 
         <section>
           <h3 className="mb-1 text-sm font-medium">
@@ -153,6 +255,13 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
                 <button onClick={pickVault} className={secondary}>
                   Change folder
                 </button>
+                <button
+                  onClick={addSkills}
+                  className={secondary}
+                  title="Copies starter skills you don't have yet. Nothing is overwritten."
+                >
+                  Add missing starter skills
+                </button>
                 <button onClick={clearVault} className="text-xs text-ash-500 hover:text-ember-600">
                   Disconnect
                 </button>
@@ -168,6 +277,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
               </button>
             </div>
           )}
+          {added && <p className="mt-2 text-xs text-ash-400">{added}</p>}
           {vaultError && <p className="mt-2 text-sm text-ember-600">{vaultError}</p>}
         </section>
 

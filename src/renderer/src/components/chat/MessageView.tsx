@@ -51,7 +51,14 @@ export function ToolLine({
       className={`mb-2 flex items-center gap-2.5 text-xs ${status === 'error' ? 'text-ember-600' : 'text-ash-400'}`}
     >
       {status === 'running' ? (
-        <Orb size={16} state={/^(Created|Added|Saved)/.test(label) ? 'composing' : 'searching'} />
+        <Orb
+          size={16}
+          state={
+            /^(Created|Added|Saved|Spotify queue|Opened|Moved|Started)/.test(label)
+              ? 'composing'
+              : 'searching'
+          }
+        />
       ) : (
         <span
           className={`h-2 w-2 rounded-full ${status === 'error' ? 'bg-ember-600' : 'bg-molten-400 shadow-[0_0_8px_rgb(var(--glow)/0.6)]'}`}

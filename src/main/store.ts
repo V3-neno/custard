@@ -58,7 +58,7 @@ export function deleteConversation(id: string): void {
   rmSync(file(id), { force: true })
 }
 
-type Config = { chat: ChatSettings; vaultPath: string | null }
+type Config = { chat: ChatSettings; vaultPath: string | null; spotifyClientId: string | null }
 
 function readConfig(): Config {
   let raw: Partial<Config> & Partial<ChatSettings> = {}
@@ -72,7 +72,8 @@ function readConfig(): Config {
   if (raw.effort) legacy.effort = raw.effort
   return {
     chat: { ...defaultChatSettings, ...legacy, ...raw.chat },
-    vaultPath: raw.vaultPath ?? null
+    vaultPath: raw.vaultPath ?? null,
+    spotifyClientId: raw.spotifyClientId ?? null
   }
 }
 
@@ -84,3 +85,6 @@ export const getChatSettings = (): ChatSettings => readConfig().chat
 export const setChatSettings = (chat: ChatSettings): void => writeConfig({ chat })
 export const getVaultPath = (): string | null => readConfig().vaultPath
 export const setVaultPath = (vaultPath: string | null): void => writeConfig({ vaultPath })
+export const getSpotifyClientId = (): string | null => readConfig().spotifyClientId
+export const setSpotifyClientId = (spotifyClientId: string | null): void =>
+  writeConfig({ spotifyClientId })

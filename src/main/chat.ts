@@ -3,6 +3,7 @@ import type {
   BetaContentBlock,
   BetaContentBlockParam,
   BetaTextBlockParam,
+  BetaTool,
   BetaToolResultBlockParam,
   MessageCreateParamsStreaming
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
@@ -13,6 +14,8 @@ import OpenAI from 'openai'
 import { getConversation, getVaultPath, newConversation, saveConversation } from './store'
 import { runOpenAI } from './openai'
 import { runVaultTool, vaultSystemPrompt, vaultTools } from './vault'
+import { spotifyConnected, spotifyDeps } from './spotify'
+import { isSpotifyTool, runSpotifyTool, spotifySystemPrompt, spotifyTools } from './spotify/tools'
 import {
   chatModels,
   providerNames,
@@ -93,18 +96,40 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
   ]
   if (vaultReady) system.push({ type: 'text', text: vaultSystemPrompt(vault, conversation.mode) })
+  const spotifyReady = spotifyConnected()
+  if (spotifyReady) system.push({ type: 'text', text: spotifySystemPrompt })
 
-  // Runs one vault tool call and reports it to the UI.
-  const runTool = (
+  // The APIs require tool definitions whenever the history contains calls to
+  // them, so keep a tool set even if it was disconnected since.
+  const used = new Set(
+    conversation.messages.flatMap((m) =>
+      typeof m.content === 'string'
+        ? []
+        : m.content.flatMap((b) => (b.type === 'tool_use' ? [b.name] : []))
+    )
+  )
+  const usedSpotify = [...used].some(isSpotifyTool)
+  const usedVault = [...used].some((n) => !isSpotifyTool(n))
+  const tools: BetaTool[] = [
+    ...(vaultReady || usedVault ? vaultTools : []),
+    ...(spotifyReady || usedSpotify ? spotifyTools : [])
+  ]
+
+  // Runs one tool call and reports it to the UI.
+  const runTool = async (
     id: string,
     name: string,
     input: unknown
-  ): { content: string; isError: boolean } => {
+  ): Promise<{ content: string; isError: boolean }> => {
     const label = toolLabel(name, input)
     emit({ requestId, type: 'tool', id, label, status: 'running' })
-    const r = vaultReady
-      ? runVaultTool(vault, name, input)
-      : { content: 'The vault is not connected right now.', isError: true }
+    const r = isSpotifyTool(name)
+      ? spotifyConnected()
+        ? await runSpotifyTool(spotifyDeps(), name, input)
+        : { content: 'Spotify is not connected right now.', isError: true }
+      : vaultReady
+        ? runVaultTool(vault, name, input)
+        : { content: 'The vault is not connected right now.', isError: true }
     emit({ requestId, type: 'tool', id, label, status: r.isError ? 'error' : 'done' })
     return r
   }
@@ -117,12 +142,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     cache_control: { type: 'ephemeral' },
     stream: true
   }
-  // The API requires tool definitions whenever the history contains tool
-  // calls, so keep them even if the vault was disconnected since.
-  const usedTools = conversation.messages.some(
-    (m) => typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_use')
-  )
-  if (vaultReady || usedTools) params.tools = vaultTools
+  if (tools.length) params.tools = tools
   if (model.effort) {
     params.thinking = { type: 'adaptive', display: 'summarized' }
     params.output_config = { effort: req.settings.effort }
@@ -155,7 +175,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         effort: req.settings.effort,
         instructions: system.map((b) => b.text).join('\n\n'),
         conversation,
-        withTools: vaultReady || usedTools,
+        tools,
         signal: controller.signal,
         emit,
         runTool,
@@ -189,17 +209,24 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       }
       const toolUses = message.content.filter((b) => b.type === 'tool_use')
       if (toolUses.length > 0 && message.stop_reason === 'max_tokens') {
-        fail('The reply was cut off in the middle of a vault action. Try again.')
+        fail('The reply was cut off in the middle of a tool action. Try again.')
         return
       }
       conversation.messages.push({ role: 'assistant', content: echoableContent(message.content) })
       if (message.stop_reason !== 'tool_use') break
 
-      // Run every tool call from this turn and return all results together.
-      const results: BetaToolResultBlockParam[] = toolUses.map((t) => {
-        const r = runTool(t.id, t.name, t.input)
-        return { type: 'tool_result', tool_use_id: t.id, content: r.content, is_error: r.isError }
-      })
+      // Run every tool call from this turn, one after another in order, and
+      // return all results together.
+      const results: BetaToolResultBlockParam[] = []
+      for (const t of toolUses) {
+        const r = await runTool(t.id, t.name, t.input)
+        results.push({
+          type: 'tool_result',
+          tool_use_id: t.id,
+          content: r.content,
+          is_error: r.isError
+        })
+      }
       conversation.messages.push({ role: 'user', content: results })
       saveConversation(conversation)
     }

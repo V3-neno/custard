@@ -47,6 +47,10 @@ Basic skills in Chat arrived with the starter vault in Phase 2. This phase build
 - Manage skills from a Skills page in Custard.
 - Let Claude draft new skills from a conversation ("turn what we just did into a skill").
 
+## Integrations
+
+- **Spotify** (done): search, now playing, devices, queue, open and transfer, with a `music` skill. See [SPOTIFY.md](SPOTIFY.md).
+
 ## Phase 6: Polish and reach
 
 - Windows installer and auto-update.
