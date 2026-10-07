@@ -25,6 +25,7 @@ const custard = {
   vault: {
     get: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:get'),
     pick: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:pick'),
+    createStarter: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:createStarter'),
     clear: (): Promise<void> => ipcRenderer.invoke('vault:clear')
   },
   conversations: {

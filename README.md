@@ -26,9 +26,11 @@ Pick the model and effort under the message box. Opus 5.5 and Sonnet 5.5 show a 
 
 ## Obsidian brain
 
-In **Settings**, choose your Obsidian vault folder. In Chat, Claude can then search, list and read your notes, create new notes and add to existing ones. It can't overwrite or delete anything, and every action shows up in the chat.
+In **Settings**, click **Create starter vault** to get a ready-made vault (folders, templates, a memory note and starter skills, copied from [`vault-template/`](vault-template)), or choose an existing Obsidian vault. In Chat, Claude can then search, list and read your notes, create new notes and add to existing ones. It can't overwrite or delete anything, and every action shows up in the chat.
 
 Claude keeps what it learns about you in `Custard/Memory.md` inside the vault. That note is loaded into every chat, and you can edit it in Obsidian like any other note.
+
+Skills live in `Custard/Skills/<name>/SKILL.md`. Claude sees each skill's name and description and reads the full skill when a request matches. The starter vault includes note-writing, daily-note, weekly-review, project-kickoff and remember.
 
 ## Roadmap
 

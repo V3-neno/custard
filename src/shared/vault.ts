@@ -1,6 +1,6 @@
 export const MEMORY_NOTE = 'Custard/Memory.md'
 
-export type VaultInfo = { path: string; isObsidian: boolean } | null
+export type VaultInfo = { path: string; isObsidian: boolean; skills: string[] } | null
 
 // A short human-readable line for a vault tool call, used in the chat UI.
 export function toolLabel(name: string, input: unknown): string {

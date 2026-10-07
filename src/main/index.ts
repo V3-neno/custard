@@ -15,10 +15,17 @@ import {
   setVaultPath
 } from './store'
 import type { VaultInfo } from '../shared/vault'
+import { listSkills } from './vault'
+import { createStarterVault } from './vaultTemplate'
 
 function vaultInfo(): VaultInfo {
   const path = getVaultPath()
-  return path ? { path, isObsidian: existsSync(join(path, '.obsidian')) } : null
+  if (!path) return null
+  return {
+    path,
+    isObsidian: existsSync(join(path, '.obsidian')),
+    skills: existsSync(path) ? listSkills(path).map((s) => s.name) : []
+  }
 }
 
 function createWindow(): void {
@@ -89,6 +96,19 @@ app.whenReady().then(() => {
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
     if (!result.canceled && result.filePaths[0]) setVaultPath(result.filePaths[0])
+    return vaultInfo()
+  })
+  ipcMain.handle('vault:createStarter', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options = {
+      title: 'Choose where to create the starter vault',
+      properties: ['openDirectory' as const, 'createDirectory' as const]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (!result.canceled && result.filePaths[0])
+      setVaultPath(createStarterVault(result.filePaths[0]))
     return vaultInfo()
   })
   ipcMain.handle('vault:clear', () => setVaultPath(null))

@@ -15,6 +15,8 @@ Custard uses an Obsidian vault as its long-term memory. A vault is just a folder
 2. Give Claude tools in Chat to search, list and read notes, create new notes and append to existing ones. It can't overwrite or delete anything.
 3. Keep a memory note (`Custard/Memory.md`) that is loaded into every chat, which Claude adds to when it learns something worth remembering.
 4. Show what Claude did in the vault inline in the chat.
+5. A starter vault (`vault-template/`) that Custard can create from Settings, with folders, templates, a memory note and starter skills.
+6. First skills support in Chat: skills in `Custard/Skills/` are listed to Claude, and it reads the full skill when a request matches.
 
 Later in this phase:
 
@@ -39,10 +41,11 @@ Claude Code inside Custard, using the Claude Agent SDK in the main process.
 
 Agent Skills are folders with a `SKILL.md` file that teach Claude a procedure.
 
-- Keep skills in the vault (for example `Custard/Skills/`) so they're editable in Obsidian.
-- Chat: list each skill's name and description to Claude, and let it load the full skill when a task matches.
+Basic skills in Chat arrived with the starter vault in Phase 2. This phase builds on that:
+
 - Code: pass the same skills to the Claude Agent SDK.
 - Manage skills from a Skills page in Custard.
+- Let Claude draft new skills from a conversation ("turn what we just did into a skill").
 
 ## Phase 6: Polish and reach
 

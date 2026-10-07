@@ -34,7 +34,16 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
     onChanged()
   }
 
+  const [vaultError, setVaultError] = useState<string | null>(null)
   const pickVault = async (): Promise<void> => setVault(await window.custard.vault.pick())
+  const createStarter = async (): Promise<void> => {
+    try {
+      setVaultError(null)
+      setVault(await window.custard.vault.createStarter())
+    } catch (e) {
+      setVaultError(cleanError(e))
+    }
+  }
   const clearVault = async (): Promise<void> => {
     await window.custard.vault.clear()
     setVault(null)
@@ -99,6 +108,11 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
               <div className="truncate rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm">
                 {vault.path}
               </div>
+              <p className="mt-2 text-xs text-ink-500">
+                {vault.skills.length
+                  ? `Skills: ${vault.skills.join(', ')}`
+                  : 'No skills yet. Add them in Custard/Skills.'}
+              </p>
               {!vault.isObsidian && (
                 <p className="mt-2 text-xs text-custard-300">
                   This folder has no .obsidian folder, so it may not be an Obsidian vault. It still
@@ -115,10 +129,16 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
               </div>
             </>
           ) : (
-            <button onClick={pickVault} className={primary}>
-              Choose vault folder
-            </button>
+            <div className="flex gap-2">
+              <button onClick={createStarter} className={primary}>
+                Create starter vault
+              </button>
+              <button onClick={pickVault} className={secondary}>
+                Use an existing vault
+              </button>
+            </div>
           )}
+          {vaultError && <p className="mt-2 text-sm text-red-300">{vaultError}</p>}
         </section>
 
         <div className="mt-6 flex justify-end">

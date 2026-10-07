@@ -90,7 +90,43 @@ export const vaultTools: BetaTool[] = [
   }
 ]
 
+const SKILLS_DIR = 'Custard/Skills'
+
+// Skills are folders in the vault with a SKILL.md whose frontmatter has a name
+// and description. Only those two fields go in the prompt; Claude reads the
+// full file when a request matches.
+export function listSkills(vault: string): { name: string; description: string; path: string }[] {
+  const dir = join(vault, SKILLS_DIR)
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    .flatMap((e) => {
+      const path = `${SKILLS_DIR}/${e.name}/SKILL.md`
+      let text: string
+      try {
+        text = readFileSync(join(vault, path), 'utf8')
+      } catch {
+        return []
+      }
+      const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? ''
+      const field = (key: string): string =>
+        new RegExp(`^${key}:\\s*(.+)$`, 'm')
+          .exec(front)?.[1]
+          .trim()
+          .replace(/^["']|["']$/g, '') ?? ''
+      const description = field('description')
+      return description ? [{ name: field('name') || e.name, description, path }] : []
+    })
+}
+
+// YYYY-MM-DD in the user's own time zone, for daily notes and memory entries.
+const localDate = (): string => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export function vaultSystemPrompt(vault: string): string {
+  const skills = listSkills(vault)
   const memoryPath = join(vault, MEMORY_NOTE)
   const memory = existsSync(memoryPath) ? readFileSync(memoryPath, 'utf8').trim() : ''
   return [
@@ -98,10 +134,16 @@ export function vaultSystemPrompt(vault: string): string {
     "Use the vault tools when the user mentions their notes, or when what they've written before would help you answer. Don't search for small talk.",
     `${MEMORY_NOTE} is your long-term memory about the user and is shown below. When you learn something durable and useful (a preference, a fact about their life or projects, a decision), append it there as a short dated bullet. Don't save trivia or secrets, and never say you saved something unless the tool call succeeded.`,
     'When you create notes, write clean Obsidian Markdown and use [[wikilinks]] to related notes you know exist.',
+    `Today's date is ${localDate()}.`,
+    skills.length
+      ? `Skills are instructions for specific tasks in this vault. When a request matches a skill's description, read its SKILL.md with vault_read before doing anything else, then follow it.\n<skills>\n${skills.map((s) => `- ${s.name} (${s.path}): ${s.description}`).join('\n')}\n</skills>`
+      : '',
     memory
       ? `<memory>\n${memory}\n</memory>`
       : `<memory>\n(empty: ${MEMORY_NOTE} doesn't exist yet)\n</memory>`
-  ].join('\n\n')
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 class VaultError extends Error {}

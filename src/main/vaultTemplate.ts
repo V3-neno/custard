@@ -1,0 +1,37 @@
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
+
+// The starter vault in /vault-template, bundled into the app at build time.
+const PREFIX = '../../vault-template/'
+const templateFiles = import.meta.glob('../../vault-template/**/*.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true
+}) as Record<string, string>
+
+// Obsidian settings so new notes go to Inbox and the Templates and Daily notes
+// core plugins point at the right folders once they're turned on.
+const obsidianConfig: Record<string, unknown> = {
+  'app.json': { newFileLocation: 'folder', newFileFolderPath: 'Inbox' },
+  'templates.json': { folder: 'Templates' },
+  'daily-notes.json': { folder: 'Daily', template: 'Templates/Daily' }
+}
+
+export const STARTER_VAULT_NAME = 'Custard Brain'
+
+export function createStarterVault(parent: string): string {
+  const root = join(parent, STARTER_VAULT_NAME)
+  if (existsSync(root) && readdirSync(root).length > 0) {
+    throw new Error(`"${STARTER_VAULT_NAME}" already exists in that folder. Choose another folder.`)
+  }
+  for (const [key, content] of Object.entries(templateFiles)) {
+    const file = join(root, key.slice(PREFIX.length))
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, content, { flag: 'wx' })
+  }
+  mkdirSync(join(root, '.obsidian'), { recursive: true })
+  for (const [name, value] of Object.entries(obsidianConfig)) {
+    writeFileSync(join(root, '.obsidian', name), JSON.stringify(value, null, 2))
+  }
+  return root
+}
