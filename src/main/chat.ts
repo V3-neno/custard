@@ -199,7 +199,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     })
   // What besides the user's own words the model can see, for the search gate.
   const injected = [
-    ...(vaultReady ? ['your vault notes (Memory.md and the skills list)'] : []),
+    ...(vaultReady ? ['your vault notes (memory, recent activity and the skills list)'] : []),
     ...(plugins.instructions.length ? ['text from enabled plugins'] : []),
     ...(workspace ? ['your code workspace'] : [])
   ]
