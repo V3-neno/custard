@@ -202,8 +202,9 @@ export type ChatLink = { id: string; title: string; mode: Mode }
 export type ContextUse = {
   tokens: number
   budget: number
-  // Counted by the provider, or Custard's estimate.
-  exact: boolean
+  // Counted by the provider's token-counting endpoint (itself documented as
+  // an estimate), or Custard's own estimate.
+  counted: boolean
   // Past the share of the budget where the chat says it is getting long.
   warn: boolean
   model: string

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   chatModels,
   providerNames,
+  providerOf,
   type ChatLink,
   type Compaction,
   type Continuation,
@@ -57,7 +58,7 @@ export function LengthNotice({
       <span className="flex-1">
         {tooLong
           ? 'This chat is too long to go on. A new chat can carry on from here; this one stays as it is.'
-          : `This chat is getting long: ${use?.exact ? '' : 'about '}${share}% of what ${modelLabel(use!.model)} can take in. A new chat can carry on from here.`}
+          : `This chat is getting long: about ${share}% of what ${modelLabel(use!.model)} can take in (${use?.counted ? `counted by ${providerNames[providerOf(use.model)]}` : "Custard's estimate"}). A new chat can carry on from here.`}
       </span>
       <button onClick={onContinue} disabled={busy} className={pill}>
         Continue in a new chat

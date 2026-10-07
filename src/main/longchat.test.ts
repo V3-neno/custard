@@ -10,6 +10,7 @@ import {
   budgetFor,
   capResult,
   COMPACT_TRIGGER,
+  compactTrigger,
   estimateTokens,
   fromLastCompaction,
   isContextError,
@@ -37,7 +38,7 @@ import {
   type HandoffSummary
 } from './handoff'
 import { continueChat, continuationsOf, type ContinueDeps } from './continue'
-import { actionKey, TurnLog, type Call } from './turn'
+import { actionKey, repairInterrupted, TurnLog, type Call } from './turn'
 import { toInput } from './openai'
 import { buildEvidence, evidenceText } from './memory/evidence'
 import { searchExposure } from './web'
@@ -181,24 +182,33 @@ describe('context budget', () => {
     expect(budgetFor('gpt-6-luna')).toBe(Math.floor((1_050_000 - 64_000) * 0.95))
     // Unknown models get the smallest window, not the largest.
     expect(limitsFor('some-new-model').window).toBe(200_000)
-    // Compaction starts well before any compaction model's budget.
-    for (const m of ['claude-opus-5-5', 'claude-sonnet-5-5', 'gpt-6-astra', 'gpt-6.1-sol'])
-      expect(COMPACT_TRIGGER).toBeLessThan(budgetFor(m) * 0.5)
+  })
+
+  it("sets each model's compaction trigger from its own budget", () => {
+    // Large models: 400,000, under half their budget.
+    for (const m of ['claude-opus-5-5', 'claude-sonnet-5-5', 'gpt-6-astra', 'gpt-6-luna']) {
+      expect(compactTrigger(m)).toBe(COMPACT_TRIGGER)
+      expect(compactTrigger(m)).toBeLessThanOrEqual(budgetFor(m) * 0.5)
+    }
+    // A smaller window gets a lower trigger: half of Haiku's 129,200 budget.
+    expect(compactTrigger('claude-haiku-4-5')).toBe(64_600)
+    // Never below Claude's documented minimum of 50,000.
+    expect(compactTrigger('claude-unknown-small')).toBeGreaterThanOrEqual(50_000)
   })
 
   it('estimates conservatively and only asks the provider near the limit', async () => {
     const count = vi.fn(async () => 1)
     const small = await measure('claude-haiku-4-5', 1_000, count)
     expect(count).not.toHaveBeenCalled()
-    expect(small).toMatchObject({ exact: false, over: false, warn: false })
+    expect(small).toMatchObject({ counted: false, over: false, warn: false })
 
     const budget = budgetFor('claude-haiku-4-5')
     const near = await measure('claude-haiku-4-5', budget * 0.8, async () => budget * 0.8)
-    expect(near).toMatchObject({ exact: true, over: false, warn: true })
+    expect(near).toMatchObject({ counted: true, over: false, warn: true })
 
-    // The count is exact: a high estimate that counts low is not over.
+    // The provider's count wins: a high estimate that counts low is not over.
     const counted = await measure('claude-haiku-4-5', budget * 1.2, async () => budget * 0.6)
-    expect(counted).toMatchObject({ exact: true, over: false, warn: false })
+    expect(counted).toMatchObject({ counted: true, over: false, warn: false })
   })
 
   it('falls back to the estimate when counting fails', async () => {
@@ -206,7 +216,7 @@ describe('context budget', () => {
     const fit = await measure('gpt-6-astra', budget + 1, async () => {
       throw new Error('rate limited')
     })
-    expect(fit).toMatchObject({ exact: false, over: true, tokens: budget + 1 })
+    expect(fit).toMatchObject({ counted: false, over: true, tokens: budget + 1 })
   })
 
   it('counts system, tools and history in the estimate', () => {
@@ -258,12 +268,50 @@ describe('context errors', () => {
     expect(isContextError(new Error('prompt is too long'))).toBe(false)
   })
 
-  it('recognizes a model turning compaction down', () => {
-    expect(isCompactionRejected(anthropic(400, 'context_management: not supported'))).toBe(true)
-    expect(isCompactionRejected(openai(400, undefined, 'compact_threshold is not supported'))).toBe(
-      true
+  it('retries without compaction only on a definite "not supported" 400', () => {
+    expect(
+      isCompactionRejected(anthropic(400, 'context_management: Extra inputs are not permitted'))
+    ).toBe(true)
+    expect(
+      isCompactionRejected(anthropic(400, 'compact_20260112 is not supported on this model'))
+    ).toBe(true)
+    const param = OpenAI.APIError.generate(
+      400,
+      {
+        error: {
+          message: "Unsupported parameter: 'context_management'.",
+          type: 'invalid_request_error',
+          param: 'context_management',
+          code: 'unsupported_parameter'
+        }
+      },
+      undefined,
+      new Headers()
     )
-    expect(isCompactionRejected(anthropic(400, 'prompt is too long'))).toBe(false)
+    expect(isCompactionRejected(param)).toBe(true)
+  })
+
+  it('never treats ambiguous failures as "not supported"', () => {
+    // A 400 about compaction that isn't "unsupported" (a bad value).
+    expect(
+      isCompactionRejected(
+        anthropic(400, 'context_management.edits.0.trigger.value: must be >= 50000')
+      )
+    ).toBe(false)
+    // Too long, even when the message mentions compaction.
+    expect(
+      isCompactionRejected(anthropic(400, 'prompt is too long; compaction not supported'))
+    ).toBe(false)
+    // Server errors, rate limits and timeouts may have done work or may pass.
+    expect(isCompactionRejected(anthropic(500, 'context_management not supported'))).toBe(false)
+    expect(isCompactionRejected(anthropic(529, 'Overloaded'))).toBe(false)
+    expect(isCompactionRejected(openai(429, 'rate_limit_exceeded', 'compaction unsupported'))).toBe(
+      false
+    )
+    expect(isCompactionRejected(new Anthropic.APIConnectionTimeoutError())).toBe(false)
+    expect(isCompactionRejected(new OpenAI.APIConnectionError({ message: 'reset' }))).toBe(false)
+    // An error without a status (e.g. an error event mid-stream) is not it.
+    expect(isCompactionRejected(new Error('context_management is not supported'))).toBe(false)
   })
 })
 
@@ -420,6 +468,109 @@ describe('action record', () => {
     expect(model).toContain('Launch Friday 10:00')
     expect(model).toContain('Check whether the team email went out')
     expect(model).toContain('Never email customers directly')
+  })
+})
+
+describe('bounded record, complete records', () => {
+  // 300 write actions with long labels; the first one's outcome is unknown.
+  function busyChat(): Conversation {
+    const c = conv({ id: 'busy' })
+    c.messages.push({ role: 'user', content: 'do lots' })
+    c.actions = {}
+    for (let i = 0; i < 300; i++) {
+      const input = { n: i }
+      c.messages.push(
+        {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: `t${i}`, name: 'crm__update', input }]
+        },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: 'x' }] }
+      )
+      c.actions[`t${i}`] = {
+        name: 'crm__update',
+        label: `Update record ${i} ${'with a very long description '.repeat(20)}`,
+        write: true,
+        status: i === 0 ? 'unknown' : i % 3 ? 'completed' : 'failed',
+        key: actionKey('crm__update', input),
+        result: 'r'.repeat(5_000)
+      }
+    }
+    return c
+  }
+  const first: Call = {
+    id: 'again',
+    name: 'crm__update',
+    input: { n: 0 },
+    label: 'Update record 0',
+    write: true
+  }
+
+  it('caps what the model sees and keeps unknown outcomes first', () => {
+    const { text, counts } = actionLedger(busyChat())
+    expect(text.length).toBeLessThanOrEqual(HANDOFF_LIMITS.ledgerChars)
+    expect(text.startsWith('Outcome unknown')).toBe(true)
+    expect(text).toContain('Update record 0')
+    expect(text).toMatch(/more lines of the record left out for length/)
+    // The counts are complete even where the lines were cut.
+    expect(counts).toMatchObject({ unknown: 1, failed: 99, changes: 200 })
+  })
+
+  it('keeps every record in the chat itself', async () => {
+    const c = busyChat()
+    const s = store(c)
+    const r = await continueChat(s, 'busy')
+    if (!r.ok) throw new Error()
+    expect(Object.keys(s.all.get('busy')!.actions!)).toHaveLength(300)
+    expect(s.all.get('busy')!.actions!.t5.result).toHaveLength(5_000)
+    // The carried guard list is complete, not the shown text.
+    expect(r.conversation.continuedFrom!.unknown.map((u) => u.key)).toEqual([
+      actionKey('crm__update', { n: 0 })
+    ])
+  })
+
+  it('blocks a repeat in code even when the text never mentions it', async () => {
+    const c = busyChat()
+    // 80 more unknown outcomes push action 0 out of the shown record.
+    for (let i = 300; i < 380; i++) {
+      c.messages.push({
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: `t${i}`, name: 'crm__update', input: { n: i } }]
+      })
+      c.messages.push({
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: 'x' }]
+      })
+      c.actions![`t${i}`] = {
+        name: 'crm__update',
+        label: `Update record ${i}`,
+        write: true,
+        status: 'unknown',
+        key: actionKey('crm__update', { n: i })
+      }
+    }
+    const s = store(c)
+    const r = await continueChat(s, 'busy')
+    if (!r.ok) throw new Error()
+    expect(r.conversation.continuedFrom!.ledger).not.toMatch(/Update record 0 /)
+    // Saved and loaded again, as after a restart: the guard still holds.
+    const reloaded = JSON.parse(JSON.stringify(r.conversation)) as Conversation
+    expect(new TurnLog(reloaded, () => {}).unknownRepeat(first)).toBe(true)
+  })
+
+  it('holds across compaction and a crash mid-action', () => {
+    const c = busyChat()
+    // Custard was killed while action 0 ran; it was saved as running.
+    c.actions!.t0.status = 'running'
+    c.messages = c.messages.slice(0, 2)
+    recordClaudeCompaction(
+      c,
+      [{ type: 'compaction', content: 'Summary', encrypted_content: 'e' }] as BetaContentBlock[],
+      'claude-opus-5-5'
+    )
+    const reloaded = JSON.parse(JSON.stringify(c)) as Conversation
+    expect(repairInterrupted(reloaded)).toBe(true)
+    expect(reloaded.actions!.t0.status).toBe('unknown')
+    expect(new TurnLog(reloaded, () => {}).unknownRepeat(first)).toBe(true)
   })
 })
 

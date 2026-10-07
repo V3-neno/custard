@@ -274,7 +274,9 @@ http
                             ? 'compact'
                             : /too long test/.test(ask)
                               ? 'toolong'
-                              : 'plain'
+                              : /unsupported test/.test(ask)
+                                ? 'nocompact'
+                                : 'plain'
       // The provider says the request is too large.
       if (key === 'toolong')
         return j(400, {
@@ -282,6 +284,15 @@ http
           error: {
             type: 'invalid_request_error',
             message: 'prompt is too long: 1204511 tokens > 1000000 maximum'
+          }
+        })
+      // A model that doesn't take compaction rejects the setting up front.
+      if (key === 'nocompact' && b.context_management)
+        return j(400, {
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: 'context_management: Extra inputs are not permitted'
           }
         })
       if (key === 'error' && step === 1)
@@ -380,6 +391,7 @@ http
             text('Summarized and carrying on.')
           }
         ],
+        nocompact: ['Answered without compaction.'],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]

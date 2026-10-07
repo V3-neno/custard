@@ -21,7 +21,7 @@ import {
   recordOpenAICompaction,
   usesCompaction
 } from './compaction'
-import { COMPACT_TRIGGER, estimateTokens, openaiCounter } from './context'
+import { compactTrigger, estimateTokens, openaiCounter } from './context'
 
 type Emit = (e: ChatEvent) => void
 
@@ -150,7 +150,11 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
           // The server compacts once the input passes the threshold and
           // returns an encrypted compaction item; works with store: false.
           ...(compact
-            ? { context_management: [{ type: 'compaction', compact_threshold: COMPACT_TRIGGER }] }
+            ? {
+                context_management: [
+                  { type: 'compaction', compact_threshold: compactTrigger(turn.model) }
+                ]
+              }
             : {}),
           stream: true
         },

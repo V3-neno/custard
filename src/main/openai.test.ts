@@ -206,8 +206,17 @@ describe('OpenAI long chats (mocked Responses API)', () => {
         item: { id: 'old', encrypted_content: 'OLD' }
       }
     ]
-    const { t } = turn(c, 'gpt-6-astra')
+    const checked: number[] = []
+    const { t } = turn(c, 'gpt-6-astra', {
+      fits: async (estimate) => {
+        checked.push(estimate)
+        return true
+      }
+    })
     expect(await runOpenAI(t)).toBe('done')
+    // The replacement request (full history) was checked against the budget too.
+    expect(checked).toHaveLength(2)
+    expect(checked[1]).not.toBe(checked[0])
     const [first, second] = requests.filter((r) => r.path.endsWith('/responses'))
     expect(first.body.context_management).toBeDefined()
     expect((first.body.input as { type?: string }[])[0].type).toBe('compaction')
@@ -215,5 +224,76 @@ describe('OpenAI long chats (mocked Responses API)', () => {
     // The retry sends the full history instead of the item.
     expect(JSON.stringify(second.body.input)).not.toContain('OLD')
     expect(JSON.stringify(second.body.input)).toContain('earlier question')
+  })
+
+  it('does not send the replacement when it no longer fits', async () => {
+    requests.length = 0
+    replies = [
+      {
+        status: 400,
+        json: {
+          error: {
+            message: "Unsupported parameter: 'context_management'.",
+            type: 'invalid_request_error',
+            param: 'context_management',
+            code: 'unsupported_parameter'
+          }
+        }
+      }
+    ]
+    const c = conv()
+    c.compactions = [
+      {
+        after: 1,
+        at: 0,
+        provider: 'openai',
+        model: 'gpt-6.1-sol',
+        item: { id: 'old', encrypted_content: 'OLD' }
+      }
+    ]
+    let n = 0
+    const { t } = turn(c, 'gpt-6.1-sol', { fits: async () => n++ === 0 })
+    expect(await runOpenAI(t)).toBe('too-long')
+    expect(requests.filter((r) => r.path.endsWith('/responses'))).toHaveLength(1)
+  })
+
+  it('does not retry other 400s, or errors once a reply has started', async () => {
+    requests.length = 0
+    replies = [
+      {
+        status: 400,
+        json: {
+          error: {
+            message: 'Invalid value for compact_threshold: must be at least 1000.',
+            type: 'invalid_request_error',
+            param: 'context_management',
+            code: 'invalid_value'
+          }
+        }
+      }
+    ]
+    await expect(runOpenAI(turn(conv(), 'gpt-6-luna').t)).rejects.toThrow(/compact_threshold/)
+    expect(requests.filter((r) => r.path.endsWith('/responses'))).toHaveLength(1)
+
+    // Text has streamed, then the response fails: nothing is resent.
+    requests.length = 0
+    replies = [
+      {
+        events: [
+          { type: 'response.output_text.delta', delta: 'Partial', sequence_number: 1 },
+          {
+            type: 'error',
+            sequence_number: 2,
+            code: 'unsupported_parameter',
+            message: "Unsupported parameter: 'context_management'.",
+            param: 'context_management'
+          }
+        ]
+      }
+    ]
+    await expect(runOpenAI(turn(conv(), 'gpt-6-luna').t)).rejects.toThrow()
+    const sent = requests.filter((r) => r.path.endsWith('/responses'))
+    expect(sent).toHaveLength(1)
+    expect(sent[0].body.context_management).toBeDefined()
   })
 })

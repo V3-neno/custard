@@ -23,7 +23,11 @@ export const HANDOFF_LIMITS = {
   request: 1_200,
   answer: 800,
   result: 200,
+  // Entries shown per group, characters per label, and the whole record as
+  // the model sees it. Custard's own records are kept in full.
   ledger: 60,
+  label: 120,
+  ledgerChars: 12_000,
   maxTokens: 2_000,
   timeoutMs: 60_000,
   retries: 2
@@ -84,7 +88,7 @@ export function actionLedger(c: Conversation): {
   const changes = all.filter((a) => a.status === 'completed' && a.write)
   const reads = all.filter((a) => a.status === 'completed' && !a.write)
   const line = (a: ActionRecord): string =>
-    `- ${oneLine(a.label || a.name)} [${a.name}${a.write ? ', changes something' : ', read-only'}]: ${STATUS_WORDS[a.status]}${
+    `- ${cut(oneLine(a.label || a.name), HANDOFF_LIMITS.label)} [${a.name}${a.write ? ', changes something' : ', read-only'}]: ${STATUS_WORDS[a.status]}${
       a.result && !CONTENT_TOOLS.test(a.name) && a.status !== 'completed'
         ? ` (${redact(cut(oneLine(a.result), HANDOFF_LIMITS.result))})`
         : ''
@@ -98,7 +102,7 @@ export function actionLedger(c: Conversation): {
       ...(list.length > shown.length ? [`- …and ${list.length - shown.length} earlier`] : [])
     ]
   }
-  const text = [
+  const lines = [
     ...group('Outcome unknown (never repeat without checking or asking the user)', unknown),
     ...group('Failed', failed),
     ...group('Not run', notRun),
@@ -109,7 +113,25 @@ export function actionLedger(c: Conversation): {
     ...(reads.length
       ? [`Reads and searches that ran: ${reads.length} (their contents are not carried over).`]
       : [])
-  ].join('\n')
+  ]
+  // What the model sees is capped. Unknown outcomes come first, so a cut
+  // drops lines from the end (reads, then accepted changes, ...) before
+  // them. Custard's records themselves are never cut, and repeat protection
+  // reads those, not this text.
+  let text = lines.join('\n')
+  if (text.length > HANDOFF_LIMITS.ledgerChars) {
+    const kept: string[] = []
+    let used = 0
+    for (const l of lines) {
+      if (used + l.length + 1 > HANDOFF_LIMITS.ledgerChars - 120) break
+      kept.push(l)
+      used += l.length + 1
+    }
+    text = [
+      ...kept,
+      `[${lines.length - kept.length} more lines of the record left out for length. Custard still keeps every record and still checks before repeating any action whose outcome is unknown.]`
+    ].join('\n')
+  }
   return {
     text: text || 'No actions ran in the earlier chat.',
     counts: {

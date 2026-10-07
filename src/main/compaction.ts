@@ -7,7 +7,9 @@ import type {
   ResponseInputItem
 } from 'openai/resources/responses/responses'
 import type { Conversation } from '../shared/chat'
-import { limitsFor } from './context'
+import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
+import { isContextError, limitsFor } from './context'
 
 // Provider compaction: the provider summarizes everything before a point and
 // later requests send that summary instead. Custard keeps every message as it
@@ -21,10 +23,24 @@ export const compactionRefused = (model: string): void => void refused.add(model
 export const usesCompaction = (model: string): boolean =>
   limitsFor(model).compaction && !refused.has(model)
 
-// A 400 that names the compaction setting: the model or account doesn't take it.
-export const isCompactionRejected = (err: unknown): boolean => {
-  const e = err as { status?: number; message?: string }
-  return e?.status === 400 && /compact|context_management|context-management/i.test(e.message ?? '')
+// Only a definite "this model doesn't take compaction": a 400 (rejected
+// before anything ran) naming the compaction setting and saying it is
+// unsupported. Timeouts, 5xx, rate limits, context-length errors and any
+// error once a reply has started are not this, and are never retried here.
+const NAMES_COMPACTION = /context_management|context-management|compact/i
+const UNSUPPORTED =
+  /not supported|unsupported|does not support|unknown parameter|unrecognized|extra inputs are not permitted|not permitted|not available|invalid beta/i
+export function isCompactionRejected(err: unknown): boolean {
+  if (isContextError(err)) return false
+  if (err instanceof Anthropic.APIError)
+    return err.status === 400 && NAMES_COMPACTION.test(err.message) && UNSUPPORTED.test(err.message)
+  if (err instanceof OpenAI.APIError)
+    return (
+      err.status === 400 &&
+      (err.param === 'context_management' || NAMES_COMPACTION.test(err.message)) &&
+      (err.code === 'unsupported_parameter' || UNSUPPORTED.test(err.message))
+    )
+  return false
 }
 
 // Claude history for one model. Compaction blocks go only to a model that
@@ -44,14 +60,17 @@ export function claudeHistory(messages: BetaMessageParam[], model: string): Beta
 }
 
 // Records a Claude compaction: the block stays in the assistant message at
-// `after`, which the API drops everything before.
+// `after`, which the API drops everything before. A block with no content is
+// a compaction that failed (the API treats it as a no-op), so it isn't shown
+// as one.
 export function recordClaudeCompaction(
   c: Conversation,
   content: BetaContentBlock[],
   model: string,
   now = Date.now()
 ): boolean {
-  if (!content.some((b) => b.type === 'compaction')) return false
+  if (!content.some((b) => b.type === 'compaction' && typeof b.content === 'string' && b.content))
+    return false
   ;(c.compactions ??= []).push({ after: c.messages.length, at: now, provider: 'claude', model })
   return true
 }

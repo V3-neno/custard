@@ -31,7 +31,7 @@ import { continueChat } from './continue'
 import {
   claudeCounter,
   capResult,
-  COMPACT_TRIGGER,
+  compactTrigger,
   COMPACTION_INSTRUCTIONS,
   estimateTokens,
   fromLastCompaction,
@@ -276,7 +276,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     conversation.context = {
       tokens: fit.tokens,
       budget: fit.budget,
-      exact: fit.exact,
+      counted: fit.counted,
       warn: fit.warn,
       model: model.id
     }
@@ -434,7 +434,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         edits: [
           {
             type: 'compact_20260112',
-            trigger: { type: 'input_tokens', value: COMPACT_TRIGGER },
+            trigger: { type: 'input_tokens', value: compactTrigger(model.id) },
             instructions: COMPACTION_INSTRUCTIONS
           }
         ]

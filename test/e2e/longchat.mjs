@@ -349,10 +349,36 @@ try {
   await idle()
   const nearText = await w.locator(length).textContent()
   check(
-    /79% of what Opus 5.5 can take in/.test(nearText) && !/about/.test(nearText),
+    /about 79% of what Opus 5.5 can take in \(counted by Claude\)/.test(nearText),
     `the counted share is shown (${nearText.trim().slice(0, 80)})`
   )
   await shot('step3-07-near-limit')
+
+  // Last: after this, compaction stays off for Opus for the rest of the session.
+  step('A model that rejects compaction: one retry without it, checked again first')
+  await newChat()
+  await send('plain warmup')
+  await w.waitForSelector('text=OK.', { timeout: 30000 })
+  await idle()
+  const countsBefore = readJson('counts.json').length
+  const betasBefore = readJson('betas.json').length
+  await w.fill('textarea', 'unsupported test ' + 'z'.repeat(1_400_000))
+  await w.keyboard.press('Enter')
+  await w.waitForSelector('text=Answered without compaction.', { timeout: 60000 })
+  await idle()
+  const tries = readJson('betas.json').slice(betasBefore)
+  check(
+    tries.length === 2 && tries[0].context_management && !tries[1].context_management,
+    'the rejected request asked for compaction; the one retry did not'
+  )
+  check(
+    !/compact-2026-01-12/.test(tries[1].beta ?? ''),
+    'and dropped the compaction beta header'
+  )
+  check(
+    readJson('counts.json').length - countsBefore === 2,
+    'the replacement request was counted against the budget before it was sent'
+  )
 } catch (e) {
   await shot('step3-fail').catch(() => {})
   console.log(e)
