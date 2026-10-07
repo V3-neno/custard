@@ -4,14 +4,13 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
-import { registerChatHandlers } from './chat'
+import { openConversation, registerChatHandlers } from './chat'
 import { handle } from './ipc'
 import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
 import { isPluginContents } from './plugins/runtime'
 import {
   deleteConversation,
   getChatSettings,
-  getConversation,
   getVaultPath,
   listConversations,
   setChatSettings,
@@ -87,7 +86,7 @@ app.whenReady().then(() => {
   handle('settings:get', () => getChatSettings())
   handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
   handle('conversations:list', (_, mode: Mode) => listConversations(mode))
-  handle('conversations:get', (_, id: string) => getConversation(id))
+  handle('conversations:get', (_, id: string) => openConversation(id))
   handle('conversations:delete', (_, id: string) => deleteConversation(id))
   handle('vault:get', () => vaultInfo())
   handle('vault:pick', async (e) => {

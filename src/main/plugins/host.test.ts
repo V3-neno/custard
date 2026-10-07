@@ -60,10 +60,29 @@ const vmRuntime: RuntimeFactory = async ({ code, onCap, onExit }) => {
     tools: bridge.tools(),
     handle: {
       dispose: () => void (dead = true),
-      call: async (callId, tool, input, config, _timeoutMs, signal) => {
-        if (dead) return { content: 'not running', isError: true }
+      // Like the real runtime: a call cut short by a timeout or a cancel
+      // after it was sent is marked interrupted.
+      call: async (callId, tool, input, config, timeoutMs, signal) => {
+        if (dead) return { content: 'not running', isError: true, notSent: true }
         signal.addEventListener('abort', () => bridge.cancel(callId))
-        return bridge.call(callId, tool, JSON.parse(JSON.stringify(input)), config)
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timedOut = new Promise<ToolOutcome>((res) => {
+          timer = setTimeout(
+            () =>
+              res({
+                content: 'The plugin did not answer in time.',
+                isError: true,
+                interrupted: true
+              }),
+            timeoutMs
+          )
+        })
+        const r = await Promise.race([
+          bridge.call(callId, tool, JSON.parse(JSON.stringify(input)), config),
+          timedOut
+        ])
+        clearTimeout(timer)
+        return signal.aborted ? { ...r, interrupted: true } : r
       }
     }
   }
@@ -181,7 +200,13 @@ export default definePlugin({
       const r = await ctx.fetch(url, { auth })
       return 'status ' + r.status + ' ' + (await r.text())
     },
-    act: ({ text }) => { (globalThis as any).actCalls = ((globalThis as any).actCalls ?? 0) + 1; return 'done ' + text },
+    act: ({ text }, ctx) => {
+      (globalThis as any).actCalls = ((globalThis as any).actCalls ?? 0) + 1
+      if (text === 'fail') throw new PluginError('could not do it')
+      // Accepted, but the answer never comes back.
+      if (text === 'hang') return new Promise((resolve) => ctx.signal.addEventListener('abort', () => resolve('aborted')))
+      return 'done ' + text
+    },
     slow: (_i, ctx) => new Promise((resolve) => ctx.signal.addEventListener('abort', () => resolve('aborted'))),
     open: async ({ url }, ctx) => { await ctx.openExternal(url); return 'opened' },
     remember: async ({ v }, ctx) => { await ctx.storage.set('v', v); return String(await ctx.storage.get('v')) },
@@ -327,7 +352,8 @@ describe('activation and permissions', () => {
     expect(set.instructions[0]).toContain('Use demo tools carefully.')
     expect(await invoke('demo__echo', { text: 'you' })).toEqual({
       content: 'hello you',
-      isError: false
+      isError: false,
+      outcome: 'completed'
     })
   })
 
@@ -363,7 +389,8 @@ describe('activation and permissions', () => {
     })
     expect(await invoke('demo__echo', { text: 'a' })).toEqual({
       content: 'hello a',
-      isError: false
+      isError: false,
+      outcome: 'completed'
     })
   })
 
@@ -402,7 +429,8 @@ describe('invocation-time checks', () => {
     const r = await invoke('demo__act', { text: 'x' }, stale)
     expect(r).toEqual({
       content: 'The demo plugin is disabled, so this call was not run.',
-      isError: true
+      isError: true,
+      outcome: 'not-run'
     })
   })
 
@@ -471,6 +499,82 @@ describe('invocation-time checks', () => {
     const p = invoke('demo__slow', {}, undefined, yes, c.signal)
     setTimeout(() => c.abort(), 10)
     expect((await p).content).toBe('aborted')
+  })
+})
+
+describe('what became of a call', () => {
+  const withTimeouts = (): Record<string, unknown> => {
+    const m = manifest()
+    m.tools = (m.tools as Record<string, unknown>[]).map((t) =>
+      t.name === 'act' || t.name === 'slow' ? { ...t, timeoutMs: 1000 } : t
+    )
+    return m
+  }
+
+  it('completed, or failed when the plugin reports an error', async () => {
+    writePlugin({})
+    await activate()
+    expect((await invoke('demo__act', { text: 'x' })).outcome).toBe('completed')
+    const r = await invoke('demo__act', { text: 'fail' })
+    expect(r).toMatchObject({ outcome: 'failed', content: 'could not do it' })
+  })
+
+  it('not run when refused before the plugin was called', async () => {
+    writePlugin({})
+    await activate()
+    expect((await invoke('demo__act', { text: 'x' }, undefined, no)).outcome).toBe('not-run')
+    expect((await invoke('demo__act', { text: 5 })).outcome).toBe('not-run')
+    expect((await invoke('demo__nope', {})).outcome).toBe('not-run')
+    // Stopped while the approval card was up.
+    const c = new AbortController()
+    const r = await invoke(
+      'demo__act',
+      { text: 'x' },
+      undefined,
+      async () => {
+        c.abort()
+        return false
+      },
+      c.signal
+    )
+    expect(r).toMatchObject({
+      outcome: 'not-run',
+      content: 'Stopped before it ran, so nothing was done.'
+    })
+  })
+
+  it('unknown when a write times out after it was sent; a read is just failed', async () => {
+    writePlugin({}, withTimeouts())
+    await activate()
+    const w = await invoke('demo__act', { text: 'hang' })
+    expect(w).toMatchObject({ outcome: 'unknown', isError: true })
+    const r = await invoke('demo__slow', {})
+    expect(r).toMatchObject({ outcome: 'failed', isError: true })
+  }, 10_000)
+
+  it('unknown when a running write is stopped', async () => {
+    writePlugin({})
+    await activate()
+    const c = new AbortController()
+    const p = invoke('demo__act', { text: 'hang' }, undefined, yes, c.signal)
+    setTimeout(() => c.abort(), 20)
+    expect((await p).outcome).toBe('unknown')
+  })
+
+  it('skips the question for a call the user already approved', async () => {
+    writePlugin({})
+    await activate()
+    const r = await host.invoke(
+      'demo__act',
+      { text: 'x' },
+      {
+        snapshot: host.toolSet().snapshot,
+        signal: new AbortController().signal,
+        approve: no,
+        preApproved: true
+      }
+    )
+    expect(r).toMatchObject({ outcome: 'completed', content: 'done x' })
   })
 })
 

@@ -55,6 +55,30 @@ export type ConversationSummary = {
   updatedAt: number
 }
 
+// What became of one tool call. Saved as it changes, so a chat reloaded after
+// a crash still knows which actions ran.
+//   completed / failed: it ran and reported success or an error.
+//   not-run: nothing was done (declined, stopped before it started, refused).
+//   unknown: a write was already sent when it timed out, crashed or was
+//   stopped, so it may or may not have taken effect.
+export type ActionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'not-run' | 'unknown'
+
+export type ActionRecord = {
+  name: string
+  label: string
+  write: boolean
+  status: ActionStatus
+  // Name and input together, to spot a repeat of an unknown-outcome action.
+  key: string
+  // What the call returned (or why it didn't run), as sent to the model.
+  result?: string
+}
+
+export type NoticeKind = 'stopped' | 'error' | 'interrupted' | 'cut-off' | 'step-limit'
+
+// Shown in the chat after message `after - 1`.
+export type Notice = { after: number; kind: NoticeKind; text: string }
+
 export type Conversation = ConversationSummary & {
   createdAt: number
   // Code mode only: which folder the file tools may touch. Fixed when the
@@ -63,6 +87,9 @@ export type Conversation = ConversationSummary & {
   // Exactly what is sent to the API, so assistant turns keep their thinking
   // blocks unchanged between requests.
   messages: BetaMessageParam[]
+  // By tool_use id.
+  actions?: Record<string, ActionRecord>
+  notices?: Notice[]
 }
 
 export type ChatEvent =
@@ -74,7 +101,7 @@ export type ChatEvent =
       type: 'tool'
       id: string
       label: string
-      status: 'running' | 'done' | 'error'
+      status: 'running' | 'done' | 'error' | 'not-run' | 'unknown'
       write?: boolean
     }
   // A plugin action waits for the user's go-ahead.
@@ -85,10 +112,20 @@ export type ChatEvent =
       plugin: string
       label: string
       detail: string
+      // Set when this repeats an action whose outcome is unknown.
+      warning?: string
     }
   | { requestId: string; type: 'approval-done'; id: string }
   | { requestId: string; type: 'done'; conversation: Conversation }
-  | { requestId: string; type: 'error'; message: string; conversation: Conversation | null }
+  // `kept`: the turn stayed in the history (something had already happened),
+  // so the message must not be put back in the box to be sent again.
+  | {
+      requestId: string
+      type: 'error'
+      message: string
+      conversation: Conversation | null
+      kept: boolean
+    }
 
 export type SendChatRequest = {
   requestId: string

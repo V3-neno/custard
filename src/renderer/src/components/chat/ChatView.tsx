@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import {
   modes,
   providerNames,
   providerOf,
+  type ActionRecord,
   type ChatSettings,
   type Conversation,
   type ConversationSummary,
@@ -13,14 +14,16 @@ import HistoryDrawer from '../HistoryDrawer'
 import ModeBubbles from '../ModeBubbles'
 import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
-import MessageView, { UserBubble } from './MessageView'
+import MessageView, { NoticeLine, UserBubble } from './MessageView'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
 import type { Workspace } from '../../../../shared/plugins'
 type Live = { requestId: string; userText: string; segments: Segment[]; approvals: Approval[] }
 
 const isToolResults = (m: BetaMessageParam | undefined): boolean =>
-  !!m && typeof m.content !== 'string' && m.content.every((b) => b.type === 'tool_result')
+  !!m && typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
+
+const CONTINUE = 'Continue from where you were cut off.'
 
 // Streamed text joins the previous segment of the same kind, or starts a new one.
 function appendText(segments: Segment[], kind: 'thinking' | 'text', text: string): Segment[] {
@@ -125,7 +128,13 @@ function ChatView(props: Props): React.JSX.Element {
                   ...l,
                   approvals: [
                     ...l.approvals,
-                    { id: e.id, plugin: e.plugin, label: e.label, detail: e.detail }
+                    {
+                      id: e.id,
+                      plugin: e.plugin,
+                      label: e.label,
+                      detail: e.detail,
+                      warning: e.warning
+                    }
                   ]
                 }
             )
@@ -138,7 +147,9 @@ function ChatView(props: Props): React.JSX.Element {
             pending.current = null
             setCurrent(e.conversation)
             setLive(null)
-            if (e.type === 'error') {
+            // When the turn was kept, what happened is in the chat with a
+            // notice, and the message isn't put back to be sent twice.
+            if (e.type === 'error' && !e.kept) {
               setError(e.message)
               setDraft(p.userText)
             }
@@ -187,14 +198,22 @@ function ChatView(props: Props): React.JSX.Element {
     refreshList()
   }
 
-  const failedTools = useMemo(() => {
-    const ids = new Set<string>()
+  // Each tool call's outcome. Chats saved before outcomes were recorded only
+  // know which calls failed.
+  const actions = useMemo(() => {
+    const all: Record<string, ActionRecord> = { ...(current?.actions ?? {}) }
     for (const m of current?.messages ?? [])
       if (typeof m.content !== 'string')
         for (const b of m.content)
-          if (b.type === 'tool_result' && b.is_error) ids.add(b.tool_use_id)
-    return ids
+          if (b.type === 'tool_result' && b.is_error && !all[b.tool_use_id])
+            all[b.tool_use_id] = { name: '', label: '', write: false, status: 'failed', key: '' }
+    return all
   }, [current])
+
+  const notices = current?.notices ?? []
+  const lastNotice = notices[notices.length - 1]
+  const canContinue =
+    !live && lastNotice?.kind === 'cut-off' && lastNotice.after === current?.messages.length
 
   const empty = !current && !live
   const modeLabel = modes.find((m) => m.id === mode)?.label ?? 'Chat'
@@ -223,14 +242,27 @@ function ChatView(props: Props): React.JSX.Element {
           </div>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 pt-8 pb-6">
-            {current?.messages.map((m, i) =>
-              isToolResults(m) ? null : (
-                // A reply that continues after vault actions sits flush with the part before it.
-                <div key={i} className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
-                  <MessageView message={m} failedTools={failedTools} />
-                </div>
-              )
-            )}
+            {current?.messages.map((m, i) => (
+              <Fragment key={i}>
+                {!isToolResults(m) && (
+                  // A reply that continues after vault actions sits flush with the part before it.
+                  <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
+                    <MessageView message={m} actions={actions} />
+                  </div>
+                )}
+                {notices
+                  .filter((n) => n.after === i + 1)
+                  .map((n, j) => (
+                    <NoticeLine
+                      key={j}
+                      notice={n}
+                      onContinue={
+                        canContinue && n === lastNotice ? () => send(CONTINUE) : undefined
+                      }
+                    />
+                  ))}
+              </Fragment>
+            ))}
             {live && (
               <>
                 <UserBubble text={live.userText} />

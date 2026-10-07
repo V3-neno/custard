@@ -10,8 +10,8 @@ import type {
   ResponseInputItem,
   ResponseOutputItem
 } from 'openai/resources/responses/responses'
-import type { ChatEvent, Conversation, Effort } from '../shared/chat'
-import { saveConversation } from './store'
+import type { ChatEvent, Effort } from '../shared/chat'
+import type { TurnLog } from './turn'
 
 type Emit = (e: ChatEvent) => void
 
@@ -22,19 +22,20 @@ type Turn = {
   model: string
   effort: Effort
   instructions: string
-  conversation: Conversation
   // The history as sent this time (calls to unavailable tools turned into text).
   history: BetaMessageParam[]
   tools: BetaTool[]
   signal: AbortSignal
   emit: Emit
-  runTool: (
-    id: string,
-    name: string,
-    input: unknown
-  ) => Promise<{ content: string; isError: boolean }>
-  onText: (text: string) => void
+  // Records the reply and each tool call as it happens (see turn.ts).
+  log: TurnLog
+  runRound: (
+    calls: { id: string; name: string; input: unknown }[]
+  ) => Promise<BetaToolResultBlockParam[]>
 }
+
+// How the turn ended, when not with a normal final answer.
+export type OpenAIEnd = 'done' | 'cut-off' | 'cut-off-tool' | 'step-limit'
 
 const toFunctionTool = (t: BetaTool): FunctionTool => ({
   type: 'function',
@@ -99,8 +100,8 @@ function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
   return blocks
 }
 
-export async function runOpenAI(turn: Turn): Promise<void> {
-  const { conversation, emit, requestId } = turn
+export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
+  const { emit, requestId, log } = turn
   const client = new OpenAI({ apiKey: turn.apiKey })
   const input = toInput(turn.history)
 
@@ -129,7 +130,7 @@ export async function runOpenAI(turn: Turn): Promise<void> {
       } else if (event.type === 'response.reasoning_summary_part.done') {
         emit({ requestId, type: 'thinking', text: '\n\n' })
       } else if (event.type === 'response.output_text.delta') {
-        turn.onText(event.delta)
+        log.text(event.delta)
         emit({ requestId, type: 'text', text: event.delta })
       } else if (event.type === 'response.completed') {
         output = event.response.output
@@ -144,26 +145,24 @@ export async function runOpenAI(turn: Turn): Promise<void> {
     }
 
     const calls = output.filter((o) => o.type === 'function_call')
-    if (incomplete && calls.length > 0)
-      throw new Error('The reply was cut off in the middle of a tool action. Try again.')
+    if (incomplete && calls.length > 0) return 'cut-off-tool'
     const blocks = toBlocks(output)
-    if (blocks.length > 0) conversation.messages.push({ role: 'assistant', content: blocks })
-    if (calls.length === 0) return
+    log.addAssistant(blocks)
+    if (incomplete) return 'cut-off'
+    if (calls.length === 0) return 'done'
 
     // One after another, in order.
-    const results: BetaToolResultBlockParam[] = []
-    for (const c of calls) {
-      const block = blocks.find((b) => b.type === 'tool_use' && b.id === c.call_id)
-      const r = await turn.runTool(c.call_id, c.name, block?.type === 'tool_use' ? block.input : {})
-      results.push({
-        type: 'tool_result',
-        tool_use_id: c.call_id,
-        content: r.content,
-        is_error: r.isError
+    const results = await turn.runRound(
+      calls.map((c) => {
+        const block = blocks.find((b) => b.type === 'tool_use' && b.id === c.call_id)
+        return {
+          id: c.call_id,
+          name: c.name,
+          input: block?.type === 'tool_use' ? block.input : {}
+        }
       })
-    }
-    conversation.messages.push({ role: 'user', content: results })
-    saveConversation(conversation)
+    )
+    if (turn.signal.aborted) return 'done'
     input.push(
       ...(output as ResponseInputItem[]),
       ...results.map((r): ResponseInputItem => ({
@@ -173,4 +172,5 @@ export async function runOpenAI(turn: Turn): Promise<void> {
       }))
     )
   }
+  return 'step-limit'
 }

@@ -138,7 +138,8 @@ export const createRuntime =
       for (const [, done] of pending)
         done({
           content: `The plugin stopped (${reason}), so the call did not finish.`,
-          isError: true
+          isError: true,
+          interrupted: true
         })
       pending.clear()
       if (!win.isDestroyed()) {
@@ -199,7 +200,8 @@ export const createRuntime =
         signal: AbortSignal
       ) =>
         new Promise<ToolOutcome>((resolve) => {
-          if (disposed) return resolve({ content: 'The plugin is not running.', isError: true })
+          if (disposed)
+            return resolve({ content: 'The plugin is not running.', isError: true, notSent: true })
           let settled = false
           const settle = (r: ToolOutcome): void => {
             if (settled) return
@@ -212,7 +214,7 @@ export const createRuntime =
           // Cancel, then make sure the window still answers. A busy loop
           // can't even receive the cancel, so it is killed.
           const stop = (why: string): void => {
-            settle({ content: why, isError: true })
+            settle({ content: why, isError: true, interrupted: true })
             if (disposed || wc.isDestroyed()) return
             wc.send('plugin-host:cancel', callId)
             const kill = setTimeout(
@@ -232,7 +234,9 @@ export const createRuntime =
             timeoutMs
           )
           const onAbort = (): void => stop('The call was cancelled.')
-          if (signal.aborted) return onAbort()
+          // Cancelled before it was sent: nothing reached the plugin.
+          if (signal.aborted)
+            return settle({ content: 'The call was cancelled.', isError: true, notSent: true })
           signal.addEventListener('abort', onAbort)
           pending.set(callId, settle)
           wc.send('plugin-host:call', callId, tool, input, config)

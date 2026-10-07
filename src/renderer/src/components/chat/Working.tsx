@@ -7,7 +7,7 @@ export type Segment =
       kind: 'tool'
       id: string
       label: string
-      status: 'running' | 'done' | 'error'
+      status: 'running' | 'done' | 'error' | 'not-run' | 'unknown'
       write?: boolean
     }
   | { kind: 'fallback'; to: string }
@@ -15,11 +15,17 @@ export type Segment =
 type Stage = {
   label: string
   detail?: string
-  status: 'active' | 'done' | 'error'
+  status: 'active' | 'done' | 'error' | 'skipped'
   orb: OrbState
 }
 
-export type Approval = { id: string; plugin: string; label: string; detail: string }
+export type Approval = {
+  id: string
+  plugin: string
+  label: string
+  detail: string
+  warning?: string
+}
 
 // The latest line of the thinking summary, as a hint of what it's on now.
 function latestThought(text: string): string | undefined {
@@ -45,7 +51,20 @@ function toStages(segments: Segment[]): Stage[] {
     if (seg.kind === 'tool')
       stages.push({
         label: seg.label,
-        status: seg.status === 'error' ? 'error' : seg.status === 'running' ? 'active' : 'done',
+        detail:
+          seg.status === 'unknown'
+            ? 'Outcome unknown'
+            : seg.status === 'not-run'
+              ? 'Not run'
+              : undefined,
+        status:
+          seg.status === 'error' || seg.status === 'unknown'
+            ? 'error'
+            : seg.status === 'not-run'
+              ? 'skipped'
+              : seg.status === 'running'
+                ? 'active'
+                : 'done',
         orb: seg.write ? 'weaving' : 'searching'
       })
     else if (seg.kind === 'fallback')
@@ -80,6 +99,7 @@ function ApprovalCard({ a }: { a: Approval }): React.JSX.Element {
       <p className="text-sm text-ash-100">
         <span className="text-molten-200">{a.plugin}</span> wants to: {a.label}
       </p>
+      {a.warning && <p className="mt-2 text-sm text-ember-600">{a.warning}</p>}
       {a.detail && a.detail !== '{}' && (
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-forge-950 p-2 text-[11px] text-ash-400">
           {a.detail}
@@ -93,13 +113,15 @@ function ApprovalCard({ a }: { a: Approval }): React.JSX.Element {
         >
           Allow
         </button>
-        <button
-          disabled={busy}
-          onClick={() => answer('chat')}
-          className="rounded-lg border border-forge-700 px-3 py-1.5 text-sm text-ash-300 hover:text-molten-200 disabled:opacity-40"
-        >
-          Allow for this chat
-        </button>
+        {!a.warning && (
+          <button
+            disabled={busy}
+            onClick={() => answer('chat')}
+            className="rounded-lg border border-forge-700 px-3 py-1.5 text-sm text-ash-300 hover:text-molten-200 disabled:opacity-40"
+          >
+            Allow for this chat
+          </button>
+        )}
         <button
           disabled={busy}
           onClick={() => answer('deny')}
@@ -137,7 +159,13 @@ function Working({
                       : 'text-molten-200'
                 }`}
               >
-                {s.status === 'done' ? '✓' : s.status === 'error' ? '✕' : '●'}
+                {s.status === 'done'
+                  ? '✓'
+                  : s.status === 'error'
+                    ? '✕'
+                    : s.status === 'skipped'
+                      ? '–'
+                      : '●'}
               </span>
               <span
                 className={`truncate ${s.status === 'active' ? 'text-ash-100' : s.status === 'error' ? 'text-ember-600' : 'text-ash-400'}`}
@@ -148,9 +176,10 @@ function Working({
             <div
               className={`stage-track mt-1.5 ml-6 ${s.status === 'active' ? 'is-active' : ''}`}
             />
-            {s.status === 'active' && s.detail && (
-              <p className="mt-1.5 ml-6 truncate text-[11px] text-ash-500">{s.detail}</p>
-            )}
+            {(s.status === 'active' || s.status === 'error' || s.status === 'skipped') &&
+              s.detail && (
+                <p className="mt-1.5 ml-6 truncate text-[11px] text-ash-500">{s.detail}</p>
+              )}
           </li>
         ))}
       </ol>

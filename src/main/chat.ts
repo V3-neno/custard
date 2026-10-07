@@ -20,8 +20,10 @@ import { handle, on } from './ipc'
 import { pluginHost, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
 import { workspaceTools } from './workspace'
+import { repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
   chatModels,
+  type ActionStatus,
   type ApprovalDecision,
   providerNames,
   type ChatEvent,
@@ -63,6 +65,56 @@ const MODE_PROMPTS: Record<Mode, string> = {
 const MAX_STEPS = 25
 
 const running = new Map<string, AbortController>()
+// Conversations with a turn in progress; they're never repaired from disk.
+const active = new Set<string>()
+
+// Loads a conversation, closing a turn that Custard quit or crashed in the
+// middle of (see repairInterrupted).
+export function openConversation(id: string): Conversation | null {
+  const c = getConversation(id)
+  if (c && !active.has(c.id) && repairInterrupted(c)) saveConversation(c)
+  return c
+}
+
+const settledStatus: Record<ActionStatus, 'done' | 'error' | 'not-run' | 'unknown' | 'running'> = {
+  pending: 'running',
+  running: 'running',
+  completed: 'done',
+  failed: 'error',
+  'not-run': 'not-run',
+  unknown: 'unknown'
+}
+
+const pluginName = (id: string): string => {
+  try {
+    return pluginHost().status(id).name
+  } catch {
+    return id
+  }
+}
+
+// Plain-language provider errors.
+function describeError(err: unknown, provider: string): string {
+  if (err instanceof Anthropic.AuthenticationError || err instanceof OpenAI.AuthenticationError)
+    return `Your ${provider} API key was rejected. Check it in Settings.`
+  if (err instanceof Anthropic.RateLimitError || err instanceof OpenAI.RateLimitError) {
+    const after = Number(err.headers?.get?.('retry-after'))
+    return `${provider} is limiting requests right now.${after > 0 ? ` Try again in ${Math.ceil(after)} seconds.` : ' Try again shortly.'}`
+  }
+  if (
+    err instanceof Anthropic.APIConnectionTimeoutError ||
+    err instanceof OpenAI.APIConnectionTimeoutError
+  )
+    return `${provider} took too long to answer.`
+  if (err instanceof Anthropic.APIConnectionError || err instanceof OpenAI.APIConnectionError)
+    return `Couldn't reach ${provider}. Check your internet connection.`
+  if (err instanceof Anthropic.APIError || err instanceof OpenAI.APIError) {
+    if (err.status === 529 || err.status === 503)
+      return `${provider} is overloaded right now. Try again shortly.`
+    return `${provider} returned an error${err.status ? ` (${err.status})` : ''}: ${err.message}`
+  }
+  return err instanceof Error ? err.message : String(err)
+}
 
 // Plugin actions waiting for the user, and the ones allowed for the rest of a chat.
 const approvals = new Map<string, { requestId: string; resolve: (d: ApprovalDecision) => void }>()
@@ -85,32 +137,25 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     if (!sender.isDestroyed()) sender.send('chat:event', e)
   }
   const model = chatModels.find((m) => m.id === req.settings.model) ?? chatModels[0]
+  const provider = providerNames[model.provider]
   const apiKey = getApiKey(model.provider)
-  if (!apiKey) {
-    emit({
-      requestId,
-      type: 'error',
-      message: `Add your ${providerNames[model.provider]} API key in Settings first.`,
-      conversation: null
-    })
-    return
-  }
+  const refuse = (message: string): void =>
+    emit({ requestId, type: 'error', message, conversation: null, kept: false })
+  if (!apiKey) return refuse(`Add your ${provider} API key in Settings first.`)
 
-  const existing = (req.conversationId && getConversation(req.conversationId)) || null
+  const existing = (req.conversationId && openConversation(req.conversationId)) || null
+  if (existing && active.has(existing.id))
+    return refuse('This chat is still answering. Wait for it to finish or stop it first.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
   if (!existing && req.mode === 'code')
     try {
       conversation.workspace = verifyWorkspace(req.workspace)
     } catch (err) {
-      emit({
-        requestId,
-        type: 'error',
-        message: err instanceof Error ? err.message : String(err),
-        conversation: null
-      })
-      return
+      return refuse(err instanceof Error ? err.message : String(err))
     }
-  const startLength = conversation.messages.length
+  // Created before the user's message goes in, so it can be taken back out
+  // if nothing at all happens.
+  const log = new TurnLog(conversation, saveConversation)
   conversation.messages.push({ role: 'user', content: req.text })
 
   const controller = new AbortController()
@@ -134,23 +179,26 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         ...plugins.instructions
       ].join('\n\n')
     })
+  system.push({
+    type: 'text',
+    text: 'Tool results start with "Not run:" when nothing was done and "Outcome unknown:" when an action was sent but its result is not known. Report these to the user as they are, and never repeat an action whose outcome is unknown without checking or asking first.'
+  })
 
   const tools: BetaTool[] = [
     ...(vaultReady ? vaultTools : []),
     ...(workspace?.tools ?? []),
     ...plugins.tools
   ]
+  const available = new Set(tools.map((t) => t.name))
   // Calls in the history to tools that aren't offered now go in as text.
-  const sent = withoutUnavailableTools(conversation.messages, new Set(tools.map((t) => t.name)))
-  const push = (m: Conversation['messages'][number]): void => {
-    conversation.messages.push(m)
-    if (sent !== conversation.messages) sent.push(m)
-  }
+  const history = (): Conversation['messages'] =>
+    withoutUnavailableTools(conversation.messages, available)
 
-  // Asks the user before a plugin action, unless they allowed it for this chat.
-  const approve = async (r: ApprovalRequest): Promise<boolean> => {
+  // Asks the user before an action, unless they allowed it for this chat. A
+  // repeat of an action whose outcome is unknown (`warning`) always asks.
+  const approve = async (r: ApprovalRequest, warning?: string): Promise<boolean> => {
     const key = `${conversation.id}:${r.pluginId}:${r.tool}`
-    if (allowedInChat.has(key)) return true
+    if (!warning && allowedInChat.has(key)) return true
     if (controller.signal.aborted) return false
     const id = randomUUID()
     let detail = ''
@@ -159,49 +207,100 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     } catch {
       // Leave it empty.
     }
-    emit({ requestId, type: 'approval', id, plugin: r.pluginName, label: r.label, detail })
+    emit({
+      requestId,
+      type: 'approval',
+      id,
+      plugin: r.pluginName,
+      label: r.label,
+      detail,
+      ...(warning ? { warning } : {})
+    })
     const decision = await new Promise<ApprovalDecision>((resolve) => {
       approvals.set(id, { requestId, resolve })
       controller.signal.addEventListener('abort', () => resolve('deny'), { once: true })
     })
     approvals.delete(id)
     emit({ requestId, type: 'approval-done', id })
-    if (decision === 'chat') allowedInChat.add(key)
+    if (decision === 'chat' && !warning) allowedInChat.add(key)
     return decision === 'once' || decision === 'chat'
   }
 
-  // Runs one tool call and reports it to the UI.
-  const runTool = async (
-    id: string,
-    name: string,
-    input: unknown
-  ): Promise<{ content: string; isError: boolean }> => {
+  const toCall = (id: string, name: string, input: unknown): Call => {
     const described = pluginHost().describeCall(name, input)
-    const label = described?.label ?? toolLabel(name, input)
-    const write = described?.write ?? CORE_WRITES.test(name)
-    emit({ requestId, type: 'tool', id, label, status: 'running', write })
-    const r = workspace?.has(name)
-      ? await workspace.run(name, input)
-      : isVaultTool(name)
-        ? vaultReady
-          ? runVaultTool(vault, name, input)
-          : { content: 'The vault is not connected right now.', isError: true }
-        : name.includes('__')
-          ? await pluginHost().invoke(name, input, {
-              snapshot: plugins.snapshot,
-              signal: controller.signal,
-              approve
-            })
-          : { content: `There is no tool called ${name} here.`, isError: true }
-    emit({ requestId, type: 'tool', id, label, status: r.isError ? 'error' : 'done', write })
-    return r
+    return {
+      id,
+      name,
+      input,
+      label: described?.label ?? toolLabel(name, input),
+      write: described?.write ?? CORE_WRITES.test(name)
+    }
   }
+
+  // Runs one tool call. Its record is kept by the log.
+  const runTool = async (c: Call): Promise<ToolRun> => {
+    emit({ requestId, type: 'tool', id: c.id, label: c.label, status: 'running', write: c.write })
+    const isPlugin = c.name.includes('__') && !workspace?.has(c.name)
+    let preApproved = false
+    if (c.write && log.unknownRepeat(c)) {
+      const allowed = await approve(
+        {
+          pluginId: isPlugin ? c.name.split('__')[0] : 'custard',
+          pluginName: isPlugin ? pluginName(c.name.split('__')[0]) : 'Custard',
+          tool: c.name,
+          label: c.label,
+          input: c.input
+        },
+        'This repeats an earlier action whose outcome is unknown. It may already have happened.'
+      )
+      if (!allowed)
+        return {
+          content: controller.signal.aborted
+            ? 'Stopped before it ran, so nothing was done.'
+            : 'The user declined repeating an action whose outcome is unknown, so nothing was done.',
+          isError: true,
+          outcome: 'not-run'
+        }
+      preApproved = true
+    }
+    if (workspace?.has(c.name)) return workspace.run(c.name, c.input)
+    if (isVaultTool(c.name))
+      return vaultReady
+        ? runVaultTool(vault, c.name, c.input)
+        : { content: 'The vault is not connected right now.', isError: true, outcome: 'not-run' }
+    if (isPlugin)
+      return pluginHost().invoke(c.name, c.input, {
+        snapshot: plugins.snapshot,
+        signal: controller.signal,
+        approve,
+        preApproved
+      })
+    return { content: `There is no tool called ${c.name} here.`, isError: true, outcome: 'not-run' }
+  }
+
+  const runRound = (
+    uses: { id: string; name: string; input: unknown }[]
+  ): Promise<BetaToolResultBlockParam[]> =>
+    log.runRound(
+      uses.map((u) => toCall(u.id, u.name, u.input)),
+      runTool,
+      controller.signal,
+      (c, status) =>
+        emit({
+          requestId,
+          type: 'tool',
+          id: c.id,
+          label: c.label,
+          status: settledStatus[status],
+          write: c.write
+        })
+    )
 
   const params: MessageCreateParamsStreaming = {
     model: model.id,
     max_tokens: 64000,
     system,
-    messages: sent,
+    messages: history(),
     cache_control: { type: 'ephemeral' },
     stream: true
   }
@@ -218,38 +317,60 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
 
   running.set(requestId, controller)
-  let partialText = ''
+  active.add(conversation.id)
 
-  // A failed turn is removed from the end of the history so it can be resent.
-  const fail = (message: string): void => {
-    conversation.messages.length = startLength
-    if (startLength > 0) saveConversation(conversation)
-    emit({ requestId, type: 'error', message, conversation: startLength > 0 ? conversation : null })
+  // Ends the turn early. Whatever already happened stays in the chat with a
+  // notice; only a turn where nothing happened is taken back, and then the
+  // message goes back in the box.
+  const stopEarly = (kind: 'stopped' | 'error' | 'cut-off', message: string): void => {
+    const kept = log.interrupt(kind, message)
+    if (kept || log.startLength > 0) saveConversation(conversation)
+    emit({
+      requestId,
+      type: 'error',
+      message,
+      conversation: kept || log.startLength > 0 ? conversation : null,
+      kept
+    })
   }
+  const finish = (): void => {
+    saveConversation(conversation)
+    emit({ requestId, type: 'done', conversation })
+  }
+  const STEP_LIMIT = `Stopped after ${MAX_STEPS} steps without a final answer. Send a message to let it carry on.`
+  const CUT_OFF = 'The reply hit the length limit and was cut off. Continue to let it carry on.'
+  const CUT_OFF_TOOL =
+    'The reply was cut off in the middle of a tool action, so that action was not run.'
 
   try {
     if (model.provider === 'openai') {
-      await runOpenAI({
+      const end = await runOpenAI({
         requestId,
         maxSteps: MAX_STEPS,
         apiKey,
         model: model.id,
         effort: req.settings.effort,
         instructions: system.map((b) => b.text).join('\n\n'),
-        conversation,
-        history: sent,
+        history: history(),
         tools,
         signal: controller.signal,
         emit,
-        runTool,
-        onText: (t) => (partialText += t)
+        log,
+        runRound
       })
-      saveConversation(conversation)
-      emit({ requestId, type: 'done', conversation })
-      return
+      if (controller.signal.aborted) return stopEarly('stopped', 'Stopped by you.')
+      if (end === 'cut-off-tool') return stopEarly('cut-off', CUT_OFF_TOOL)
+      if (end === 'cut-off') log.notice('cut-off', CUT_OFF)
+      if (end === 'step-limit') log.notice('step-limit', STEP_LIMIT)
+      return finish()
     }
     const client = new Anthropic({ apiKey })
-    for (let step = 0; step < MAX_STEPS; step++) {
+    for (let step = 0; ; step++) {
+      if (step === MAX_STEPS) {
+        log.notice('step-limit', STEP_LIMIT)
+        break
+      }
+      params.messages = history()
       const stream = client.beta.messages.stream(params, { signal: controller.signal })
       for await (const event of stream) {
         if (event.type === 'content_block_start' && event.content_block.type === 'fallback') {
@@ -259,7 +380,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
           if (event.delta.type === 'thinking_delta') {
             emit({ requestId, type: 'thinking', text: event.delta.thinking })
           } else if (event.delta.type === 'text_delta') {
-            partialText += event.delta.text
+            log.text(event.delta.text)
             emit({ requestId, type: 'text', text: event.delta.text })
           }
         }
@@ -267,57 +388,30 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       const message = await stream.finalMessage()
       if (message.stop_reason === 'refusal') {
         const category = message.stop_details?.category
-        fail(`Claude declined this request${category ? ` (${category})` : ''}.`)
-        return
+        return stopEarly(
+          'error',
+          `Claude declined this request${category ? ` (${category})` : ''}.`
+        )
       }
       const toolUses = message.content.filter((b) => b.type === 'tool_use')
-      if (toolUses.length > 0 && message.stop_reason === 'max_tokens') {
-        fail('The reply was cut off in the middle of a tool action. Try again.')
-        return
+      if (toolUses.length > 0 && message.stop_reason === 'max_tokens')
+        return stopEarly('cut-off', CUT_OFF_TOOL)
+      log.addAssistant(echoableContent(message.content))
+      if (message.stop_reason === 'max_tokens') {
+        log.notice('cut-off', CUT_OFF)
+        break
       }
-      push({ role: 'assistant', content: echoableContent(message.content) })
       if (message.stop_reason !== 'tool_use') break
-
-      // Run every tool call from this turn, one after another in order, and
-      // return all results together.
-      const results: BetaToolResultBlockParam[] = []
-      for (const t of toolUses) {
-        const r = await runTool(t.id, t.name, t.input)
-        results.push({
-          type: 'tool_result',
-          tool_use_id: t.id,
-          content: r.content,
-          is_error: r.isError
-        })
-      }
-      push({ role: 'user', content: results })
-      saveConversation(conversation)
+      await runRound(toolUses)
+      if (controller.signal.aborted) return stopEarly('stopped', 'Stopped by you.')
     }
-    saveConversation(conversation)
-    emit({ requestId, type: 'done', conversation })
+    finish()
   } catch (err) {
-    const onlyUserMessage = conversation.messages.length === startLength + 1
-    if (controller.signal.aborted && onlyUserMessage && partialText.trim()) {
-      // Stopped by the user before any vault actions: keep the text so far.
-      conversation.messages.push({ role: 'assistant', content: partialText.trimEnd() })
-      saveConversation(conversation)
-      emit({ requestId, type: 'done', conversation })
-    } else if (controller.signal.aborted) {
-      fail('Stopped.')
-    } else if (
-      err instanceof Anthropic.AuthenticationError ||
-      err instanceof OpenAI.AuthenticationError
-    ) {
-      fail(`Your ${providerNames[model.provider]} API key was rejected. Check it in Settings.`)
-    } else if (err instanceof Anthropic.RateLimitError || err instanceof OpenAI.RateLimitError) {
-      fail(`${providerNames[model.provider]} said: ${err.message}`)
-    } else if (err instanceof Anthropic.APIError || err instanceof OpenAI.APIError) {
-      fail(`API error${err.status ? ` ${err.status}` : ''}: ${err.message}`)
-    } else {
-      fail(err instanceof Error ? err.message : String(err))
-    }
+    if (controller.signal.aborted) stopEarly('stopped', 'Stopped by you.')
+    else stopEarly('error', describeError(err, provider))
   } finally {
     running.delete(requestId)
+    active.delete(conversation.id)
   }
 }
 

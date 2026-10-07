@@ -26,7 +26,16 @@ import type { PluginStore } from './store'
 // the moment of use; manifests and the sandbox runtime only describe intent.
 
 export type ConfigValues = Record<string, string | number | boolean>
-export type ToolOutcome = { content: string; isError: boolean }
+// From the runtime: `interrupted` when the call was cut short after it reached
+// the plugin (timeout, cancel, crash), `notSent` when it never reached it.
+// From invoke: `outcome`, what became of the call (see ActionStatus).
+export type ToolOutcome = {
+  content: string
+  isError: boolean
+  interrupted?: boolean
+  notSent?: boolean
+  outcome?: 'completed' | 'failed' | 'not-run' | 'unknown'
+}
 
 export type RuntimeHandle = {
   call(
@@ -80,6 +89,8 @@ const MAX_RESULT_CHARS = 50_000
 const OAUTH_KEY = '__oauth'
 
 const fail = (content: string): ToolOutcome => ({ content, isError: true })
+// Refused before the plugin was called: nothing was done.
+const notRun = (content: string): ToolOutcome => ({ content, isError: true, outcome: 'not-run' })
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
 export class PluginHost {
@@ -633,12 +644,15 @@ export class PluginHost {
       snapshot: ToolSnapshot
       signal: AbortSignal
       approve: (r: ApprovalRequest) => Promise<boolean>
+      // The user already approved this exact call (a repeat of an action
+      // whose outcome was unknown), so don't ask again.
+      preApproved?: boolean
     }
   ): Promise<ToolOutcome> {
     const offered = o.snapshot.get(name)
     const split = splitToolName(name)
     if (!offered || !split || split.pluginId !== offered.pluginId)
-      return fail('This tool is not available right now.')
+      return notRun('This tool is not available right now.')
     const id = offered.pluginId
 
     // Re-checked at call time: the tool list the model saw may be stale.
@@ -655,14 +669,15 @@ export class PluginHost {
       return { manifest, granted: st.granted }
     }
     let c = current()
-    if (typeof c === 'string') return fail(c)
+    if (typeof c === 'string') return notRun(c)
     const tool = c.manifest.tools.find((t) => t.name === split.tool)
-    if (!tool) return fail('This plugin has no such tool.')
+    if (!tool) return notRun('This plugin has no such tool.')
     const errors = validate(tool.inputSchema, input ?? {})
-    if (errors.length) return fail(`Invalid input: ${errors.slice(0, 5).join('; ')}`)
+    if (errors.length) return notRun(`Invalid input: ${errors.slice(0, 5).join('; ')}`)
 
     if (
       tool.effect === 'write' &&
+      !o.preApproved &&
       (this.d.store.state(id).askEveryTime[tool.name] ?? this.d.askByDefault())
     ) {
       const label = this.describeCall(name, input)?.label ?? name
@@ -673,11 +688,16 @@ export class PluginHost {
         label,
         input
       })
-      if (!allowed) return fail('The user declined this action, so nothing was done.')
+      if (!allowed)
+        return notRun(
+          o.signal.aborted
+            ? 'Stopped before it ran, so nothing was done.'
+            : 'The user declined this action, so nothing was done.'
+        )
       c = current()
-      if (typeof c === 'string') return fail(c)
+      if (typeof c === 'string') return notRun(c)
     }
-    if (o.signal.aborted) return fail('Stopped.')
+    if (o.signal.aborted) return notRun('Stopped before it ran, so nothing was done.')
 
     const callId = randomUUID()
     const controller = new AbortController()
@@ -685,6 +705,10 @@ export class PluginHost {
     o.signal.addEventListener('abort', onAbort)
     this.calls.set(callId, { pluginId: id, buildId: offered.buildId, controller })
     const secrets = this.secretValues(id)
+    const write = tool.effect === 'write'
+    // Once the call may have reached the plugin, a write cut short might
+    // still have happened.
+    let sent = false
     try {
       const handle = await this.ensureRunning(id, offered.buildId)
       const config: ConfigValues = {}
@@ -692,6 +716,7 @@ export class PluginHost {
         if (!f.secret && f.default !== undefined) config[k] = f.default
       for (const [k, v] of Object.entries(this.d.store.config(id)))
         if (c.manifest.config[k] && !c.manifest.config[k].secret) config[k] = v
+      sent = true
       const r = await handle.call(
         callId,
         tool.name,
@@ -702,11 +727,20 @@ export class PluginHost {
       )
       const content = redact(String(r.content).slice(0, MAX_RESULT_CHARS), secrets)
       if (r.isError) this.log(id, `${tool.name}: ${content.slice(0, 200)}`)
-      return { content, isError: !!r.isError }
+      const outcome = r.notSent
+        ? 'not-run'
+        : r.interrupted
+          ? write
+            ? 'unknown'
+            : 'failed'
+          : r.isError
+            ? 'failed'
+            : 'completed'
+      return { content, isError: !!r.isError, outcome }
     } catch (err) {
       const msg = redact(message(err), secrets)
       this.d.store.addError(id, `${tool.name}: ${msg}`)
-      return fail(msg)
+      return { ...fail(msg), outcome: sent && write ? 'unknown' : sent ? 'failed' : 'not-run' }
     } finally {
       o.signal.removeEventListener('abort', onAbort)
       this.calls.delete(callId)

@@ -1,6 +1,14 @@
 import { app } from 'electron'
 import { randomUUID } from 'crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from 'fs'
 import { join } from 'path'
 import {
   defaultChatSettings,
@@ -50,9 +58,13 @@ export function newConversation(mode: Mode, firstMessage: string): Conversation 
   return { id: randomUUID(), mode, title, createdAt: now, updatedAt: now, messages: [] }
 }
 
+// Saved often during a turn (after every tool call), so written to a
+// temporary file and renamed: a crash mid-write leaves the last good copy.
 export function saveConversation(c: Conversation): void {
   c.updatedAt = Date.now()
-  writeFileSync(file(c.id), JSON.stringify(c))
+  const target = file(c.id)
+  writeFileSync(`${target}.tmp`, JSON.stringify(c))
+  renameSync(`${target}.tmp`, target)
 }
 
 export function deleteConversation(id: string): void {
