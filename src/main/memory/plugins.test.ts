@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync
 } from 'fs'
+import { createHash } from 'crypto'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type { Conversation } from '../../shared/chat'
@@ -312,9 +313,10 @@ describe('capture into plugin notes', () => {
     await cap.run()
     const job = chats.get('one')!.memory!.job!
     expect(job.status).toBe('saved')
+    const id = createHash('sha256').update('one:0-4').digest('hex').slice(0, 8)
     expect(job.notes).toEqual([
-      'Custard/Plugins/Spotify/Activity/2026-10-07 0000 t.md',
-      'Custard/Captures/2026-10-07 0000 t.md'
+      `Custard/Plugins/Spotify/Activity/2026-10-07 0000 t ${id}.md`,
+      `Custard/Captures/2026-10-07 0000 t ${id}.md`
     ])
     const act = read(job.notes![0])
     expect(act).toContain('plugin: "spotify"')
