@@ -198,11 +198,20 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         ...plugins.instructions
       ].join('\n\n')
     })
+  // What besides the user's own words the model can see, for the search gate.
+  const injected = [
+    ...(vaultReady ? ['your vault notes (memory, recent activity and the skills list)'] : []),
+    ...(plugins.instructions.length ? ['text from enabled plugins'] : []),
+    ...(workspace ? ['your code workspace'] : [])
+  ]
   // Notes about the plugins this message is about (at most two).
   if (vaultReady) {
     try {
       const notes = pluginContext(vault, conversation, req.text, allPluginInfo())
-      if (notes) system.push({ type: 'text', text: notes })
+      if (notes) {
+        system.push({ type: 'text', text: notes })
+        injected.push('notes about your plugins')
+      }
     } catch (err) {
       // Notes are a help, not a requirement for answering.
       console.error('Plugin notes:', err)
@@ -299,6 +308,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     if (isWebTool(c.name))
       return runWebTool(c.name, c.input, {
         conversation,
+        injected,
         model,
         apiKey,
         signal: controller.signal,
