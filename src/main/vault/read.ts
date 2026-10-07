@@ -2,11 +2,10 @@ import { createHash } from 'crypto'
 import { promises as fsp } from 'fs'
 import { relative, sep } from 'path'
 import { resolveInVault } from '../memory/paths'
-import type { VaultRead } from '../../shared/chat'
 
 // vault_read in parts. Each part says which characters of the note it holds,
 // whether more follows, and the note's version (a hash of the whole note), so
-// a later part, or an edit, can tell when the note changed in between.
+// a later part can tell when the note changed in between.
 
 export const READ_LIMITS = {
   // Characters per part.
@@ -24,14 +23,11 @@ export const toVaultPath = (vault: string, full: string): string =>
   relative(vault, full).split(sep).join('/')
 
 // A note's text, or a plain reason it can't be read.
-// resolveInVault has already refused a link that leads outside the vault;
-// `noLink` refuses any link (an edit would replace the link with a file).
-export async function readNote(full: string, noLink = false): Promise<string> {
+// resolveInVault has already refused a link that leads outside the vault.
+export async function readNote(full: string): Promise<string> {
   let size: number
   try {
-    const st = await (noLink ? fsp.lstat(full) : fsp.stat(full))
-    if (st.isSymbolicLink())
-      throw new ReadError("That note is a link to another file, so Custard won't edit it.")
+    const st = await fsp.stat(full)
     if (!st.isFile()) throw new ReadError('Note not found.')
     size = st.size
   } catch (err) {
@@ -44,21 +40,6 @@ export async function readNote(full: string, noLink = false): Promise<string> {
     )
   return fsp.readFile(full, 'utf8')
 }
-
-// Sorted, merged character ranges.
-export function addRange(ranges: [number, number][], r: [number, number]): [number, number][] {
-  const all = [...ranges, r].sort((a, b) => a[0] - b[0])
-  const out: [number, number][] = []
-  for (const [a, b] of all) {
-    const last = out[out.length - 1]
-    if (last && a <= last[1]) last[1] = Math.max(last[1], b)
-    else out.push([a, b])
-  }
-  return out
-}
-
-export const covers = (ranges: [number, number][], a: number, b: number): boolean =>
-  ranges.some(([x, y]) => x <= a && b <= y)
 
 const n = (x: number): string => x.toLocaleString('en-US')
 
@@ -73,9 +54,7 @@ function partEnd(text: string, from: number): number {
 
 export async function readPart(
   vault: string,
-  input: { path?: unknown; offset?: unknown; version?: unknown },
-  reads: Record<string, VaultRead>,
-  now = Date.now
+  input: { path?: unknown; offset?: unknown; version?: unknown }
 ): Promise<string> {
   const full = resolveInVault(vault, input.path)
   const path = toVaultPath(vault, full)
@@ -93,13 +72,6 @@ export async function readPart(
       `offset ${n(offset)} is past the end of ${path} (${n(text.length)} characters).`
     )
   const end = partEnd(text, offset)
-  // Reads at another version describe a different text, so they're dropped.
-  const prev = reads[path]
-  reads[path] = {
-    version,
-    ranges: addRange(prev?.version === version ? prev.ranges : [], [offset, end]),
-    at: now()
-  }
   const whole = offset === 0 && end === text.length
   const more = end < text.length
   const head = whole

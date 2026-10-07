@@ -181,32 +181,7 @@ export type Conversation = ConversationSummary & {
   compactions?: Compaction[]
   // How much of the model's input budget the last request used.
   context?: ContextUse
-  // Notes read in this chat, by vault path: the version read and which
-  // characters of it. An edit must lie inside what was read at that version.
-  vaultReads?: Record<string, VaultRead>
-  // Targeted note edits made in this chat, by tool call id (see main/vault/edit).
-  vaultEdits?: Record<string, VaultEdit>
 }
-
-export type VaultRead = { version: string; ranges: [number, number][]; at: number }
-
-// One edit and how to take it back. The copy from before the edit is kept in
-// Custard's app data, outside the vault.
-export type VaultEdit = {
-  path: string
-  // Which vault (a hash of its folder), so Undo never writes into another.
-  vault: string
-  before: string
-  after: string
-  backup: string
-  at: number
-  // The write's read-back didn't show the edit: what happened is unknown.
-  unknown?: boolean
-  undone?: number
-}
-
-export type UndoResult =
-  { ok: true; conversation: Conversation; message: string } | { ok: false; message: string }
 
 // Claude's compaction block is part of the assistant message at `after`, as
 // the API requires; OpenAI's encrypted item is kept here, with the model it
@@ -257,10 +232,6 @@ export type ChatEvent =
       detail: string
       // Set when this repeats an action whose outcome is unknown.
       warning?: string
-      // Asks for this one action only: no "allow for this chat".
-      once?: boolean
-      // A note edit: exactly what is replaced, and with what.
-      edit?: { path: string; old: string; new: string }
     }
   | { requestId: string; type: 'approval-done'; id: string }
   | { requestId: string; type: 'done'; conversation: Conversation }

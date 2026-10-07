@@ -289,21 +289,29 @@ export async function search(
   const notes: string[] = []
   if (r.stopped)
     notes.push(
-      `Search stopped after ${r.stopped === 'time' ? `${SEARCH_LIMITS.timeMs / 1000} seconds` : `${SEARCH_LIMITS.maxFiles.toLocaleString('en-US')} notes`} (${r.searched.toLocaleString('en-US')} notes searched), so there may be more matches. Narrow it with folder: or more words.`
+      `This was a partial scan: it stopped after ${r.stopped === 'time' ? `${SEARCH_LIMITS.timeMs / 1000} seconds` : `${SEARCH_LIMITS.maxFiles.toLocaleString('en-US')} notes`}, with ${r.searched.toLocaleString('en-US')} notes searched, so notes it didn't reach may also match. Each page runs a new scan, which may stop at a different point, so pages can repeat or miss notes. Narrow it with folder: or more words for complete results.`
     )
   if (r.skippedLarge)
     notes.push(
       `${r.skippedLarge} note${r.skippedLarge === 1 ? ' was' : 's were'} over ${SEARCH_LIMITS.maxFileBytes / 1_000_000} MB and not searched.`
     )
-  if (!r.total) return [`No notes matched ${describe(q)}.`, ...notes].join('\n')
+  const partial = !!r.stopped
+  if (!r.total)
+    return [
+      `No notes matched ${describe(q)}${partial ? ' in the part of the vault searched' : ''}.`,
+      ...notes
+    ].join('\n')
   const from = (page - 1) * pageSize
   if (from >= r.total)
-    return `There are ${r.total} matches, so page ${page} is past the end (last page: ${Math.ceil(r.total / pageSize)}).`
+    return [
+      `${partial ? `This scan found ${r.total} matches` : `There are ${r.total} matches`}, so page ${page} is past the end (last page: ${Math.ceil(r.total / pageSize)}).`,
+      ...notes
+    ].join('\n')
   const shown = r.hits.slice(from, from + pageSize)
   const all = r.hits.filter((h) => h.all).length
   const terms = q.terms.length + q.phrases.length
   return [
-    `${r.total} note${r.total === 1 ? '' : 's'} matched ${describe(q)}${terms > 1 ? ` (${all} with every term, listed first)` : ''}. Showing ${from + 1}–${from + shown.length}${from + shown.length < r.total ? `; for more, search again with page ${page + 1}` : ''}.`,
+    `${r.total} note${r.total === 1 ? '' : 's'} matched ${describe(q)}${partial ? ' in a partial scan (not a total for the whole vault)' : ''}${terms > 1 ? ` (${all} with every term, listed first)` : ''}. Showing ${from + 1}–${from + shown.length}${from + shown.length < r.total ? `; for more, search again with page ${page + 1}` : ''}.`,
     ...notes,
     ...shown.map(
       (h) =>

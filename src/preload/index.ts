@@ -11,8 +11,7 @@ import type {
   ConversationSummary,
   Mode,
   Provider,
-  SendChatRequest,
-  UndoResult
+  SendChatRequest
 } from '../shared/chat'
 import type { VaultInfo } from '../shared/vault'
 import type { ApprovalDecision } from '../shared/chat'
@@ -105,9 +104,6 @@ const custard = {
     // Continue a chat that grew too long in a new one; the original is kept.
     continue: (id: string, withoutSummary?: boolean): Promise<ContinueResult> =>
       ipcRenderer.invoke('chat:continue', id, withoutSummary),
-    // Undo a note edit made in this chat (refused if the note changed since).
-    undoEdit: (conversationId: string, callId: string): Promise<UndoResult> =>
-      ipcRenderer.invoke('vault:undo', conversationId, callId),
     onEvent: (cb: (e: ChatEvent) => void): (() => void) => {
       const listener = (_: unknown, e: ChatEvent): void => cb(e)
       ipcRenderer.on('chat:event', listener)

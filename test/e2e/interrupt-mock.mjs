@@ -276,10 +276,10 @@ http
                               ? 'toolong'
                               : /unsupported test/.test(ask)
                                 ? 'nocompact'
-                                : /edit test/.test(ask)
-                                  ? 'edit'
-                                  : /search test/.test(ask)
-                                    ? 'search'
+                                : /search test/.test(ask)
+                                  ? 'search'
+                                  : /parts test/.test(ask)
+                                    ? 'parts'
                                     : 'plain'
       // The provider says the request is too large.
       if (key === 'toolong')
@@ -336,29 +336,22 @@ http
         })
         send('content_block_stop', { index: idx++ })
       }
-      // The version the last vault_read gave, for an edit against it.
-      const lastVersion = () => {
+      // Where the last vault_read said the next part starts.
+      const nextPart = () => {
         for (let i = b.messages.length - 1; i >= 0; i--)
           for (const c of Array.isArray(b.messages[i].content) ? b.messages[i].content : [])
             if (c.type === 'tool_result') {
-              const t = typeof c.content === 'string' ? c.content : JSON.stringify(c.content)
-              const v = /version (\w+)/.exec(t)
-              if (v) return v[1]
+              const m = /offset (\d+) and version "(\w+)"/.exec(String(c.content))
+              if (m) return { offset: Number(m[1]), version: m[2] }
             }
-        return 'none'
+        return {}
       }
       const scripts = {
-        // Step 4: read a note, edit one passage of it, then answer.
-        edit: [
-          () => tool('vault_read', { path: 'Projects/Plan.md' }),
-          () =>
-            tool('vault_edit', {
-              path: 'Projects/Plan.md',
-              version: lastVersion(),
-              old_text: 'Status: draft',
-              new_text: 'Status: approved'
-            }),
-          'Done with the plan.'
+        // Step 4: a long note read in two parts.
+        parts: [
+          () => tool('vault_read', { path: 'Projects/Long.md' }),
+          () => tool('vault_read', { path: 'Projects/Long.md', ...nextPart() }),
+          'Read both parts.'
         ],
         search: [
           () => tool('vault_search', { query: 'CAFE "release plan" folder:Projects' }),

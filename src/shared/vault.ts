@@ -15,8 +15,6 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
       return `Read ${str(i.path)}${typeof i.offset === 'number' && i.offset > 0 ? ' (continued)' : ''}`
     case 'vault_create_note':
       return `Created ${str(i.path)}`
-    case 'vault_edit':
-      return `Edited ${str(i.path)}`
     case 'vault_append':
       return str(i.path) === MEMORY_NOTE ? 'Saved to memory' : `Added to ${str(i.path)}`
     case 'fs_list':

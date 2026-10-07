@@ -6,7 +6,6 @@ import { toolLabel } from '../../../../shared/vault'
 import type { ActionRecord, ActionStatus, Notice, WebSource } from '../../../../shared/chat'
 import { splitSources } from '../../../../shared/web'
 import { ToolLabelsContext } from '../../toolLabels'
-import { VaultEditsContext } from '../../vaultEdits'
 
 // The orb is the "buffer": it glows while Claude works and holds the
 // collapsible thinking summary once there is one.
@@ -188,45 +187,6 @@ export function UserBubble({ text }: { text: string }): React.JSX.Element {
   )
 }
 
-const pill =
-  'rounded-full border border-molten-500/50 px-2.5 py-0.5 text-[11px] text-molten-200 transition-colors hover:border-molten-400 hover:shadow-[0_0_10px_rgb(var(--glow)/0.25)] disabled:opacity-40'
-
-// Under a note edit: Undo, or what became of it.
-function EditUndo({ callId }: { callId: string }): React.JSX.Element | null {
-  const { edits, undo } = useContext(VaultEditsContext)
-  const [busy, setBusy] = useState(false)
-  const [said, setSaid] = useState<{ ok: boolean; message: string } | null>(null)
-  const e = edits[callId]
-  if (!e) return null
-  if (e.undone)
-    return (
-      <p className="-mt-1 mb-2 ml-[18px] text-[11px] text-ash-500">
-        Undone{said?.ok ? `: ${e.path} is back as it was.` : '.'}
-      </p>
-    )
-  return (
-    <div className="-mt-1 mb-2 ml-[18px] flex flex-wrap items-center gap-2 text-[11px] text-ash-500">
-      <button
-        disabled={busy}
-        className={pill}
-        onClick={async () => {
-          setBusy(true)
-          setSaid(await undo(callId))
-          setBusy(false)
-        }}
-        title={`Puts back the version from before this edit, only if ${e.path} hasn't changed since.`}
-      >
-        Undo
-      </button>
-      {said && !said.ok && (
-        <span role="alert" className="text-ember-600 [overflow-wrap:anywhere]">
-          {said.message}
-        </span>
-      )}
-    </div>
-  )
-}
-
 type Props = { message: BetaMessageParam; actions?: Record<string, ActionRecord> }
 
 function MessageView({ message, actions }: Props): React.JSX.Element | null {
@@ -250,13 +210,11 @@ function MessageView({ message, actions }: Props): React.JSX.Element | null {
         if (b.type === 'fallback') return <FallbackNote key={i} to={b.to.model} />
         if (b.type === 'tool_use')
           return (
-            <div key={i}>
-              <ToolLine
-                label={toolLabel(b.name, b.input, labels)}
-                status={lineStatus(actions?.[b.id]?.status)}
-              />
-              {b.name === 'vault_edit' && <EditUndo callId={b.id} />}
-            </div>
+            <ToolLine
+              key={i}
+              label={toolLabel(b.name, b.input, labels)}
+              status={lineStatus(actions?.[b.id]?.status)}
+            />
           )
         if (b.type === 'text') return <Markdown key={i} text={b.text} />
         return null

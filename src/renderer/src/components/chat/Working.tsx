@@ -26,8 +26,6 @@ export type Approval = {
   label: string
   detail: string
   warning?: string
-  once?: boolean
-  edit?: { path: string; old: string; new: string }
 }
 
 // The latest line of the thinking summary, as a hint of what it's on now.
@@ -88,34 +86,6 @@ function toStages(segments: Segment[]): Stage[] {
 // Shown while a reply is being made: the orb holds the centre and thin stage
 // lines underneath tick off what it's doing. The answer itself appears, in
 // the normal format, once it's finished.
-// Exactly what a note edit replaces, and with what.
-function EditPreview({
-  edit
-}: {
-  edit: { path: string; old: string; new: string }
-}): React.JSX.Element {
-  const box =
-    'mt-1 max-h-40 overflow-auto rounded-lg bg-forge-950 p-2 text-[11px] whitespace-pre-wrap [overflow-wrap:anywhere]'
-  return (
-    <div className="mt-2 text-xs">
-      <p className="text-ash-500">Replaces this, which appears once in the note:</p>
-      <pre
-        aria-label="Text replaced"
-        className={`${box} text-ash-400 line-through decoration-ember-600/60`}
-      >
-        {edit.old}
-      </pre>
-      <p className="mt-2 text-ash-500">With:</p>
-      <pre aria-label="Replacement" className={`${box} text-ash-200`}>
-        {edit.new || '(nothing: the passage is removed)'}
-      </pre>
-      <p className="mt-2 text-ash-500">
-        A copy of the note from before the edit is kept, and you can undo it from the chat.
-      </p>
-    </div>
-  )
-}
-
 // A plugin action waiting for the user. Nothing runs until they choose.
 function ApprovalCard({ a }: { a: Approval }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
@@ -127,13 +97,12 @@ function ApprovalCard({ a }: { a: Approval }): React.JSX.Element {
     <div
       className="stage-in w-full max-w-md rounded-2xl border border-molten-500/40 bg-forge-850 p-4"
       role="alertdialog"
-      aria-label={a.edit ? 'Allow note edit' : 'Allow plugin action'}
+      aria-label="Allow plugin action"
     >
       <p className="text-sm text-ash-100">
         <span className="text-molten-200">{a.plugin}</span> wants to: {a.label}
       </p>
       {a.warning && <p className="mt-2 text-sm text-ember-600">{a.warning}</p>}
-      {a.edit && <EditPreview edit={a.edit} />}
       {a.detail && a.detail !== '{}' && (
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-forge-950 p-2 text-[11px] text-ash-400">
           {a.detail}
@@ -147,7 +116,7 @@ function ApprovalCard({ a }: { a: Approval }): React.JSX.Element {
         >
           Allow
         </button>
-        {!a.warning && !a.once && (
+        {!a.warning && (
           <button
             disabled={busy}
             onClick={() => answer('chat')}
