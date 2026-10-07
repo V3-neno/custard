@@ -371,10 +371,7 @@ try {
     tries.length === 2 && tries[0].context_management && !tries[1].context_management,
     'the rejected request asked for compaction; the one retry did not'
   )
-  check(
-    !/compact-2026-01-12/.test(tries[1].beta ?? ''),
-    'and dropped the compaction beta header'
-  )
+  check(!/compact-2026-01-12/.test(tries[1].beta ?? ''), 'and dropped the compaction beta header')
   check(
     readJson('counts.json').length - countsBefore === 2,
     'the replacement request was counted against the budget before it was sent'
