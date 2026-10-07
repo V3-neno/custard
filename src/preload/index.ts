@@ -7,6 +7,7 @@ import type {
   ConversationSummary,
   SendChatRequest
 } from '../shared/chat'
+import type { VaultInfo } from '../shared/vault'
 
 // API exposed to the renderer as window.custard. The renderer never sees the
 // API key; all Claude calls happen in the main process.
@@ -20,6 +21,11 @@ const custard = {
   settings: {
     get: (): Promise<ChatSettings> => ipcRenderer.invoke('settings:get'),
     set: (s: ChatSettings): Promise<void> => ipcRenderer.invoke('settings:set', s)
+  },
+  vault: {
+    get: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:get'),
+    pick: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:pick'),
+    clear: (): Promise<void> => ipcRenderer.invoke('vault:clear')
   },
   conversations: {
     list: (): Promise<ConversationSummary[]> => ipcRenderer.invoke('conversations:list'),

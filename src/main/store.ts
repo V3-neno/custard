@@ -52,14 +52,29 @@ export function deleteConversation(id: string): void {
   rmSync(file(id), { force: true })
 }
 
-export function getChatSettings(): ChatSettings {
+type Config = { chat: ChatSettings; vaultPath: string | null }
+
+function readConfig(): Config {
+  let raw: Partial<Config> & Partial<ChatSettings> = {}
   try {
-    return { ...defaultChatSettings, ...JSON.parse(readFileSync(settingsFile(), 'utf8')) }
+    raw = JSON.parse(readFileSync(settingsFile(), 'utf8'))
   } catch {
-    return defaultChatSettings
+    // First run or unreadable file: use defaults.
+  }
+  // Older versions stored the chat settings at the top level.
+  const legacy: Partial<ChatSettings> = raw.model ? { model: raw.model } : {}
+  if (raw.effort) legacy.effort = raw.effort
+  return {
+    chat: { ...defaultChatSettings, ...legacy, ...raw.chat },
+    vaultPath: raw.vaultPath ?? null
   }
 }
 
-export function setChatSettings(s: ChatSettings): void {
-  writeFileSync(settingsFile(), JSON.stringify(s))
+function writeConfig(patch: Partial<Config>): void {
+  writeFileSync(settingsFile(), JSON.stringify({ ...readConfig(), ...patch }))
 }
+
+export const getChatSettings = (): ChatSettings => readConfig().chat
+export const setChatSettings = (chat: ChatSettings): void => writeConfig({ chat })
+export const getVaultPath = (): string | null => readConfig().vaultPath
+export const setVaultPath = (vaultPath: string | null): void => writeConfig({ vaultPath })

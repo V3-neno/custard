@@ -24,6 +24,16 @@ Open **Settings** and paste a Claude API key from [console.anthropic.com](https:
 
 Pick the model and effort under the message box. Opus 5.5 and Sonnet 5.5 show a summary of Claude's thinking and fall back to another model automatically if a safety check declines a request.
 
+## Obsidian brain
+
+In **Settings**, choose your Obsidian vault folder. In Chat, Claude can then search, list and read your notes, create new notes and add to existing ones. It can't overwrite or delete anything, and every action shows up in the chat.
+
+Claude keeps what it learns about you in `Custard/Memory.md` inside the vault. That note is loaded into every chat, and you can edit it in Obsidian like any other note.
+
+## Roadmap
+
+See [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## Layout
 
 - `src/main`: Electron main process (window, OS access, API calls)

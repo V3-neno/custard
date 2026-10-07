@@ -32,6 +32,13 @@ export type ChatEvent =
   | { requestId: string; type: 'thinking'; text: string }
   | { requestId: string; type: 'text'; text: string }
   | { requestId: string; type: 'fallback'; from: string; to: string }
+  | {
+      requestId: string
+      type: 'tool'
+      id: string
+      label: string
+      status: 'running' | 'done' | 'error'
+    }
   | { requestId: string; type: 'done'; conversation: Conversation }
   | { requestId: string; type: 'error'; message: string; conversation: Conversation | null }
 

@@ -1,31 +1,48 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 
 type Props = { hasKey: boolean; onClose: () => void; onChanged: () => void }
+
+const cleanError = (e: unknown): string =>
+  String(e instanceof Error ? e.message : e).replace(
+    /^Error invoking remote method '[^']+': (Error: )?/,
+    ''
+  )
 
 function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Element {
   const [key, setKey] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [vault, setVault] = useState<VaultInfo>(null)
 
-  const save = async (): Promise<void> => {
+  useEffect(() => {
+    window.custard.vault.get().then(setVault)
+  }, [])
+
+  const saveKey = async (): Promise<void> => {
     try {
       await window.custard.apiKey.set(key)
       setKey('')
+      setError(null)
       onChanged()
-      onClose()
     } catch (e) {
-      setError(
-        String(e instanceof Error ? e.message : e).replace(
-          /^Error invoking remote method '[^']+': (Error: )?/,
-          ''
-        )
-      )
+      setError(cleanError(e))
     }
   }
 
-  const clear = async (): Promise<void> => {
+  const clearKey = async (): Promise<void> => {
     await window.custard.apiKey.clear()
     onChanged()
   }
+
+  const pickVault = async (): Promise<void> => setVault(await window.custard.vault.pick())
+  const clearVault = async (): Promise<void> => {
+    await window.custard.vault.clear()
+    setVault(null)
+  }
+
+  const button = 'rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-40'
+  const primary = `${button} bg-custard-400 text-ink-900 hover:bg-custard-300`
+  const secondary = `${button} border border-ink-700 text-ink-300 hover:text-custard-50`
 
   return (
     <div
@@ -33,45 +50,80 @@ function SettingsDialog({ hasKey, onClose, onChanged }: Props): React.JSX.Elemen
       onClick={onClose}
     >
       <div
-        className="w-[440px] rounded-2xl border border-ink-700 bg-ink-800 p-6"
+        className="w-[480px] rounded-2xl border border-ink-700 bg-ink-800 p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-1 text-base font-semibold">Settings</h2>
-        <p className="mb-4 text-sm text-ink-300">
-          Your Claude API key is encrypted with Windows secure storage and stays on this computer.
-          Get one at console.anthropic.com.
-        </p>
-        <label className="mb-1 block text-xs text-ink-300">
-          API key {hasKey && <span className="text-custard-300">(saved)</span>}
-        </label>
-        <input
-          type="password"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && key.trim() && save()}
-          placeholder={hasKey ? 'Paste a new key to replace it' : 'sk-ant-…'}
-          className="w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm outline-none focus:border-custard-400/60"
-          autoFocus
-        />
-        {error && <p className="mt-2 text-sm text-red-300">{error}</p>}
-        <div className="mt-5 flex items-center gap-2">
+        <h2 className="mb-5 text-base font-semibold">Settings</h2>
+
+        <section className="mb-6">
+          <h3 className="mb-1 text-sm font-medium">
+            Claude API key {hasKey && <span className="text-custard-300">· saved</span>}
+          </h3>
+          <p className="mb-3 text-sm text-ink-300">
+            Encrypted with Windows secure storage and kept on this computer. Get one at
+            console.anthropic.com.
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && key.trim() && saveKey()}
+              placeholder={hasKey ? 'Paste a new key to replace it' : 'sk-ant-…'}
+              className="flex-1 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm outline-none focus:border-custard-400/60"
+              autoFocus={!hasKey}
+            />
+            <button onClick={saveKey} disabled={!key.trim()} className={primary}>
+              Save
+            </button>
+          </div>
+          {error && <p className="mt-2 text-sm text-red-300">{error}</p>}
           {hasKey && (
-            <button onClick={clear} className="text-sm text-ink-500 hover:text-red-300">
+            <button onClick={clearKey} className="mt-2 text-xs text-ink-500 hover:text-red-300">
               Remove key
             </button>
           )}
-          <button
-            onClick={onClose}
-            className="ml-auto rounded-lg px-3 py-1.5 text-sm text-ink-300 hover:text-custard-50"
-          >
-            Close
-          </button>
-          <button
-            onClick={save}
-            disabled={!key.trim()}
-            className="rounded-lg bg-custard-400 px-3 py-1.5 text-sm font-medium text-ink-900 hover:bg-custard-300 disabled:opacity-40"
-          >
-            Save
+        </section>
+
+        <section>
+          <h3 className="mb-1 text-sm font-medium">
+            Obsidian vault {vault && <span className="text-custard-300">· connected</span>}
+          </h3>
+          <p className="mb-3 text-sm text-ink-300">
+            The brain behind Custard. Claude can search and read your notes, create new ones and add
+            to existing ones, but never overwrites or deletes anything. It keeps its memory of you
+            in <code className="text-custard-100">{MEMORY_NOTE}</code>.
+          </p>
+          {vault ? (
+            <>
+              <div className="truncate rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm">
+                {vault.path}
+              </div>
+              {!vault.isObsidian && (
+                <p className="mt-2 text-xs text-custard-300">
+                  This folder has no .obsidian folder, so it may not be an Obsidian vault. It still
+                  works as a notes folder.
+                </p>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button onClick={pickVault} className={secondary}>
+                  Change folder
+                </button>
+                <button onClick={clearVault} className="text-xs text-ink-500 hover:text-red-300">
+                  Disconnect
+                </button>
+              </div>
+            </>
+          ) : (
+            <button onClick={pickVault} className={primary}>
+              Choose vault folder
+            </button>
+          )}
+        </section>
+
+        <div className="mt-6 flex justify-end">
+          <button onClick={onClose} className={secondary}>
+            Done
           </button>
         </div>
       </div>

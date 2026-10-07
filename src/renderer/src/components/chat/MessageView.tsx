@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import Markdown from '../Markdown'
+import { toolLabel } from '../../../../shared/vault'
 
 export function Thinking({
   text,
@@ -29,6 +30,22 @@ export function FallbackNote({ to }: { to: string }): React.JSX.Element {
   return <div className="mb-2 text-xs text-ink-500">Answer continued by {to}.</div>
 }
 
+export function ToolLine({
+  label,
+  status = 'done'
+}: {
+  label: string
+  status?: 'running' | 'done' | 'error'
+}): React.JSX.Element {
+  const icon = status === 'running' ? '◌' : status === 'error' ? '✕' : '✓'
+  return (
+    <div className={`mb-2 text-xs ${status === 'error' ? 'text-red-300' : 'text-ink-300'}`}>
+      <span className="mr-2 text-custard-400">{icon}</span>
+      {label}
+    </div>
+  )
+}
+
 export function UserBubble({ text }: { text: string }): React.JSX.Element {
   return (
     <div className="flex justify-end">
@@ -37,13 +54,17 @@ export function UserBubble({ text }: { text: string }): React.JSX.Element {
   )
 }
 
-function MessageView({ message }: { message: BetaMessageParam }): React.JSX.Element {
+type Props = { message: BetaMessageParam; failedTools?: Set<string> }
+
+function MessageView({ message, failedTools }: Props): React.JSX.Element | null {
   const blocks =
     typeof message.content === 'string'
       ? [{ type: 'text' as const, text: message.content }]
       : message.content
 
   if (message.role === 'user') {
+    // Tool results are sent as user messages but aren't something the user wrote.
+    if (blocks.every((b) => b.type === 'tool_result')) return null
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n')
     return <UserBubble text={text} />
   }
@@ -53,6 +74,14 @@ function MessageView({ message }: { message: BetaMessageParam }): React.JSX.Elem
       {blocks.map((b, i) => {
         if (b.type === 'thinking') return <Thinking key={i} text={b.thinking} />
         if (b.type === 'fallback') return <FallbackNote key={i} to={b.to.model} />
+        if (b.type === 'tool_use')
+          return (
+            <ToolLine
+              key={i}
+              label={toolLabel(b.name, b.input)}
+              status={failedTools?.has(b.id) ? 'error' : 'done'}
+            />
+          )
         if (b.type === 'text') return <Markdown key={i} text={b.text} />
         return null
       })}

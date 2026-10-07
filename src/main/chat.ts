@@ -2,16 +2,24 @@ import Anthropic from '@anthropic-ai/sdk'
 import type {
   BetaContentBlock,
   BetaContentBlockParam,
+  BetaTextBlockParam,
+  BetaToolResultBlockParam,
   MessageCreateParamsStreaming
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { ipcMain, type WebContents } from 'electron'
+import { existsSync } from 'fs'
 import { getApiKey } from './apiKey'
-import { getConversation, newConversation, saveConversation } from './store'
+import { getConversation, getVaultPath, newConversation, saveConversation } from './store'
+import { runVaultTool, vaultSystemPrompt, vaultTools } from './vault'
 import { chatModels, type ChatEvent, type Conversation, type SendChatRequest } from '../shared/chat'
+import { toolLabel } from '../shared/vault'
 
 const SYSTEM_PROMPT =
   'You are Claude, chatting with the user through Custard, their personal desktop client. ' +
   'Format responses in Markdown when it helps readability.'
+
+// Upper bound on model calls per user message, so a tool loop can't run away.
+const MAX_STEPS = 25
 
 const running = new Map<string, AbortController>()
 
@@ -27,13 +35,14 @@ function echoableContent(content: BetaContentBlock[]): BetaContentBlockParam[] {
 }
 
 async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
+  const { requestId } = req
   const emit = (e: ChatEvent): void => {
     if (!sender.isDestroyed()) sender.send('chat:event', e)
   }
   const apiKey = getApiKey()
   if (!apiKey) {
     emit({
-      requestId: req.requestId,
+      requestId,
       type: 'error',
       message: 'Add your API key in Settings first.',
       conversation: null
@@ -43,17 +52,29 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
 
   const conversation: Conversation =
     (req.conversationId && getConversation(req.conversationId)) || newConversation(req.text)
+  const startLength = conversation.messages.length
   conversation.messages.push({ role: 'user', content: req.text })
+
+  const vault = getVaultPath()
+  const vaultReady = vault !== null && existsSync(vault)
+  const system: BetaTextBlockParam[] = [{ type: 'text', text: SYSTEM_PROMPT }]
+  if (vaultReady) system.push({ type: 'text', text: vaultSystemPrompt(vault) })
 
   const model = chatModels.find((m) => m.id === req.settings.model) ?? chatModels[0]
   const params: MessageCreateParamsStreaming = {
     model: model.id,
     max_tokens: 64000,
-    system: SYSTEM_PROMPT,
+    system,
     messages: conversation.messages,
     cache_control: { type: 'ephemeral' },
     stream: true
   }
+  // The API requires tool definitions whenever the history contains tool
+  // calls, so keep them even if the vault was disconnected since.
+  const usedTools = conversation.messages.some(
+    (m) => typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_use')
+  )
+  if (vaultReady || usedTools) params.tools = vaultTools
   if (model.effort) {
     params.thinking = { type: 'adaptive', display: 'summarized' }
     params.output_config = { effort: req.settings.effort }
@@ -66,56 +87,71 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
 
   const controller = new AbortController()
-  running.set(req.requestId, controller)
+  running.set(requestId, controller)
   const client = new Anthropic({ apiKey })
   let partialText = ''
 
   // A failed turn is removed from the end of the history so it can be resent.
   const fail = (message: string): void => {
-    conversation.messages.pop()
-    if (conversation.messages.length > 0) saveConversation(conversation)
-    emit({
-      requestId: req.requestId,
-      type: 'error',
-      message,
-      conversation: conversation.messages.length > 0 ? conversation : null
-    })
+    conversation.messages.length = startLength
+    if (startLength > 0) saveConversation(conversation)
+    emit({ requestId, type: 'error', message, conversation: startLength > 0 ? conversation : null })
   }
 
   try {
-    const stream = client.beta.messages.stream(params, { signal: controller.signal })
-    for await (const event of stream) {
-      if (event.type === 'content_block_start' && event.content_block.type === 'fallback') {
-        const { from, to } = event.content_block
-        emit({ requestId: req.requestId, type: 'fallback', from: from.model, to: to.model })
-      } else if (event.type === 'content_block_delta') {
-        if (event.delta.type === 'thinking_delta') {
-          emit({ requestId: req.requestId, type: 'thinking', text: event.delta.thinking })
-        } else if (event.delta.type === 'text_delta') {
-          partialText += event.delta.text
-          emit({ requestId: req.requestId, type: 'text', text: event.delta.text })
+    for (let step = 0; step < MAX_STEPS; step++) {
+      const stream = client.beta.messages.stream(params, { signal: controller.signal })
+      for await (const event of stream) {
+        if (event.type === 'content_block_start' && event.content_block.type === 'fallback') {
+          const { from, to } = event.content_block
+          emit({ requestId, type: 'fallback', from: from.model, to: to.model })
+        } else if (event.type === 'content_block_delta') {
+          if (event.delta.type === 'thinking_delta') {
+            emit({ requestId, type: 'thinking', text: event.delta.thinking })
+          } else if (event.delta.type === 'text_delta') {
+            partialText += event.delta.text
+            emit({ requestId, type: 'text', text: event.delta.text })
+          }
         }
       }
-    }
-    const message = await stream.finalMessage()
-    if (message.stop_reason === 'refusal') {
-      const category = message.stop_details?.category
-      fail(`Claude declined this request${category ? ` (${category})` : ''}.`)
-      return
-    }
-    conversation.messages.push({ role: 'assistant', content: echoableContent(message.content) })
-    saveConversation(conversation)
-    emit({ requestId: req.requestId, type: 'done', conversation })
-  } catch (err) {
-    if (controller.signal.aborted) {
-      // Stopped by the user: keep what was written so far as plain text.
-      if (partialText.trim()) {
-        conversation.messages.push({ role: 'assistant', content: partialText.trimEnd() })
-        saveConversation(conversation)
-        emit({ requestId: req.requestId, type: 'done', conversation })
-      } else {
-        fail('Stopped.')
+      const message = await stream.finalMessage()
+      if (message.stop_reason === 'refusal') {
+        const category = message.stop_details?.category
+        fail(`Claude declined this request${category ? ` (${category})` : ''}.`)
+        return
       }
+      const toolUses = message.content.filter((b) => b.type === 'tool_use')
+      if (toolUses.length > 0 && message.stop_reason === 'max_tokens') {
+        fail('The reply was cut off in the middle of a vault action. Try again.')
+        return
+      }
+      conversation.messages.push({ role: 'assistant', content: echoableContent(message.content) })
+      if (message.stop_reason !== 'tool_use') break
+
+      // Run every tool call from this turn and return all results together.
+      const results: BetaToolResultBlockParam[] = toolUses.map((t) => {
+        const label = toolLabel(t.name, t.input)
+        emit({ requestId, type: 'tool', id: t.id, label, status: 'running' })
+        const r = vaultReady
+          ? runVaultTool(vault, t.name, t.input)
+          : { content: 'The vault is not connected right now.', isError: true }
+        emit({ requestId, type: 'tool', id: t.id, label, status: r.isError ? 'error' : 'done' })
+        return { type: 'tool_result', tool_use_id: t.id, content: r.content, is_error: r.isError }
+      })
+      conversation.messages.push({ role: 'user', content: results })
+      saveConversation(conversation)
+    }
+    saveConversation(conversation)
+    emit({ requestId, type: 'done', conversation })
+  } catch (err) {
+    const onlyUserMessage = conversation.messages.length === startLength + 1
+    if (controller.signal.aborted && onlyUserMessage && partialText.trim()) {
+      // Stopped by the user before any vault actions: keep the text so far.
+      conversation.messages.push({ role: 'assistant', content: partialText.trimEnd() })
+      saveConversation(conversation)
+      emit({ requestId, type: 'done', conversation })
+    } else if (controller.signal.aborted) {
+      fail('Stopped.')
     } else if (err instanceof Anthropic.AuthenticationError) {
       fail('Your API key was rejected. Check it in Settings.')
     } else if (err instanceof Anthropic.RateLimitError) {
@@ -126,7 +162,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       fail(err instanceof Error ? err.message : String(err))
     }
   } finally {
-    running.delete(req.requestId)
+    running.delete(requestId)
   }
 }
 

@@ -1,4 +1,5 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, dialog, shell, BrowserWindow, ipcMain } from 'electron'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -8,9 +9,17 @@ import {
   deleteConversation,
   getChatSettings,
   getConversation,
+  getVaultPath,
   listConversations,
-  setChatSettings
+  setChatSettings,
+  setVaultPath
 } from './store'
+import type { VaultInfo } from '../shared/vault'
+
+function vaultInfo(): VaultInfo {
+  const path = getVaultPath()
+  return path ? { path, isObsidian: existsSync(join(path, '.obsidian')) } : null
+}
 
 function createWindow(): void {
   // Create the browser window.
@@ -69,6 +78,20 @@ app.whenReady().then(() => {
   ipcMain.handle('conversations:list', () => listConversations())
   ipcMain.handle('conversations:get', (_, id: string) => getConversation(id))
   ipcMain.handle('conversations:delete', (_, id: string) => deleteConversation(id))
+  ipcMain.handle('vault:get', () => vaultInfo())
+  ipcMain.handle('vault:pick', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options = {
+      title: 'Choose your Obsidian vault folder',
+      properties: ['openDirectory' as const]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (!result.canceled && result.filePaths[0]) setVaultPath(result.filePaths[0])
+    return vaultInfo()
+  })
+  ipcMain.handle('vault:clear', () => setVaultPath(null))
   registerChatHandlers()
 
   createWindow()

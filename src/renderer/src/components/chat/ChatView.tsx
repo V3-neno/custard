@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import {
   defaultChatSettings,
   type ChatSettings,
@@ -6,15 +7,29 @@ import {
   type ConversationSummary
 } from '../../../../shared/chat'
 import Composer from './Composer'
-import MessageView, { FallbackNote, Thinking, UserBubble } from './MessageView'
+import MessageView, { FallbackNote, Thinking, ToolLine, UserBubble } from './MessageView'
 import Markdown from '../Markdown'
 
-type Live = {
-  requestId: string
-  userText: string
-  thinking: string
-  text: string
-  fallbackTo?: string
+type Segment =
+  | { kind: 'thinking' | 'text'; text: string }
+  | { kind: 'tool'; id: string; label: string; status: 'running' | 'done' | 'error' }
+  | { kind: 'fallback'; to: string }
+type Live = { requestId: string; userText: string; segments: Segment[] }
+
+const isToolResults = (m: BetaMessageParam | undefined): boolean =>
+  !!m && typeof m.content !== 'string' && m.content.every((b) => b.type === 'tool_result')
+
+// Streamed text joins the previous segment of the same kind, or starts a new one.
+function appendText(segments: Segment[], kind: 'thinking' | 'text', text: string): Segment[] {
+  const last = segments[segments.length - 1]
+  if (last && last.kind === kind)
+    return [...segments.slice(0, -1), { kind, text: last.text + text }]
+  return [...segments, { kind, text }]
+}
+
+function upsertTool(segments: Segment[], tool: Extract<Segment, { kind: 'tool' }>): Segment[] {
+  const i = segments.findIndex((s) => s.kind === 'tool' && s.id === tool.id)
+  return i < 0 ? [...segments, tool] : segments.map((s, j) => (j === i ? tool : s))
 }
 
 function ChatView({
@@ -48,13 +63,27 @@ function ChatView({
         if (!p || e.requestId !== p.requestId) return
         switch (e.type) {
           case 'thinking':
-            setLive((l) => l && { ...l, thinking: l.thinking + e.text })
+            setLive((l) => l && { ...l, segments: appendText(l.segments, 'thinking', e.text) })
             break
           case 'text':
-            setLive((l) => l && { ...l, text: l.text + e.text })
+            setLive((l) => l && { ...l, segments: appendText(l.segments, 'text', e.text) })
             break
           case 'fallback':
-            setLive((l) => l && { ...l, fallbackTo: e.to })
+            setLive((l) => l && { ...l, segments: [...l.segments, { kind: 'fallback', to: e.to }] })
+            break
+          case 'tool':
+            setLive(
+              (l) =>
+                l && {
+                  ...l,
+                  segments: upsertTool(l.segments, {
+                    kind: 'tool',
+                    id: e.id,
+                    label: e.label,
+                    status: e.status
+                  })
+                }
+            )
             break
           case 'done':
           case 'error':
@@ -79,7 +108,7 @@ function ChatView({
     setError(null)
     setDraft('')
     pending.current = { requestId, userText: text }
-    setLive({ requestId, userText: text, thinking: '', text: '' })
+    setLive({ requestId, userText: text, segments: [] })
     window.custard.chat.send({ requestId, conversationId: current?.id ?? null, text, settings })
   }
 
@@ -99,6 +128,15 @@ function ChatView({
     setSettings(s)
     window.custard.settings.set(s)
   }
+
+  const failedTools = useMemo(() => {
+    const ids = new Set<string>()
+    for (const m of current?.messages ?? [])
+      if (typeof m.content !== 'string')
+        for (const b of m.content)
+          if (b.type === 'tool_result' && b.is_error) ids.add(b.tool_use_id)
+    return ids
+  }, [current])
 
   const empty = !current && !live
 
@@ -151,16 +189,28 @@ function ChatView({
             </div>
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-6">
-              {current?.messages.map((m, i) => (
-                <MessageView key={i} message={m} />
-              ))}
+              {current?.messages.map((m, i) =>
+                isToolResults(m) ? null : (
+                  // A reply that continues after vault actions sits flush with the part before it.
+                  <div key={i} className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
+                    <MessageView message={m} failedTools={failedTools} />
+                  </div>
+                )
+              )}
               {live && (
                 <>
                   <UserBubble text={live.userText} />
                   <div>
-                    <Thinking text={live.thinking} live={!live.text} />
-                    {live.fallbackTo && <FallbackNote to={live.fallbackTo} />}
-                    {live.text && <Markdown text={live.text} />}
+                    {live.segments.map((seg, i) => {
+                      if (seg.kind === 'thinking') return <Thinking key={i} text={seg.text} />
+                      if (seg.kind === 'fallback') return <FallbackNote key={i} to={seg.to} />
+                      if (seg.kind === 'tool')
+                        return <ToolLine key={i} label={seg.label} status={seg.status} />
+                      return <Markdown key={i} text={seg.text} />
+                    })}
+                    {live.segments[live.segments.length - 1]?.kind !== 'text' && (
+                      <Thinking text="" live />
+                    )}
                   </div>
                 </>
               )}
