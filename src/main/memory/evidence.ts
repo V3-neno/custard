@@ -25,8 +25,8 @@ export type Evidence = {
   actions: EvidenceAction[]
   notices: string[]
   answer: string
-  // The user asked for this not to be remembered.
-  dontRemember: boolean
+  // The user asked for this not to be remembered: the words that said so.
+  dontRemember: string | null
 }
 
 // A backstop, not a guarantee: obvious credentials and long opaque strings.
@@ -45,8 +45,20 @@ export function redact(s: string): string {
 const cut = (s: string, n: number): string =>
   s.length > n ? `${s.slice(0, n).trimEnd()}… [shortened]` : s
 
-const DONT_REMEMBER =
-  /\b(don'?t|do not|never)\s+(remember|save|store|keep|record)\b|\bforget\s+(this|that|it|what i)\b|\boff the record\b/i
+// An explicit request, phrased as one, not to remember: "don't save this",
+// "forget this chat", "off the record". Casual phrases ("forget it, play
+// something else", "I don't remember that") don't count, so the request has
+// to start a sentence or follow "please", "and", "but" or "so", and name
+// what not to keep. A backstop to the switches in the app, not a classifier.
+const DONT_REMEMBER = new RegExp(
+  [
+    String.raw`(?:^|[.!?;:,]\s*|\b(?:please|and|but|so)\s+)(?:please\s+)?(?:don['’]?t|do not|never)\s+(?:remember|save|store|record)\s+(?:this|that|it|any of (?:this|that)|what I (?:said|told you))\b`,
+    String.raw`(?:^|[.!?;:,]\s*|\b(?:please|and|but|so)\s+)(?:please\s+)?forget\s+(?:this (?:chat|conversation)|what I (?:just )?(?:said|told you)|everything (?:I|we) (?:said|talked about))`,
+    String.raw`\boff the record\b`,
+    String.raw`\bkeep (?:this|that|it) out of (?:your |my )?memory\b`
+  ].join('|'),
+  'i'
+)
 
 // Tools whose results are content (notes, files, pages, search results), not
 // observations about the world. Only their status goes in.
@@ -92,7 +104,14 @@ export function buildEvidence(c: Conversation, from: number, to: number): Eviden
     actions,
     notices,
     answer: answerMsg ? redact(cut(textOf(answerMsg).trim(), LIMITS.answer)) : '',
-    dontRemember: requests.some((r) => DONT_REMEMBER.test(r))
+    dontRemember:
+      requests
+        .map((r) =>
+          DONT_REMEMBER.exec(r)?.[0]
+            .replace(/^[.!?;:,\s]+/, '')
+            .trim()
+        )
+        .find(Boolean) ?? null
   }
 }
 
