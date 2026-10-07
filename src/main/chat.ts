@@ -21,7 +21,8 @@ import {
   releaseConversation,
   saveConversation
 } from './store'
-import { memory } from './memory'
+import { allPluginInfo, memory } from './memory'
+import { pluginContext } from './memory/plugins'
 import { runOpenAI } from './openai'
 import { runVaultTool, vaultSystemPrompt, vaultTools } from './vault'
 import { withoutUnavailableTools } from './history'
@@ -197,6 +198,16 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         ...plugins.instructions
       ].join('\n\n')
     })
+  // Notes about the plugins this message is about (at most two).
+  if (vaultReady) {
+    try {
+      const notes = pluginContext(vault, conversation, req.text, allPluginInfo())
+      if (notes) system.push({ type: 'text', text: notes })
+    } catch (err) {
+      // Notes are a help, not a requirement for answering.
+      console.error('Plugin notes:', err)
+    }
+  }
   const web = webTools(model)
   system.push({ type: 'text', text: web.prompt })
   system.push({

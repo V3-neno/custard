@@ -7,6 +7,7 @@ import {
   type TestReport
 } from '../../../../shared/plugins'
 import { cleanError, danger, input, primary, secondary } from './ui'
+import type { MemorySettings } from '../../../../shared/memory'
 
 const stateLabel: Record<PluginStatus['state'], string> = {
   'not-activated': 'Not activated',
@@ -33,6 +34,47 @@ function Badge({ p }: { p: PluginStatus }): React.JSX.Element {
         ? 'Has problems'
         : stateLabel[p.state]
   return <span className={`text-xs ${color}`}>{text}</span>
+}
+
+// "Remember activity for this plugin": part of Custard's memory settings.
+function PluginMemory({ p }: { p: PluginStatus }): React.JSX.Element {
+  const [settings, setSettings] = useState<MemorySettings | null>(null)
+  useEffect(() => {
+    window.custard.memory.getSettings().then(setSettings)
+  }, [])
+  const on = settings ? !settings.offPlugins.includes(p.id) : true
+  return (
+    <section className="mb-5">
+      <h4 className="mb-1 text-sm font-medium">Memory</h4>
+      <label className="flex items-start gap-2 text-sm text-ash-300">
+        <input
+          type="checkbox"
+          className="mt-1"
+          aria-label={`Remember activity for ${p.name}`}
+          checked={on}
+          disabled={!settings}
+          onChange={(e) => {
+            const offPlugins = settings!.offPlugins.filter((x) => x !== p.id)
+            if (!e.target.checked) offPlugins.push(p.id)
+            const next = { ...settings!, offPlugins }
+            setSettings(next)
+            window.custard.memory.setSettings(next)
+          }}
+        />
+        <span>
+          Remember activity for this plugin. What you ask {p.name} to do, what it reports and how it
+          turned out go to its folder under Custard/Plugins in your vault after chats, and relevant
+          notes are shown to the assistant when you use it again.
+        </span>
+      </label>
+      {!on && (
+        <p className="mt-1 text-xs text-ash-500">
+          Off: its actions are left out of what Custard remembers. Notes already in your vault stay
+          until you edit them.
+        </p>
+      )}
+    </section>
+  )
 }
 
 function ConfigForm({
@@ -448,6 +490,7 @@ function Detail({
       )}
 
       <ConfigForm key={p.id} p={p} onSaved={onChange} />
+      {p.active && <PluginMemory p={p} />}
 
       {writeTools.length > 0 && (
         <section className="mb-5">

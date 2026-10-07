@@ -444,7 +444,7 @@ describe('capture', () => {
     answer = async () =>
       summary({
         workflows: [workflow()],
-        preferences: [{ text: 'Likes Discover Weekly on Mondays', replaces: '' }]
+        preferences: [{ text: 'Likes Discover Weekly on Mondays', replaces: '', plugin: '' }]
       })
     await captured(capture(), c)
     expect(job().status).toBe('saved')
@@ -863,7 +863,7 @@ describe('capture', () => {
     for (let i = 0; i < 3; i++) turn(c, `more ${i}`)
     writeFileSync(join(vault, 'x.md'), '')
     answer = async () =>
-      summary({ preferences: [{ text: 'Prefers jazz', replaces: 'Prefers rock' }] })
+      summary({ preferences: [{ text: 'Prefers jazz', replaces: 'Prefers rock', plugin: '' }] })
     await captured(capture(), c)
     expect(note('Custard/Memory.md')).toContain(
       'Prefers jazz (changes an earlier preference: "Prefers rock"; the earlier one is left as written)'

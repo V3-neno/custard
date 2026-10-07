@@ -45,6 +45,8 @@ export function safeName(name: string, fallback: string): string {
   const cleaned = name
     // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*#^[\]\u0000-\u001f]/g, ' ')
+    // No "." or ".." left as a word of the name.
+    .replace(/(^|\s)\.+(?=\s|$)/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^\.+/, '')

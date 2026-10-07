@@ -58,7 +58,14 @@ const textOf = (m: Conversation['messages'][number]): string =>
     ? m.content
     : m.content.map((b) => (b.type === 'text' ? b.text : '')).join('\n')
 
-export function buildEvidence(c: Conversation, from: number, to: number): Evidence {
+// `skipPlugins`: plugins the user asked not to remember; their actions are
+// left out entirely.
+export function buildEvidence(
+  c: Conversation,
+  from: number,
+  to: number,
+  skipPlugins: string[] = []
+): Evidence {
   const msgs = c.messages.slice(from, to)
   const isResults = (m: (typeof msgs)[number]): boolean =>
     typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
@@ -73,6 +80,7 @@ export function buildEvidence(c: Conversation, from: number, to: number): Eviden
         if (b.type === 'tool_use') {
           const a = c.actions?.[b.id]
           const plugin = /^([a-z][a-z0-9-]*)__/.exec(b.name)?.[1] ?? null
+          if (plugin && skipPlugins.includes(plugin)) continue
           actions.push({
             id: `A${actions.length + 1}`,
             label: a?.label || b.name,

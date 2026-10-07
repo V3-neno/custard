@@ -14,7 +14,9 @@ export type Entry = { text: string }
 
 export type Rendered = {
   // Lines for the "Remembered by Custard" list in Memory.md.
-  memory: string[]
+  // Lines for a "Remembered by Custard" list: Memory.md, or a plugin's
+  // Preferences.md when `plugin` is set.
+  memory: { plugin: string; text: string }[]
   // Activity entries, by plugin id ('' for none).
   activity: { plugin: string; text: string }[]
 }
@@ -73,12 +75,22 @@ export function render(
 ): Rendered {
   const mark = markerComment(marker)
   const source = `From chat "${plain(from.title)}" on ${from.date} (chat ${from.chatId.slice(0, 8)})`
-  const memory = [
-    ...summary.preferences.map(
-      (p) =>
-        `- ${from.date}: ${plain(p.text)}${p.replaces ? ` (changes an earlier preference: "${plain(p.replaces)}"; the earlier one is left as written)` : ''} ${mark}`
-    ),
-    ...summary.decisions.map((d) => `- ${from.date}: Decided: ${plain(d)} ${mark}`)
+  // A preference goes with a plugin only when that plugin acted in this
+  // part of the chat; the model's word alone doesn't pick a folder.
+  const acted = [...new Set(evidence.actions.flatMap((a) => (a.plugin ? [a.plugin] : [])))]
+  const pluginFor = (name: string): string => {
+    const n = name.trim().toLowerCase()
+    return (n && acted.find((id) => id === n || pluginName(id).toLowerCase() === n)) || ''
+  }
+  const memory: Rendered['memory'] = [
+    ...summary.preferences.map((p) => ({
+      plugin: pluginFor(p.plugin),
+      text: `- ${from.date}: ${plain(p.text)}${p.replaces ? ` (changes an earlier preference: "${plain(p.replaces)}"; the earlier one is left as written)` : ''} ${mark}`
+    })),
+    ...summary.decisions.map((d) => ({
+      plugin: '',
+      text: `- ${from.date}: Decided: ${plain(d)} ${mark}`
+    }))
   ]
   const byId = new Map(evidence.actions.map((a) => [a.id, a]))
   const activity: Rendered['activity'] = []

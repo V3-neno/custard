@@ -10,6 +10,7 @@ import { migrateLegacySpotify } from './migrate'
 import { createRuntime, pluginPreloadPath, runTestsInSandbox } from './runtime'
 import { scaffoldPlugin } from './scaffold'
 import { PluginStore, type Crypto } from './store'
+import { pluginNotesChanged } from '../memory'
 import type { Transport } from './net'
 
 // Where things live. In development the app path is the repository, so
@@ -105,12 +106,19 @@ export function registerPluginHandlers(): void {
   handle('plugins:status', (_, id: string) => h().status(id))
   handle('plugins:review', (_, id: string) => h().review(id))
   handle('plugins:test', (_, id: string) => h().test(id))
-  handle('plugins:activate', (_, id: string, buildId: string, approved: string[]) =>
-    h().activate(id, buildId, approved)
+  // Plugin notes in the vault follow the plugin's name and state.
+  const noted = <T>(id: string, s: T): T => {
+    pluginNotesChanged(id)
+    return s
+  }
+  handle('plugins:activate', async (_, id: string, buildId: string, approved: string[]) =>
+    noted(id, await h().activate(id, buildId, approved))
   )
-  handle('plugins:rollback', (_, id: string, approved: string[]) => h().rollback(id, approved))
-  handle('plugins:enable', (_, id: string) => h().enable(id))
-  handle('plugins:disable', (_, id: string) => h().disable(id))
+  handle('plugins:rollback', async (_, id: string, approved: string[]) =>
+    noted(id, await h().rollback(id, approved))
+  )
+  handle('plugins:enable', async (_, id: string) => noted(id, await h().enable(id)))
+  handle('plugins:disable', (_, id: string) => noted(id, h().disable(id)))
   handle('plugins:uninstall', async (e, id: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const opts = {
@@ -125,6 +133,7 @@ export function registerPluginHandlers(): void {
     const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
     if (r.response !== 1) return h().status(id)
     h().uninstall(id)
+    pluginNotesChanged(id, 'uninstalled')
     return h().status(id)
   })
   handle('plugins:setConfig', (_, id: string, values: Record<string, unknown>) =>

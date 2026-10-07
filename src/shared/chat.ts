@@ -117,7 +117,10 @@ export type CaptureJob = {
   provider?: Provider
   // The note text, once summarized, so a retry after a crash writes the same
   // entries instead of asking the model again. Removed once saved.
-  plan?: { memory: string[]; activity: { plugin: string; text: string }[] }
+  plan?: {
+    memory: { plugin: string; text: string }[]
+    activity: { plugin: string; text: string }[]
+  }
   notes?: string[]
   // Why it was skipped or failed, in words for the user.
   reason?: string

@@ -15,7 +15,14 @@ const check = (cond, what) => {
   if (!cond) process.exitCode = 1
 }
 const step = (s) => console.log('\n## ' + s)
-const spotifyLog = () => JSON.parse(fs.readFileSync(OUT + '/spotify.json', 'utf8'))
+// The mock may be mid-write; a partial file reads as "nothing yet".
+const spotifyLog = () => {
+  try {
+    return JSON.parse(fs.readFileSync(OUT + '/spotify.json', 'utf8'))
+  } catch {
+    return []
+  }
+}
 const queuePosts = () =>
   spotifyLog().filter((r) => r.path === '/v1/me/player/queue' && r.method === 'POST').length
 const until = async (f, ms = 15000) => {
@@ -64,7 +71,12 @@ async function launch() {
       }
     }
   }, OUT + '/vault')
-  const w = await app.firstWindow()
+  // The app's window, not a plugin's hidden sandbox window.
+  let w = null
+  for (let i = 0; !w && i < 300; i++) {
+    w = app.windows().find((x) => x.url().endsWith('/renderer/index.html')) ?? null
+    if (!w) await new Promise((r) => setTimeout(r, 100))
+  }
   await w.setViewportSize({ width: 1280, height: 900 })
   w.on('pageerror', (e) => console.log('pageerror:', e.message))
   await w.waitForSelector('text=Custard')

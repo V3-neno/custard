@@ -14,9 +14,54 @@ import { handle } from '../ipc'
 import type { ChatMemory } from '../../shared/chat'
 import type { MemorySettings } from '../../shared/memory'
 import { Capture } from './capture'
+import { ensurePluginFolder, refreshPlugin, type PluginInfo } from './plugins'
+import { existsSync } from 'fs'
 import { summarizer } from './summarize'
 
 let instance: Capture | null = null
+
+// What the plugin notes need to know about a plugin, from the plugin host.
+export function pluginInfo(id: string, state?: PluginInfo['state']): PluginInfo | null {
+  try {
+    const s = pluginHost().status(id)
+    return {
+      id,
+      name: s.name,
+      description: s.description,
+      version: s.active?.version ?? s.version,
+      state: state ?? s.state,
+      tools: s.tools.map((t) => ({ name: t.fullName, effect: t.effect }))
+    }
+  } catch {
+    return null
+  }
+}
+
+// Every plugin, for deciding which notes a message needs. Reading every
+// plugin's status hashes its source, so it's kept for a few seconds.
+let cached: { at: number; list: PluginInfo[] } | null = null
+export function allPluginInfo(): PluginInfo[] {
+  if (cached && Date.now() - cached.at < 10_000) return cached.list
+  const list = pluginHost()
+    .list()
+    .flatMap((p) => pluginInfo(p.id) ?? [])
+  cached = { at: Date.now(), list }
+  return list
+}
+
+// After a plugin is activated, renamed, turned on or off, or uninstalled:
+// its notes (if it has any) say so. Notes are never deleted or moved.
+export function pluginNotesChanged(id: string, state?: PluginInfo['state']): void {
+  cached = null
+  const vault = getVaultPath()
+  const info = pluginInfo(id, state)
+  if (!vault || !existsSync(vault) || !info) return
+  try {
+    refreshPlugin(vault, info)
+  } catch (err) {
+    console.error('Plugin notes:', err)
+  }
+}
 
 // The app's one capture queue.
 export function memory(): Capture {
@@ -36,6 +81,10 @@ export function memory(): Capture {
       } catch {
         return id
       }
+    },
+    pluginNote: (vault, id, note) => {
+      const info = pluginInfo(id)
+      return info ? `${ensurePluginFolder(vault, info)}/${note}.md` : null
     },
     notify: (c) => {
       // App windows only; plugin sandboxes are windows too.

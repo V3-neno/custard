@@ -14,7 +14,6 @@ export const ACTIVITY_NOTE = 'Custard/Activity.md'
 export const MEMORY_SECTION = 'remembered'
 export const ACTIVITY_SECTION = 'activity'
 export const CAPS = { memory: 40, activity: 30 }
-export const MEMORY_ARCHIVE = 'Custard/Memory archive.md'
 // Custard/Activity.md archives to Custard/Activity/2026-10.md, and a
 // plugin's Activity.md to an Activity folder beside it.
 const activityArchive = (note: string, entry: string): string => {
@@ -22,8 +21,11 @@ const activityArchive = (note: string, entry: string): string => {
   return `${note.replace(/\.md$/, '')}/${month ?? 'Earlier'}.md`
 }
 
-const MEMORY_HEADING =
-  '## Remembered by Custard\n\n_Custard adds to this list after chats. Edit or delete anything here; what you delete is not added back. Older items move to [[Memory archive]]._'
+// Custard/Memory.md archives to Custard/Memory archive.md, a plugin's
+// Preferences.md to "Preferences archive.md" beside it.
+const listArchive = (note: string): string => note.replace(/\.md$/, ' archive.md')
+const listHeading = (note: string): string =>
+  `## Remembered by Custard\n\n_Custard adds to this list after chats. Edit or delete anything here; what you delete is not added back. Older items move to [[${listArchive(note).replace(/\.md$/, '')}]]._`
 const activityIntro = (title: string): string =>
   `# ${title}\n\nWhat you and Custard did, added after chats. Each entry keeps what was asked, what was tried, what the tool reported and what was seen afterwards apart. Edit or delete anything; older entries move to the Activity folder.\n`
 
@@ -87,13 +89,13 @@ export function addEntries(
       base,
       name,
       body,
-      current === null && kind === 'memory' ? MEMORY_HEADING : undefined
+      current === null && kind === 'memory' ? listHeading(note) : undefined
     )
   })
   // Archived after the main note is written; a crash in between leaves the
   // entries in both places, never in neither.
   if (overflow.length) {
-    if (kind === 'memory') archive(vault, MEMORY_ARCHIVE, overflow)
+    if (kind === 'memory') archive(vault, listArchive(note), overflow)
     else {
       const byNote = new Map<string, string[]>()
       for (const o of overflow) {

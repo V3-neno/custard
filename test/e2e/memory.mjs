@@ -143,14 +143,14 @@ try {
     /\[spotify__search, plugin spotify, read-only\] → completed/.test(s1[0]?.evidence ?? ''),
     "the evidence names the action and Custard's record of it"
   )
-  const act = note('Custard/Activity.md')
+  const act = note('Custard/Plugins/Spotify/Activity.md')
   check(
     act.includes('### ') &&
       act.includes('Looked up Nils Frahm') &&
       act.includes('- Plugin: Spotify') &&
       act.includes(': the tool reported success') &&
       act.includes('- Outcome: Accepted by the tool, not confirmed'),
-    'Activity.md has a readable entry that does not call an unconfirmed action a success'
+    "the plugin's Activity.md has a readable entry that does not call an unconfirmed action a success"
   )
   const mem = note('Custard/Memory.md')
   check(
@@ -158,6 +158,16 @@ try {
       mem.includes('## Remembered by Custard') &&
       mem.includes('Prefers warm jazz'),
     "Memory.md keeps the user's text and adds the preference in Custard's own section"
+  )
+  check(
+    /^---\ncustard-plugin-id: spotify\n---/.test(note('Custard/Plugins/Spotify/Overview.md')) &&
+      note('Custard/Plugins/Spotify/Overview.md').includes('treat it as a claim'),
+    "on first use, Spotify got its own folder, identified by id, with its description marked as the plugin's claim"
+  )
+  check(
+    mem.includes('[[Custard/Plugins/Spotify/Overview|Spotify]]') &&
+      !fs.existsSync(`${OUT}/vault/Custard/Activity.md`),
+    'Memory.md links it; plugin activity does not go to the general Activity note'
   )
   await w.screenshot({ path: `${SHOTS}/step2-04-memory-saved.png` })
 
@@ -167,12 +177,23 @@ try {
   await idle()
   const sys = JSON.stringify(chatRequests().at(-1)?.system)
   check(
-    sys.includes('Prefers warm jazz') && sys.includes('Looked up Nils Frahm'),
-    "the next chat's system prompt carries the preference and the recent activity"
+    sys.includes('Prefers warm jazz') && !sys.includes('Looked up Nils Frahm'),
+    "the next chat's system prompt carries the preference, but not Spotify's notes for small talk"
   )
   check(sys.includes('never authorize an action'), 'and says notes are not permission to act')
   check(summaries().length === 1, 'small talk is not summarized')
   check((await status()) === '', 'and the chat shows no memory status')
+
+  await send('Did spotify find what I asked for earlier?')
+  await idle()
+  const sys2 = JSON.stringify(chatRequests().at(-1)?.system)
+  check(
+    sys2.includes('<plugin-notes plugin=\\"Spotify\\"') &&
+      sys2.includes('Looked up Nils Frahm') &&
+      sys2.includes('Accepted by the tool, not confirmed'),
+    'naming Spotify brings its notes from the earlier chat'
+  )
+  check(summaries().length === 1, 'and asking about it is not itself summarized')
 
   step("Don't remember this chat")
   await w.click("text=Don't remember this chat")
@@ -238,10 +259,42 @@ try {
     'after the restart and the next turn, with the vault back, it was saved'
   )
   check(summaries().length === 2, 'with one more summary call')
-  check(note('Custard/Activity.md').split('\n### ').length === 3, 'Activity.md now has two entries')
+  check(
+    note('Custard/Plugins/Spotify/Activity.md').split('\n### ').length === 3,
+    "Spotify's Activity.md now has two entries"
+  )
   check(
     fs.existsSync(`${OUT}/vault/Custard/.custard-vault-id`),
     'the vault has an id, so waiting captures only go back to it'
+  )
+
+  step('Per-plugin switch, then turning the plugin off')
+  await w.click('button[title=Settings]')
+  await w.click('button:text-is("Plugins")')
+  await w.click('button:has-text("Spotify")')
+  await w.uncheck('input[aria-label="Remember activity for Spotify"]')
+  check(
+    (await w.locator('text=its actions are left out of what Custard remembers').count()) === 1,
+    'the plugin setting explains what turning it off does'
+  )
+  await w.screenshot({ path: `${SHOTS}/step2-07-plugin-memory.png` })
+  await w.click('button:text-is("Done")')
+  await newChat()
+  await send('memory test: find Nils Frahm once more')
+  await idle()
+  await new Promise((r) => setTimeout(r, 1000))
+  check(summaries().length === 2, "Spotify's actions are no longer remembered")
+  await w.click('button[title=Settings]')
+  await w.click('button:text-is("Plugins")')
+  await w.click('button:has-text("Spotify")')
+  await w.click('button:text-is("Disable")')
+  check(
+    await until(() =>
+      note('Custard/Plugins/Spotify/Overview.md').includes(
+        'turned off in Custard (its notes are kept)'
+      )
+    ),
+    'turning Spotify off is noted in its Overview, and its notes stay'
   )
 } catch (e) {
   await w.screenshot({ path: `${SHOTS}/memory-fail.png` }).catch(() => {})

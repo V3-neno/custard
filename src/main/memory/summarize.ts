@@ -16,7 +16,8 @@ export type WorkflowOutcome = 'worked' | 'accepted' | 'failed' | 'not-run' | 'un
 
 export type Summary = {
   save: boolean
-  preferences: { text: string; replaces: string }[]
+  // plugin: the plugin a preference is about (its id or name), or ''.
+  preferences: { text: string; replaces: string; plugin: string }[]
   decisions: string[]
   workflows: {
     plugin: string
@@ -44,7 +45,7 @@ const object = (properties: Record<string, unknown>): Record<string, unknown> =>
 // limits (code enforces those afterwards), every field required.
 export const SUMMARY_SCHEMA = object({
   save: { type: 'boolean' },
-  preferences: { type: 'array', items: object({ text: str, replaces: str }) },
+  preferences: { type: 'array', items: object({ text: str, replaces: str, plugin: str }) },
   decisions: strings,
   workflows: {
     type: 'array',
@@ -74,7 +75,7 @@ export const SUMMARY_SYSTEM = [
   'Workflows: list the ids of the actions (A1, A2, …) that belong to each. Keep the request, what was tried, what the tool reported, what was observed afterwards and what is still uncertain apart.',
   'A tool accepting a request is not proof it worked. Use outcome "worked" only when a later observation in the evidence shows it; "accepted" when the tool reported success but nothing confirmed it; "not-run" when it was declined or never sent; "unknown" when the outcome is unknown; "mixed" when the actions disagree.',
   'When something was retried, describe the attempts in one workflow. When the evidence contradicts itself, say so in uncertain instead of choosing.',
-  'preferences.replaces: the earlier preference this one changes, in the words of the evidence, or "" if none. resolutions: only when the evidence shows an earlier problem was fixed.',
+  'preferences.replaces: the earlier preference this one changes, in the words of the evidence, or "" if none. preferences.plugin: the plugin id from the evidence when the preference is about using that plugin, else "". resolutions: only when the evidence shows an earlier problem was fixed.',
   'Write short plain sentences in the language the user used.'
 ].join('\n')
 
@@ -102,7 +103,9 @@ export function parseSummary(raw: string): Summary {
     save: v.save === true,
     preferences: list(v.preferences, 6, (y) => {
       const text = cleanText(obj(y).text)
-      return text ? { text, replaces: cleanText(obj(y).replaces) } : null
+      return text
+        ? { text, replaces: cleanText(obj(y).replaces), plugin: cleanText(obj(y).plugin, 60) }
+        : null
     }),
     decisions: list(v.decisions, 6, (y) => cleanText(y) || null),
     workflows: list(v.workflows, 8, (y) => {

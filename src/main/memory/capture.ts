@@ -32,7 +32,7 @@ export type CaptureDeps = {
   pluginName: (id: string) => string
   // Where a plugin's activity goes (plugin knowledge); null for the main
   // Activity note.
-  pluginNote?: (vault: string, pluginId: string) => string | null
+  pluginNote?: (vault: string, pluginId: string, note: 'Activity' | 'Preferences') => string | null
   notify?: (c: Conversation) => void
   now?: () => number
 }
@@ -177,7 +177,7 @@ export class Capture {
       void this.run()
       return
     }
-    const evidence = buildEvidence(c, from, to)
+    const evidence = buildEvidence(c, from, to, this.deps.settings().offPlugins)
     if (evidence.dontRemember) {
       this.set(id, (m) => {
         m.job = {
@@ -317,7 +317,7 @@ export class Capture {
 
     let plan = job.plan
     if (!plan) {
-      const evidence = buildEvidence(c, job.from, job.to)
+      const evidence = buildEvidence(c, job.from, job.to, this.deps.settings().offPlugins)
       if (evidence.dontRemember) {
         this.set(id, (m) => this.end(m, 'skipped', 'You asked Custard not to remember this.'))
         return false
@@ -396,17 +396,33 @@ export class Capture {
   // note that already has this job's marker (a crash after writing, before
   // the job was recorded) is counted as written and left alone.
   private write(vault: string, marker: string, plan: Rendered): string[] {
-    const targets = new Map<string, string[]>()
-    for (const a of plan.activity) {
-      const note = (a.plugin && this.deps.pluginNote?.(vault, a.plugin)) || ACTIVITY_NOTE
-      targets.set(note, [...(targets.get(note) ?? []), a.text])
+    const off = this.deps.settings().offPlugins
+    // Plugin entries go to the plugin's own notes (created on this first
+    // use), unless remembering that plugin was turned off meanwhile.
+    const group = (
+      items: { plugin: string; text: string }[],
+      kind: 'Activity' | 'Preferences',
+      fallback: string
+    ): Map<string, string[]> => {
+      const out = new Map<string, string[]>()
+      for (const i of items) {
+        if (i.plugin && off.includes(i.plugin)) continue
+        const note = (i.plugin && this.deps.pluginNote?.(vault, i.plugin, kind)) || fallback
+        out.set(note, [...(out.get(note) ?? []), i.text])
+      }
+      return out
     }
     const notes: string[] = []
-    if (plan.memory.length) {
-      addEntries(vault, MEMORY_NOTE, 'memory', marker, plan.memory)
-      notes.push(MEMORY_NOTE)
+    const lists = group(
+      plan.memory.map((m) => (typeof m === 'string' ? { plugin: '', text: m } : m)),
+      'Preferences',
+      MEMORY_NOTE
+    )
+    for (const [note, items] of lists) {
+      addEntries(vault, note, 'memory', marker, items)
+      notes.push(note)
     }
-    for (const [note, items] of targets) {
+    for (const [note, items] of group(plan.activity, 'Activity', ACTIVITY_NOTE)) {
       addEntries(vault, note, 'activity', marker, items)
       notes.push(note)
     }
