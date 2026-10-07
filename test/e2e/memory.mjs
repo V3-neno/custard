@@ -295,10 +295,17 @@ try {
     JSON.stringify(chatRequests().at(-1)?.system).includes('Automatic memory is off'),
     'and the model is told it is not remembered'
   )
+  // The switch and the chat change after React re-renders (the chat is
+  // cleared in an effect), so wait for that state rather than reading it
+  // straight after the click.
   await w.click(tempSwitch)
   check(
-    (await w.getAttribute(tempSwitch, 'aria-checked')) === 'false' &&
-      (await w.locator('text=memory test: find Nils Frahm in a temporary').count()) === 0,
+    await until(
+      async () =>
+        (await w.getAttribute(tempSwitch, 'aria-checked')) === 'false' &&
+        (await w.locator('text=memory test: find Nils Frahm in a temporary').count()) === 0,
+      5000
+    ),
     'switching it off starts a new, normal chat'
   )
   await w.click('button[title="Chat history"]')
@@ -308,9 +315,13 @@ try {
       .count()) === 1,
     'the history marks it as temporary'
   )
+  // Opening a chat loads it over IPC first; the switch follows the loaded chat.
   await w.click('div.group:has-text("in a temporary chat") >> nth=0')
+  await w.waitForSelector('text=memory test: find Nils Frahm in a temporary chat', {
+    timeout: 15000
+  })
   check(
-    (await w.getAttribute(tempSwitch, 'aria-checked')) === 'true',
+    await until(async () => (await w.getAttribute(tempSwitch, 'aria-checked')) === 'true', 5000),
     'opening it again shows the switch on'
   )
 
