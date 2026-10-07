@@ -176,6 +176,11 @@ function ChatView(props: Props): React.JSX.Element {
     const memory = await window.custard.memory.setChat(current.id, off)
     setCurrent((c) => (c && c.id === current.id ? { ...c, memory: memory ?? undefined } : c))
   }
+  const forgetChat = async (): Promise<void> => {
+    if (!current) return
+    const memory = await window.custard.memory.forgetChat(current.id)
+    setCurrent((c) => (c && c.id === current.id ? { ...c, memory: memory ?? undefined } : c))
+  }
 
   useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [current, live])
 
@@ -337,7 +342,12 @@ function ChatView(props: Props): React.JSX.Element {
           />
         )}
         {current && (
-          <MemoryBar memory={current.memory} disabled={!!live} onToggle={setChatMemory} />
+          <MemoryBar
+            memory={current.memory}
+            disabled={!!live}
+            onToggle={setChatMemory}
+            onForget={forgetChat}
+          />
         )}
         <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
         <Composer

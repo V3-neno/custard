@@ -1,7 +1,8 @@
 // Automatic memory in the built app, against test/e2e/interrupt-mock.mjs: a
 // chat with a plugin action is remembered without being asked, a later chat
-// sees it, small talk isn't saved, the per-chat and global switches stop it,
-// and a capture waiting for a missing vault is saved after a restart.
+// sees it, small talk isn't saved, a one-message preference is, Forget
+// deletes what a chat saved, the per-chat and global switches stop it, and a
+// capture waiting for a missing vault is saved after a restart.
 // Usage, from the repo root after `npx electron-vite build`:
 //   node test/e2e/interrupt-mock.mjs <out> &   (with <out>/plugin and <out>/vault as for interrupt.mjs)
 //   node test/e2e/memory.mjs <out> <screenshot dir>
@@ -26,6 +27,14 @@ const read = (f, fallback) => {
 const summaries = () => read('/memory.json', [])
 const chatRequests = () => read('/anthropic.json', [])
 const note = (p) => fs.readFileSync(`${OUT}/vault/${p}`, 'utf8')
+const captures = () => {
+  try {
+    return fs.readdirSync(`${OUT}/vault/Custard/Captures`).sort()
+  } catch {
+    return []
+  }
+}
+const capture = (f) => note(`Custard/Captures/${f}`)
 const until = async (f, ms = 15000) => {
   const end = Date.now() + ms
   while (Date.now() < end) {
@@ -56,6 +65,13 @@ async function launch() {
   await app.evaluate(({ safeStorage, dialog, shell }, vault) => {
     safeStorage.setUsePlainTextEncryption?.(true)
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [vault] })
+    // Confirmations: remember what was asked, answer the second button.
+    globalThis.__asked = []
+    dialog.showMessageBox = async (...args) => {
+      const o = args.at(-1)
+      globalThis.__asked.push({ message: o.message, detail: o.detail })
+      return { response: 1, checkboxChecked: false }
+    }
     globalThis.__custardPluginTransport = async (req) => {
       const r = await fetch('http://127.0.0.1:8899' + req.url.pathname + req.url.search, {
         method: req.method,
@@ -147,22 +163,24 @@ try {
     /\[spotify__search, plugin spotify, read-only\] → completed/.test(s1[0]?.evidence ?? ''),
     "the evidence names the action and Custard's record of it"
   )
-  const act = note('Custard/Activity.md')
+  check(captures().length === 1, `one new note in Custard/Captures (${captures().join(', ')})`)
+  const act = capture(captures()[0] ?? 'missing')
   check(
-    act.includes('### ') &&
-      act.includes('Looked up Nils Frahm') &&
+    act.includes('custard-capture:') &&
+      act.includes('Custard writes this note once and never changes it') &&
+      act.includes('## Preferences\n\n- Prefers warm jazz') &&
+      act.includes('### Looked up Nils Frahm') &&
       act.includes('- Plugin: Spotify') &&
-      act.includes(': the tool reported success') &&
-      act.includes('- Outcome: Accepted by the tool, not confirmed'),
-    'Activity.md has a readable entry that does not call an unconfirmed action a success'
+      act.includes(': ran: the tool returned a result'),
+    'it is readable, with the preference and the action as Custard recorded it'
   )
-  const mem = note('Custard/Memory.md')
   check(
-    mem.startsWith(ownMemory.trimEnd()) &&
-      mem.includes('## Remembered by Custard') &&
-      mem.includes('Prefers warm jazz'),
-    "Memory.md keeps the user's text and adds the preference in Custard's own section"
+    act.includes('- Checked afterwards: nothing checked it') &&
+      act.includes('- Requested outcome: not checked') &&
+      !act.includes('it worked'),
+    'the summary claimed success without a check, and that is not written down'
   )
+  check(note('Custard/Memory.md') === ownMemory, "Memory.md is the user's and is not touched")
   await w.screenshot({ path: `${SHOTS}/step2-04-memory-saved.png` })
 
   step('A later chat sees it')
@@ -178,7 +196,42 @@ try {
   check(summaries().length === 1, 'small talk is not summarized')
   check((await status()) === '', 'and the chat shows no memory status')
 
+  step('A preference in a one-message chat is remembered')
+  await newChat()
+  await send('From now on I prefer short answers')
+  await idle()
+  check(
+    await until(async () => /^Saved to memory/.test(await status())),
+    `saved after one message, with no action (${await status()})`
+  )
+  check(summaries().length === 2, 'with one summary call')
+  const prefNote = captures().find((f) => capture(f).includes('Prefers short answers'))
+  check(!!prefNote, 'in a new note of its own')
+
+  step('Forget this chat')
+  await w.click('button:text-is("Forget")')
+  check(
+    await until(async () => /^Forgotten/.test(await status())),
+    `the chat says it was forgotten (${await status()})`
+  )
+  const asked = await app.evaluate(() => globalThis.__asked.at(-1))
+  check(
+    asked?.message === 'Forget this chat?' && asked.detail.includes(`Custard/Captures/${prefNote}`),
+    'it asked first, listing the note it would delete'
+  )
+  check(!captures().includes(prefNote), 'the note is deleted')
+  check(captures().length === 1, "and the other chat's note is kept")
+  check(await w.locator(memorySwitch).isDisabled(), 'the switch can no longer turn it back on')
+  await w.screenshot({ path: `${SHOTS}/step2-05b-memory-forgotten.png` })
+  await send('I prefer long answers again, remember that')
+  await idle()
+  await new Promise((r) => setTimeout(r, 1000))
+  check(summaries().length === 2, 'a later preference in that chat is not summarized')
+
   step("Don't remember this chat")
+  await newChat()
+  await send('hello there')
+  await idle()
   check(
     (await w.getAttribute(memorySwitch, 'aria-checked')) === 'true',
     'a new chat is remembered by default'
@@ -195,7 +248,7 @@ try {
   await send('memory test: find Nils Frahm again')
   await idle()
   await new Promise((r) => setTimeout(r, 1000))
-  check(summaries().length === 1, 'a plugin action in that chat is not summarized')
+  check(summaries().length === 2, 'a plugin action in that chat is not summarized')
   await w.screenshot({ path: `${SHOTS}/step2-05-memory-off-chat.png` })
 
   step('Remember automatically off')
@@ -214,7 +267,7 @@ try {
     await until(async () => /Remember automatically is off/.test(await status())),
     `the chat says why it was not saved (${await status()})`
   )
-  check(summaries().length === 1, 'nothing was summarized')
+  check(summaries().length === 2, 'nothing was summarized')
   check(
     JSON.stringify(chatRequests().at(-1)?.system).includes('Automatic memory is off'),
     'and the model is told memory is off'
@@ -232,7 +285,7 @@ try {
     await until(async () => /vault isn't available/.test(await status())),
     `the chat says it is waiting for the vault (${await status()})`
   )
-  check(summaries().length === 1, 'no summary is made while the vault is missing')
+  check(summaries().length === 2, 'no summary is made while the vault is missing')
   // Quit hard, as a crash would.
   app.process().kill('SIGKILL')
   fs.renameSync(`${OUT}/vault-away`, `${OUT}/vault`)
@@ -249,8 +302,8 @@ try {
     ),
     'after the restart and the next turn, with the vault back, it was saved'
   )
-  check(summaries().length === 2, 'with one more summary call')
-  check(note('Custard/Activity.md').split('\n### ').length === 3, 'Activity.md now has two entries')
+  check(summaries().length === 3, 'with one more summary call')
+  check(captures().length === 2, 'in a second capture note')
   check(
     fs.existsSync(`${OUT}/vault/Custard/.custard-vault-id`),
     'the vault has an id, so waiting captures only go back to it'

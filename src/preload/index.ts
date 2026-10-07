@@ -70,6 +70,8 @@ const custard = {
     setSettings: (s: MemorySettings): Promise<void> => ipcRenderer.invoke('memory:setSettings', s),
     setChat: (id: string, off: boolean): Promise<ChatMemory | null> =>
       ipcRenderer.invoke('memory:setChat', id, off),
+    forgetChat: (id: string): Promise<ChatMemory | null> =>
+      ipcRenderer.invoke('memory:forgetChat', id),
     onUpdate: (cb: (u: { conversationId: string; memory?: ChatMemory }) => void): (() => void) => {
       const listener = (_: unknown, u: { conversationId: string; memory?: ChatMemory }): void =>
         cb(u)

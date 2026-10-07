@@ -16,6 +16,9 @@ export type EvidenceAction = {
   plugin: string | null
   write: boolean
   status: ActionRecord['status']
+  // A content read (notes, files, pages, search results): its result is
+  // never included, and it can't count as an observation.
+  content: boolean
   // What the tool said, shortened and redacted. Empty for content reads.
   result: string
 }
@@ -27,6 +30,8 @@ export type Evidence = {
   answer: string
   // The user asked for this not to be remembered: the words that said so.
   dontRemember: string | null
+  // Those words asked to forget the whole chat, not just this part.
+  forgetChat: boolean
 }
 
 // A backstop, not a guarantee: obvious credentials and long opaque strings.
@@ -92,10 +97,19 @@ export function buildEvidence(c: Conversation, from: number, to: number): Eviden
             plugin,
             write: a?.write ?? false,
             status: a?.status ?? 'unknown',
+            content: CONTENT_TOOLS.test(b.name),
             result: CONTENT_TOOLS.test(b.name) ? '' : redact(cut(a?.result ?? '', LIMITS.result))
           })
         }
   const answerMsg = [...msgs].reverse().find((m) => m.role === 'assistant' && textOf(m).trim())
+  const dontRemember =
+    requests
+      .map((r) =>
+        DONT_REMEMBER.exec(r)?.[0]
+          .replace(/^[.!?;:,\s]+/, '')
+          .trim()
+      )
+      .find(Boolean) ?? null
   const notices = (c.notices ?? [])
     .filter((n) => n.after > from && n.after <= to)
     .map((n) => n.text)
@@ -104,14 +118,8 @@ export function buildEvidence(c: Conversation, from: number, to: number): Eviden
     actions,
     notices,
     answer: answerMsg ? redact(cut(textOf(answerMsg).trim(), LIMITS.answer)) : '',
-    dontRemember:
-      requests
-        .map((r) =>
-          DONT_REMEMBER.exec(r)?.[0]
-            .replace(/^[.!?;:,\s]+/, '')
-            .trim()
-        )
-        .find(Boolean) ?? null
+    dontRemember,
+    forgetChat: !!dontRemember && /^(?:please\s+)?forget\b/i.test(dontRemember)
   }
 }
 
@@ -129,7 +137,9 @@ export function evidenceText(e: Evidence): string {
           `- ${a.id}: ${a.label} [${a.tool}${a.plugin ? `, plugin ${a.plugin}` : ''}, ${a.write ? 'changes something' : 'read-only'}] → ${a.status}${a.result ? `: ${a.result}` : ''}`
       ),
       ev.notices.length ? `\nHow turns ended: ${ev.notices.join(' | ')}` : '',
-      ev.answer ? `\nAssistant's last answer:\n${ev.answer}` : ''
+      ev.answer
+        ? `\nAssistant's last answer (its own words; not evidence of what happened):\n${ev.answer}`
+        : ''
     ].join('\n')
   const e2 = { ...e, requests: [...e.requests], actions: [...e.actions] }
   let text = lines(e2)
@@ -141,12 +151,33 @@ export function evidenceText(e: Evidence): string {
   return text.slice(0, LIMITS.total)
 }
 
-// Whether a range is worth a capture without asking a model: something
-// happened (a plugin action, a change, an outcome other than success, an
-// interrupted turn), or enough conversation has built up.
+// Words that often come with something lasting: a preference, a decision,
+// a fact about the user, a request to remember. Only a reason to ask the
+// summarizer, which decides whether anything is worth saving; it never
+// saves anything by itself.
+const DURABLE = new RegExp(
+  [
+    String.raw`\b(?:I|we)(?:['’]d|\s+(?:really|usually|always|generally|mostly|would))?\s+(?:prefer|like|love|hate|dislike|want you to|always|never|usually)\b`,
+    String.raw`\bfrom now on\b`,
+    String.raw`\b(?:going forward|in future|next time)\b`,
+    String.raw`\bremember\b`,
+    String.raw`\b(?:I|we)(?:['’]ve| have)?\s+decided\b`,
+    String.raw`\blet['’]?s (?:go with|use|stick with)\b`,
+    String.raw`\bwe['’]?ll (?:use|go with)\b`,
+    String.raw`\bmy (?:name|role|job|stack|pronouns|timezone|time zone) (?:is|are)\b`,
+    String.raw`\bcall me\b`
+  ].join('|'),
+  'i'
+)
+
+// Whether a range is worth asking the summarizer about, decided without a
+// model: something happened (a plugin action, a change, an outcome other
+// than success, an interrupted turn), the user said something that may
+// last, or a long stretch of chat built up. Small talk makes no call.
 export function eligible(e: Evidence): boolean {
   if (e.dontRemember) return false
   if (e.actions.some((a) => a.plugin || a.write || a.status !== 'completed')) return true
   if (e.notices.length) return true
-  return e.requests.length >= 4
+  if (e.requests.some((r) => DURABLE.test(r))) return true
+  return e.requests.length >= 10
 }

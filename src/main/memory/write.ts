@@ -1,122 +1,187 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { dirname, join } from 'path'
-import { resolveInVault } from './paths'
-import { hasMarker, section, updateNote, withSection } from './notes'
-import { MEMORY_NOTE } from '../../shared/vault'
+import { resolveInVault, safeName } from './paths'
 
-// Where automatic memory goes, and how it stays readable. Custard only adds
-// to its own marked sections; the user can edit or delete anything in them,
-// and text outside them is never touched. Old entries are moved, word for
-// word, to archive notes rather than deleted.
+// Where automatic memory goes. Each capture is a new note, created only if
+// nothing has that name yet, and Custard never opens it for writing again.
+// No note the user might be editing is ever replaced, so a capture can't
+// overwrite an edit made in Obsidian or anywhere else. Limits come from how
+// much is read back, not from moving or trimming text.
 
-export const ACTIVITY_NOTE = 'Custard/Activity.md'
-export const MEMORY_SECTION = 'remembered'
-export const ACTIVITY_SECTION = 'activity'
-export const CAPS = { memory: 40, activity: 30 }
-export const MEMORY_ARCHIVE = 'Custard/Memory archive.md'
-// Custard/Activity.md archives to Custard/Activity/2026-10.md, and a
-// plugin's Activity.md to an Activity folder beside it.
-const activityArchive = (note: string, entry: string): string => {
-  const month = /^### (\d{4}-\d{2})-\d{2}/.exec(entry)?.[1]
-  return `${note.replace(/\.md$/, '')}/${month ?? 'Earlier'}.md`
-}
+export const CAPTURES = 'Custard/Captures'
+export const RETRIEVAL = { notes: 20, chars: 2000, activity: 5 }
 
-const MEMORY_HEADING =
-  '## Remembered by Custard\n\n_Custard adds to this list after chats. Edit or delete anything here; what you delete is not added back. Older items move to [[Memory archive]]._'
-const activityIntro = (title: string): string =>
-  `# ${title}\n\nWhat you and Custard did, added after chats. Each entry keeps what was asked, what was tried, what the tool reported and what was seen afterwards apart. Edit or delete anything; older entries move to the Activity folder.\n`
+// "2026-10-07 1432 Spotify test", the name before any " (2)".
+export const captureName = (date: string, time: string, title: string): string =>
+  `${date} ${time.replace(':', '')} ${safeName(title, 'Chat')}`
 
-// Splits a section into entries (each starting with a line that matches
-// `start`) and whatever came before the first one.
-function entries(body: string, start: RegExp): { head: string; items: string[] } {
-  const lines = body.split('\n')
-  const head: string[] = []
-  const items: string[][] = []
-  for (const l of lines) {
-    if (start.test(l)) items.push([l])
-    else if (items.length) items[items.length - 1].push(l)
-    else head.push(l)
-  }
-  return {
-    head: head.join('\n').replace(/\n+$/, ''),
-    items: items.map((i) => i.join('\n').replace(/\n+$/, ''))
-  }
-}
-
-type Kind = 'memory' | 'activity'
-const START: Record<Kind, RegExp> = { memory: /^- /, activity: /^### / }
-
-function archive(vault: string, path: string, items: string[]): void {
-  updateNote(resolveInVault(vault, path), (text) => {
-    const missing = items.filter((i) => !(text ?? '').includes(i))
-    if (!missing.length) return null
-    const base =
-      text ??
-      `# ${path.replace(/^.*\//, '').replace(/\.md$/, '')}\n\nMoved here by Custard, word for word.\n`
-    return `${base.replace(/\n*$/, '\n\n')}${missing.join('\n\n')}\n`
-  })
-}
-
-// Adds new entries to a note's managed section, unless this capture (by its
-// marker) is already there. Returns false when nothing needed writing.
-export function addEntries(
-  vault: string,
-  note: string,
-  kind: Kind,
-  marker: string,
-  newItems: string[],
-  title = 'Activity'
-): boolean {
-  if (!newItems.length) return false
-  const full = resolveInVault(vault, note)
-  const name = kind === 'memory' ? MEMORY_SECTION : ACTIVITY_SECTION
-  const cap = kind === 'memory' ? CAPS.memory : CAPS.activity
-  let overflow: string[] = []
-  const wrote = updateNote(full, (text) => {
-    if (hasMarker(text, marker)) return null
-    const current = section(text, name)
-    const parsed = entries(current ?? '', START[kind])
-    const all = [...parsed.items, ...newItems]
-    overflow = all.slice(0, Math.max(0, all.length - cap))
-    const kept = all.slice(overflow.length)
-    const sep = kind === 'memory' ? '\n' : '\n\n'
-    const body = [parsed.head, kept.join(sep)].filter(Boolean).join('\n\n')
-    const base = text ?? (kind === 'activity' ? activityIntro(title) : '# Memory\n')
-    return withSection(
-      base,
-      name,
-      body,
-      current === null && kind === 'memory' ? MEMORY_HEADING : undefined
-    )
-  })
-  // Archived after the main note is written; a crash in between leaves the
-  // entries in both places, never in neither.
-  if (overflow.length) {
-    if (kind === 'memory') archive(vault, MEMORY_ARCHIVE, overflow)
-    else {
-      const byNote = new Map<string, string[]>()
-      for (const o of overflow) {
-        const p = activityArchive(note, o)
-        byNote.set(p, [...(byNote.get(p) ?? []), o])
-      }
-      for (const [p, items] of byNote) archive(vault, p, items)
+// A note's frontmatter, as written by noteText (values are JSON strings).
+export function frontmatter(text: string): Record<string, string> {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
+  const out: Record<string, string> = {}
+  for (const line of m?.[1].split(/\r?\n/) ?? []) {
+    const kv = /^([\w-]+):\s*(.*)$/.exec(line)
+    if (!kv) continue
+    try {
+      const v = JSON.parse(kv[2])
+      out[kv[1]] = typeof v === 'string' ? v : String(v)
+    } catch {
+      out[kv[1]] = kv[2].trim()
     }
   }
-  return wrote
+  return out
 }
 
-export const addToMemory = (vault: string, marker: string, lines: string[]): boolean =>
-  addEntries(vault, MEMORY_NOTE, 'memory', marker, lines)
+const read = (full: string): string | null => {
+  try {
+    return readFileSync(full, 'utf8')
+  } catch {
+    return null
+  }
+}
 
-// Which notes already hold a capture, so a retry records it as saved.
-export function notesWithMarker(vault: string, notes: string[], marker: string): string[] {
+// Creates `folder/name.md` (or "name (2).md", …) with exclusive create, so
+// an existing file is never replaced. A file already holding this capture
+// (same job and plugin: a crash after writing, before it was recorded)
+// counts as written. Returns the note's vault path.
+export function writeCapture(
+  vault: string,
+  folder: string,
+  name: string,
+  text: string,
+  key: { job: string; plugin: string }
+): string {
+  for (let n = 1; n <= 20; n++) {
+    const rel = `${folder}/${name}${n > 1 ? ` (${n})` : ''}.md`
+    const full = resolveInVault(vault, rel)
+    mkdirSync(dirname(full), { recursive: true })
+    try {
+      writeFileSync(full, text, { flag: 'wx' })
+      return rel
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      const fm = frontmatter(read(full) ?? '')
+      if (fm['custard-capture'] === key.job && (fm.plugin ?? '') === key.plugin) return rel
+    }
+  }
+  throw new Error('Too many notes with the same name.')
+}
+
+// Capture notes in a folder, newest first (by name, which starts with the
+// date and time; "x (2)" is newer than "x").
+export function captureNotes(vault: string, folder = CAPTURES): string[] {
+  try {
+    return readdirSync(resolveInVault(vault, folder, false))
+      .filter((f) => f.endsWith('.md') && !f.startsWith('.'))
+      .map((f) => {
+        const m = /^(.*?)(?: \((\d+)\))?\.md$/.exec(f)!
+        return { f, base: m[1], n: Number(m[2] ?? 1) }
+      })
+      .sort((a, b) => (a.base === b.base ? b.n - a.n : a.base < b.base ? 1 : -1))
+      .map((x) => x.f)
+      .map((f) => `${folder}/${f}`)
+  } catch {
+    return []
+  }
+}
+
+// A note's "## Heading" sections.
+export function sections(text: string): Map<string, string> {
+  const out = new Map<string, string>()
+  const parts = text.split(/^## /m).slice(1)
+  for (const p of parts) {
+    const nl = p.indexOf('\n')
+    out.set((nl < 0 ? p : p.slice(0, nl)).trim(), nl < 0 ? '' : p.slice(nl + 1).trim())
+  }
+  return out
+}
+
+const bullets = (s = ''): string[] =>
+  s
+    .split('\n')
+    .filter((l) => l.startsWith('- '))
+    .map((l) => l.slice(2).trim())
+
+const dateOf = (rel: string): string => /(\d{4}-\d{2}-\d{2})[^/]*$/.exec(rel)?.[1] ?? ''
+
+// What later chats are shown: preferences and decisions from the newest
+// capture notes, and the newest activity. Read as the notes are now, so an
+// edit or deletion in Obsidian is what the assistant sees next time.
+export function readCaptures(
+  vault: string,
+  folder = CAPTURES
+): { remembered: string[]; activity: string[]; notes: number } {
+  const notes = captureNotes(vault, folder)
+  const remembered: string[] = []
+  const activity: string[] = []
+  let chars = 0
+  for (const [n, rel] of notes.slice(0, RETRIEVAL.notes).entries()) {
+    const text = read(resolveInVault(vault, rel))
+    if (!text) continue
+    const s = sections(text)
+    const date = dateOf(rel)
+    for (const line of [
+      ...bullets(s.get('Preferences')),
+      ...bullets(s.get('Decisions')).map((d) => `Decided: ${d}`)
+    ]) {
+      const entry = `${date}: ${line}`
+      if (chars + entry.length > RETRIEVAL.chars) break
+      chars += entry.length
+      remembered.push(entry)
+    }
+    if (n < RETRIEVAL.activity)
+      activity.push(
+        ...(s.get('Activity') ?? '')
+          .split('\n')
+          .filter((l) => l.startsWith('### '))
+          .map((l) => `${date} · ${l.slice(4).trim()}`),
+        ...bullets(s.get('Still open')).map((u) => `${date} · Open: ${u}`)
+      )
+  }
+  return { remembered, activity: activity.slice(0, RETRIEVAL.activity * 3), notes: notes.length }
+}
+
+// Every capture note Custard saved from one chat, wherever it is under
+// Custard/ (plugin folders included), found by its frontmatter. Bounded.
+export function chatCaptures(vault: string, chatId: string): string[] {
+  const found: string[] = []
+  let budget = 5000
+  const walk = (rel: string): void => {
+    let entries
+    try {
+      entries = readdirSync(resolveInVault(vault, rel, false), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (--budget < 0 || e.name.startsWith('.')) continue
+      const child = `${rel}/${e.name}`
+      if (e.isDirectory()) walk(child)
+      else if (e.isFile() && e.name.endsWith('.md')) {
+        let full
+        try {
+          full = resolveInVault(vault, child)
+        } catch {
+          continue
+        }
+        const fm = frontmatter(read(full) ?? '')
+        if (fm['custard-capture'] && fm.chat === chatId) found.push(child)
+      }
+    }
+  }
+  walk('Custard')
+  return found.sort()
+}
+
+// Deletes the given notes. Returns those that are gone afterwards.
+export function deleteNotes(vault: string, notes: string[]): string[] {
   return notes.filter((n) => {
     try {
-      const full = resolveInVault(vault, n)
-      return existsSync(full) && hasMarker(readFileSync(full, 'utf8'), marker)
-    } catch {
-      return false
+      rmSync(resolveInVault(vault, n))
+      return true
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'ENOENT'
     }
   })
 }
@@ -142,17 +207,5 @@ export function vaultId(vault: string, create: boolean): string | null {
   } catch {
     // Another write got there first.
     return readFileSync(file, 'utf8').trim() || null
-  }
-}
-
-// The latest activity headings, for the system prompt.
-export function recentActivity(vault: string, n = 5): string[] {
-  try {
-    const text = readFileSync(resolveInVault(vault, ACTIVITY_NOTE), 'utf8')
-    return entries(section(text, ACTIVITY_SECTION) ?? '', START.activity)
-      .items.slice(-n)
-      .map((i) => i.split('\n')[0].replace(/^### /, ''))
-  } catch {
-    return []
   }
 }
