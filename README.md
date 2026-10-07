@@ -18,8 +18,15 @@ npm run dev        # run the app with hot reload
 npm run build:win  # build a Windows installer into dist/
 ```
 
+## Chat mode
+
+Open **Settings** and paste a Claude API key from [console.anthropic.com](https://console.anthropic.com). It's encrypted with Windows secure storage. Chats are saved as JSON files in `%APPDATA%\custard\conversations`.
+
+Pick the model and effort under the message box. Opus 5.5 and Sonnet 5.5 show a summary of Claude's thinking and fall back to another model automatically if a safety check declines a request.
+
 ## Layout
 
 - `src/main`: Electron main process (window, OS access, API calls)
 - `src/preload`: the safe bridge exposed to the UI as `window.custard`
 - `src/renderer`: the React UI
+- `src/shared`: types shared by the main process and the UI

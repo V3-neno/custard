@@ -29,3 +29,53 @@ body {
     Roboto,
     sans-serif;
 }
+
+/* Chat message Markdown */
+.markdown {
+  @apply text-sm leading-relaxed;
+}
+.markdown > * + * {
+  @apply mt-3;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  @apply font-semibold text-custard-100;
+}
+.markdown h1 {
+  @apply text-lg;
+}
+.markdown h2 {
+  @apply text-base;
+}
+.markdown ul {
+  @apply list-disc pl-6;
+}
+.markdown ol {
+  @apply list-decimal pl-6;
+}
+.markdown li + li {
+  @apply mt-1;
+}
+.markdown a {
+  @apply text-custard-300 underline;
+}
+.markdown code {
+  @apply rounded bg-ink-700 px-1 py-0.5 font-mono text-[0.85em];
+}
+.markdown pre {
+  @apply overflow-x-auto rounded-lg border border-ink-700 bg-ink-800 p-3;
+}
+.markdown pre code {
+  @apply bg-transparent p-0;
+}
+.markdown blockquote {
+  @apply border-l-2 border-ink-500 pl-3 text-ink-300;
+}
+.markdown table {
+  @apply border-collapse;
+}
+.markdown th,
+.markdown td {
+  @apply border border-ink-700 px-2 py-1;
+}
