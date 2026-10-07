@@ -10,6 +10,7 @@ import {
 } from 'fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { MEMORY_NOTE } from '../shared/vault'
+import { modes, type Mode } from '../shared/chat'
 
 const MAX_READ_CHARS = 100_000
 const MAX_SEARCH_RESULTS = 20
@@ -92,10 +93,12 @@ export const vaultTools: BetaTool[] = [
 
 const SKILLS_DIR = 'Custard/Skills'
 
+type Skill = { name: string; description: string; path: string; modes: Mode[] }
+
 // Skills are folders in the vault with a SKILL.md whose frontmatter has a name
-// and description. Only those two fields go in the prompt; Claude reads the
-// full file when a request matches.
-export function listSkills(vault: string): { name: string; description: string; path: string }[] {
+// and description, and optionally the modes it applies to. Only those fields
+// go in the prompt; the model reads the full file when a request matches.
+export function listSkills(vault: string): Skill[] {
   const dir = join(vault, SKILLS_DIR)
   if (!existsSync(dir)) return []
   return readdirSync(dir, { withFileTypes: true })
@@ -115,7 +118,13 @@ export function listSkills(vault: string): { name: string; description: string; 
           .trim()
           .replace(/^["']|["']$/g, '') ?? ''
       const description = field('description')
-      return description ? [{ name: field('name') || e.name, description, path }] : []
+      const skillModes = field('modes')
+        .toLowerCase()
+        .split(/[\s,[\]]+/)
+        .filter((m): m is Mode => modes.some((x) => x.id === m))
+      return description
+        ? [{ name: field('name') || e.name, description, path, modes: skillModes }]
+        : []
     })
 }
 
@@ -125,8 +134,12 @@ const localDate = (): string => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function vaultSystemPrompt(vault: string): string {
-  const skills = listSkills(vault)
+export function vaultSystemPrompt(vault: string, mode: Mode): string {
+  // Skills mode sees every skill so it can maintain them; other modes only
+  // get the skills meant for them.
+  const skills = listSkills(vault).filter(
+    (s) => mode === 'skills' || s.modes.length === 0 || s.modes.includes(mode)
+  )
   const memoryPath = join(vault, MEMORY_NOTE)
   const memory = existsSync(memoryPath) ? readFileSync(memoryPath, 'utf8').trim() : ''
   return [
@@ -136,7 +149,7 @@ export function vaultSystemPrompt(vault: string): string {
     'When you create notes, write clean Obsidian Markdown and use [[wikilinks]] to related notes you know exist.',
     `Today's date is ${localDate()}.`,
     skills.length
-      ? `Skills are instructions for specific tasks in this vault. When a request matches a skill's description, read its SKILL.md with vault_read before doing anything else, then follow it.\n<skills>\n${skills.map((s) => `- ${s.name} (${s.path}): ${s.description}`).join('\n')}\n</skills>`
+      ? `Skills are instructions for specific tasks in this vault. When a request matches a skill's description, read its SKILL.md with vault_read before doing anything else, then follow it.\n<skills>\n${skills.map((s) => `- ${s.name} (${s.path})${mode === 'skills' && s.modes.length ? ` [modes: ${s.modes.join(', ')}]` : ''}: ${s.description}`).join('\n')}\n</skills>`
       : '',
     memory
       ? `<memory>\n${memory}\n</memory>`

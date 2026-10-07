@@ -41,7 +41,8 @@ export const defaultChatSettings: ChatSettings = { model: 'claude-opus-5-5', eff
 export const modes = [
   { id: 'chat', label: 'Chat', hint: 'Talk anything through' },
   { id: 'code', label: 'Code', hint: 'Write, debug and explain code' },
-  { id: 'design', label: 'Design', hint: 'Shape interfaces and visuals' }
+  { id: 'design', label: 'Design', hint: 'Shape interfaces and visuals' },
+  { id: 'skills', label: 'Skills', hint: 'Teach Custard skills and improve your vault' }
 ] as const
 
 export type Mode = (typeof modes)[number]['id']

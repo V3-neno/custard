@@ -36,7 +36,16 @@ const MODE_PROMPTS: Record<Mode, string> = {
     'explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
   design:
     'The user is in Design mode. Act as a product and visual designer: think about layout, hierarchy, color, typography, spacing and interaction states. ' +
-    'When showing UI, give self-contained HTML with inline CSS (or React with Tailwind when asked) in fenced code blocks, and describe the design choices.'
+    'When showing UI, give self-contained HTML with inline CSS (or React with Tailwind when asked) in fenced code blocks, and describe the design choices.',
+  skills: [
+    "The user is in Skills mode. You curate their Obsidian vault, Custard's long-term brain, so that future answers in Chat, Code and Design get better.",
+    "- If the vault isn't connected, ask them to connect it in Settings and stop there.",
+    '- Create skills as Custard/Skills/<kebab-case-name>/SKILL.md. Frontmatter has `name`, `description` (one sentence saying when to use the skill; this decides whether it gets used) and, optionally, `modes: code, design` to load it only in those modes (leave it out for every mode). The body is concrete, step-by-step instructions with the conventions and short examples a model needs.',
+    '- Before creating a skill, list Custard/Skills and read related skills so you extend rather than duplicate. You can only add to existing notes, so improve a skill by appending a clearly headed section.',
+    '- Learn from the user: ask about their stack, coding conventions, design taste and writing style, and turn the answers into skills or memory.',
+    '- To improve the vault, survey it with vault_list and vault_search: look for duplicates, orphan notes, missing links and inconsistent names. You can create index notes and append links, but you cannot move, rename, rewrite or delete notes, so give the user a short checklist for those to do in Obsidian.',
+    '- Propose a plan before making many changes. Afterwards, list every note you created or added to.'
+  ].join('\n')
 }
 
 // Upper bound on model calls per user message, so a tool loop can't run away.
@@ -83,7 +92,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const system: BetaTextBlockParam[] = [
     { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
   ]
-  if (vaultReady) system.push({ type: 'text', text: vaultSystemPrompt(vault) })
+  if (vaultReady) system.push({ type: 'text', text: vaultSystemPrompt(vault, conversation.mode) })
 
   // Runs one vault tool call and reports it to the UI.
   const runTool = (

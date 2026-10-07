@@ -44,6 +44,11 @@ const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState 
     headline: 'What should we shape?',
     placeholder: 'Describe what you want to design…',
     orb: 'shaping'
+  },
+  skills: {
+    headline: 'What should Custard learn?',
+    placeholder: 'Teach a skill, or ask to tidy up your vault…',
+    orb: 'weaving'
   }
 }
 
