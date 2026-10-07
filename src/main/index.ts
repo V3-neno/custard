@@ -1,7 +1,16 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { clearApiKey, getApiKey, setApiKey } from './apiKey'
+import { registerChatHandlers } from './chat'
+import {
+  deleteConversation,
+  getChatSettings,
+  getConversation,
+  listConversations,
+  setChatSettings
+} from './store'
 
 function createWindow(): void {
   // Create the browser window.
@@ -51,6 +60,16 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
+
+  ipcMain.handle('apiKey:has', () => getApiKey() !== null)
+  ipcMain.handle('apiKey:set', (_, key: string) => setApiKey(key))
+  ipcMain.handle('apiKey:clear', () => clearApiKey())
+  ipcMain.handle('settings:get', () => getChatSettings())
+  ipcMain.handle('settings:set', (_, s) => setChatSettings(s))
+  ipcMain.handle('conversations:list', () => listConversations())
+  ipcMain.handle('conversations:get', (_, id: string) => getConversation(id))
+  ipcMain.handle('conversations:delete', (_, id: string) => deleteConversation(id))
+  registerChatHandlers()
 
   createWindow()
 
