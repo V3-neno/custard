@@ -56,6 +56,19 @@ npm run test:electron  # the real sandbox inside Electron (needs a display, or x
 
 On Linux as root it adds `--no-sandbox`, so the OS-level sandbox itself is not part of that run.
 
+**`test/e2e/plugin-demo.mjs`** drives the built app with Playwright through the demo below, against `test/e2e/mock.mjs`, a fake Claude API that plays scripted tool calls and a fake Spotify. Plugin network is routed to the mock through a main-process test hook, and the browser sign-in is simulated. It checks that:
+
+- edits land only in the plugin's folder, and core, absolute and `..` paths are refused
+- validate and test don't activate anything
+- Activate stays disabled until every permission is ticked
+- tokens stay out of plugin files and model context
+- nothing is queued before **Allow**, then exactly five queue requests are made, with no playback change
+- a recommendation makes no Spotify request
+- after Disable the tools are gone, a stale call is refused and nothing reaches Spotify
+- a faulty update is rolled back automatically with the plugin's own error shown, and **Roll back** restores the earlier build
+
+It doesn't exercise the real Spotify API, a real browser sign-in or the OS sandbox. Usage is at the top of the script.
+
 ## Manual end-to-end checklist (the MVP demo)
 
 Run with `npm run dev` on Windows, with an API key, a vault and a Spotify Premium account. See [../SPOTIFY.md](../SPOTIFY.md) for the Spotify app setup.

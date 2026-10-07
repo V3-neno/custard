@@ -171,7 +171,16 @@ export const createRuntime =
         }
       })
       wc.loadURL(PAGE)
-        .then(() => wc.executeJavaScript(`${code}\n;0`))
+        // Report what the plugin threw while loading, rather than Chromium's
+        // generic "Script failed to execute".
+        .then(() =>
+          wc.executeJavaScript(
+            `(function () { try {\n${code}\n; return null } catch (e) { return String((e && e.message) || e) } })()`
+          )
+        )
+        .then((thrown: unknown) => {
+          if (typeof thrown === 'string') throw new Error(thrown)
+        })
         .catch((err: Error) => {
           clearTimeout(timer)
           dispose('load failed')
