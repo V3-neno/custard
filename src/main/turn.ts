@@ -76,11 +76,14 @@ export class TurnLog {
     this.save(this.conversation)
   }
 
-  // An earlier call with the same name and input whose outcome is unknown.
+  // An earlier call with the same name and input whose outcome is unknown,
+  // in this chat or in the chats it continues.
   unknownRepeat(c: Call): boolean {
     const key = actionKey(c.name, c.input)
-    return Object.entries(this.actions).some(
-      ([id, a]) => id !== c.id && a.key === key && a.status === 'unknown'
+    return (
+      Object.entries(this.actions).some(
+        ([id, a]) => id !== c.id && a.key === key && a.status === 'unknown'
+      ) || !!this.conversation.continuedFrom?.unknown.some((u) => u.key === key)
     )
   }
 

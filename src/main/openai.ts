@@ -8,10 +8,20 @@ import OpenAI from 'openai'
 import type {
   FunctionTool,
   ResponseInputItem,
-  ResponseOutputItem
+  ResponseOutputItem,
+  ResponseStreamEvent
 } from 'openai/resources/responses/responses'
-import type { ChatEvent, Effort } from '../shared/chat'
+import type { ChatEvent, Conversation, Effort } from '../shared/chat'
 import type { TurnLog } from './turn'
+import {
+  compactionRefused,
+  dropBeforeCompaction,
+  isCompactionRejected,
+  openaiStart,
+  recordOpenAICompaction,
+  usesCompaction
+} from './compaction'
+import { COMPACT_TRIGGER, estimateTokens, openaiCounter } from './context'
 
 type Emit = (e: ChatEvent) => void
 
@@ -24,6 +34,10 @@ type Turn = {
   instructions: string
   // The history as sent this time (calls to unavailable tools turned into text).
   history: BetaMessageParam[]
+  conversation: Conversation
+  // Checks a request against the model's budget before it is sent; false
+  // when it is too large to send.
+  fits: (estimate: number, count: () => Promise<number>) => Promise<boolean>
   tools: BetaTool[]
   signal: AbortSignal
   emit: Emit
@@ -35,7 +49,7 @@ type Turn = {
 }
 
 // How the turn ended, when not with a normal final answer.
-export type OpenAIEnd = 'done' | 'cut-off' | 'cut-off-tool' | 'step-limit'
+export type OpenAIEnd = 'done' | 'cut-off' | 'cut-off-tool' | 'step-limit' | 'too-long'
 
 const toFunctionTool = (t: BetaTool): FunctionTool => ({
   type: 'function',
@@ -53,7 +67,8 @@ const textOf = (content: string | BetaToolResultBlockParam['content']): string =
 // Conversations are stored in Claude's message format so either provider can
 // continue them. This converts that history into OpenAI Responses input.
 // Claude's thinking blocks are left out: they only mean something to Claude.
-function toInput(messages: BetaMessageParam[]): ResponseInputItem[] {
+// Compaction blocks are Claude's and are left out too.
+export function toInput(messages: BetaMessageParam[]): ResponseInputItem[] {
   const items: ResponseInputItem[] = []
   for (const m of messages) {
     if (typeof m.content === 'string') {
@@ -103,29 +118,68 @@ function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
 export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
   const { emit, requestId, log } = turn
   const client = new OpenAI({ apiKey: turn.apiKey })
-  const input = toInput(turn.history)
+  // From the newest compaction this model made, if there is one.
+  const start = openaiStart(turn.conversation, turn.model)
+  let input: ResponseInputItem[] = [
+    ...(start.item ? [start.item] : []),
+    ...toInput(turn.history.slice(start.from))
+  ]
+  const tools = turn.tools.length ? { tools: turn.tools.map(toFunctionTool) } : {}
+  const count = openaiCounter(client, {
+    model: turn.model,
+    instructions: turn.instructions,
+    ...tools
+  })
 
   for (let step = 0; step < turn.maxSteps; step++) {
-    const stream = await client.responses.create(
-      {
-        model: turn.model,
-        instructions: turn.instructions,
-        input,
-        reasoning: { effort: turn.effort, summary: 'auto' },
-        // Nothing is stored at OpenAI; reasoning is passed back encrypted so
-        // the model keeps its train of thought across tool calls.
-        store: false,
-        include: ['reasoning.encrypted_content'],
-        ...(turn.tools.length ? { tools: turn.tools.map(toFunctionTool) } : {}),
-        stream: true
-      },
-      { signal: turn.signal }
-    )
+    const sent = input
+    if (!(await turn.fits(estimateTokens(turn.instructions, sent, tools), () => count(sent))))
+      return 'too-long'
+    const request = (compact: boolean): Promise<AsyncIterable<ResponseStreamEvent>> =>
+      client.responses.create(
+        {
+          model: turn.model,
+          instructions: turn.instructions,
+          input,
+          reasoning: { effort: turn.effort, summary: 'auto' },
+          // Nothing is stored at OpenAI; reasoning is passed back encrypted so
+          // the model keeps its train of thought across tool calls.
+          store: false,
+          include: ['reasoning.encrypted_content'],
+          ...tools,
+          // The server compacts once the input passes the threshold and
+          // returns an encrypted compaction item; works with store: false.
+          ...(compact
+            ? { context_management: [{ type: 'compaction', compact_threshold: COMPACT_TRIGGER }] }
+            : {}),
+          stream: true
+        },
+        { signal: turn.signal }
+      )
+    let stream: AsyncIterable<ResponseStreamEvent>
+    try {
+      stream = await request(usesCompaction(turn.model))
+    } catch (err) {
+      if (!usesCompaction(turn.model) || !isCompactionRejected(err)) throw err
+      // This model doesn't take compaction: go on without it; the budget
+      // check and "Continue in a new chat" cover what it would have.
+      compactionRefused(turn.model)
+      const [first, ...rest] = input
+      input =
+        start.item && first === start.item
+          ? [...toInput(turn.history.slice(0, start.from)), ...rest]
+          : input.filter((x) => x.type !== 'compaction')
+      // Checked against the budget again: the full history is larger.
+      step--
+      continue
+    }
 
     let output: ResponseOutputItem[] = []
     let incomplete = false
     for await (const event of stream) {
-      if (event.type === 'response.reasoning_summary_text.delta') {
+      if (event.type === 'response.compaction.compacting') {
+        emit({ requestId, type: 'compacting' })
+      } else if (event.type === 'response.reasoning_summary_text.delta') {
         emit({ requestId, type: 'thinking', text: event.delta })
       } else if (event.type === 'response.reasoning_summary_part.done') {
         emit({ requestId, type: 'thinking', text: '\n\n' })
@@ -145,6 +199,8 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
     }
 
     const calls = output.filter((o) => o.type === 'function_call')
+    const compaction = output.findLast((o) => o.type === 'compaction')
+    if (compaction) recordOpenAICompaction(turn.conversation, compaction, turn.model)
     if (incomplete && calls.length > 0) return 'cut-off-tool'
     const blocks = toBlocks(output)
     log.addAssistant(blocks)
@@ -163,14 +219,15 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
       })
     )
     if (turn.signal.aborted) return 'done'
-    input.push(
+    input = dropBeforeCompaction([
+      ...input,
       ...(output as ResponseInputItem[]),
       ...results.map((r): ResponseInputItem => ({
         type: 'function_call_output',
         call_id: r.tool_use_id,
         output: textOf(r.content)
       }))
-    )
+    ])
   }
   return 'step-limit'
 }

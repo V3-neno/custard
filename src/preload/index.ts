@@ -2,9 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type { MemorySettings } from '../shared/memory'
 import type {
+  ChatLink,
   ChatEvent,
   ChatMemory,
   ChatSettings,
+  ContinueResult,
   Conversation,
   ConversationSummary,
   Mode,
@@ -90,13 +92,18 @@ const custard = {
     list: (mode: Mode): Promise<ConversationSummary[]> =>
       ipcRenderer.invoke('conversations:list', mode),
     get: (id: string): Promise<Conversation | null> => ipcRenderer.invoke('conversations:get', id),
-    delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id)
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id),
+    continuations: (id: string): Promise<ChatLink[]> =>
+      ipcRenderer.invoke('conversations:continuations', id)
   },
   chat: {
     send: (req: SendChatRequest): void => ipcRenderer.send('chat:send', req),
     stop: (requestId: string): void => ipcRenderer.send('chat:stop', requestId),
     approve: (id: string, decision: ApprovalDecision): Promise<void> =>
       ipcRenderer.invoke('chat:approve', id, decision),
+    // Continue a chat that grew too long in a new one; the original is kept.
+    continue: (id: string, withoutSummary?: boolean): Promise<ContinueResult> =>
+      ipcRenderer.invoke('chat:continue', id, withoutSummary),
     onEvent: (cb: (e: ChatEvent) => void): (() => void) => {
       const listener = (_: unknown, e: ChatEvent): void => cb(e)
       ipcRenderer.on('chat:event', listener)

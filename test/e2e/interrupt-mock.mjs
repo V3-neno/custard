@@ -7,6 +7,15 @@ const [, , OUT] = process.argv
 const anth = []
 const spotify = []
 const memory = []
+// Step 3: token counts, handoff summaries and the beta header of each chat request.
+const counts = []
+const handoffs = []
+const betas = []
+const saveStep3 = () => {
+  fs.writeFileSync(OUT + '/counts.json', JSON.stringify(counts, null, 1))
+  fs.writeFileSync(OUT + '/handoffs.json', JSON.stringify(handoffs, null, 1))
+  fs.writeFileSync(OUT + '/betas.json', JSON.stringify(betas, null, 1))
+}
 const save = () => {
   fs.writeFileSync(OUT + '/anthropic.json', JSON.stringify(anth, null, 1))
   fs.writeFileSync(OUT + '/spotify.json', JSON.stringify(spotify, null, 1))
@@ -39,6 +48,20 @@ http
         res.writeHead(status, { 'content-type': 'application/json' })
         res.end(JSON.stringify(data))
       }
+      // Token counting: a fixed figure, larger for a message meant to be over.
+      if (url.pathname === '/v1/messages/count_tokens') {
+        const b = JSON.parse(body)
+        const over = /over test/.test(body)
+        counts.push({
+          over,
+          betas: req.headers['anthropic-beta'] ?? null,
+          context_management: b.context_management ?? null,
+          tools: (b.tools ?? []).length,
+          system: Array.isArray(b.system) ? b.system.length : 0
+        })
+        saveStep3()
+        return j(200, { input_tokens: over ? 950_000 : 700_000 })
+      }
       if (url.pathname !== '/v1/messages') {
         spotify.push({
           method: req.method,
@@ -70,6 +93,41 @@ http
         return j(404, { error: { status: 404, message: 'nope' } })
       }
       const b = JSON.parse(body)
+      // The handoff for "Continue in a new chat": no tools, JSON out. Fails
+      // for a chat meant to show a failed summary.
+      if (typeof b.system === 'string' && b.system.startsWith('You write a handoff')) {
+        const evidence = String(b.messages[0].content)
+        handoffs.push({
+          model: b.model,
+          tools: b.tools ?? null,
+          format: b.output_config?.format?.type ?? null,
+          evidence
+        })
+        saveStep3()
+        if (/fail test/.test(evidence))
+          return j(500, { type: 'error', error: { type: 'api_error', message: 'Internal error' } })
+        return j(200, {
+          id: 'msg_handoff',
+          type: 'message',
+          role: 'assistant',
+          model: b.model,
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 10 },
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                goal: 'Queue Nils Frahm on Spotify',
+                constraints: ['Ask before queueing anything'],
+                decisions: ['Keep the playlist calm'],
+                open: ['Whether the queued track went through'],
+                state: 'The queue request got no answer.'
+              })
+            }
+          ]
+        })
+      }
       // Custard's memory summary: one call, no tools, JSON out. Recorded on
       // its own so the chat's request list stays as the other tests expect.
       if (typeof b.system === 'string' && b.system.startsWith('You decide what Custard')) {
@@ -120,6 +178,11 @@ http
           content: [{ type: 'text', text: JSON.stringify(summary) }]
         })
       }
+      betas.push({
+        beta: req.headers['anthropic-beta'] ?? null,
+        context_management: b.context_management ?? null
+      })
+      saveStep3()
       anth.push({
         tools: (b.tools ?? []).map((t) => t.name),
         toolTypes: (b.tools ?? []).map((t) => t.type ?? 'custom'),
@@ -207,7 +270,20 @@ http
                         ? 'web'
                         : /memory test/.test(ask)
                           ? 'memory'
-                          : 'plain'
+                          : /compact test/.test(ask)
+                            ? 'compact'
+                            : /too long test/.test(ask)
+                              ? 'toolong'
+                              : 'plain'
+      // The provider says the request is too large.
+      if (key === 'toolong')
+        return j(400, {
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: 'prompt is too long: 1204511 tokens > 1000000 maximum'
+          }
+        })
       if (key === 'error' && step === 1)
         return j(400, {
           type: 'error',
@@ -283,11 +359,35 @@ http
         ],
         // One plugin read, then an answer: enough to be remembered.
         memory: [() => tool('spotify__search', { query: 'Nils Frahm' }), 'Found Nils Frahm.'],
+        // Compacts first when compaction was asked for, then answers.
+        compact: [
+          () => {
+            if (b.context_management) {
+              send('content_block_start', {
+                index: idx,
+                content_block: { type: 'compaction', content: null, encrypted_content: null }
+              })
+              send('content_block_delta', {
+                index: idx,
+                delta: {
+                  type: 'compaction_delta',
+                  content: 'The user queued Nils Frahm; the outcome is unknown.',
+                  encrypted_content: 'enc-1'
+                }
+              })
+              send('content_block_stop', { index: idx++ })
+            }
+            text('Summarized and carrying on.')
+          }
+        ],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]
       let stop = 'tool_use'
-      if (typeof s === 'function') s()
+      if (key === 'compact') {
+        s()
+        stop = 'end_turn'
+      } else if (typeof s === 'function') s()
       else {
         text(s)
         stop = key === 'cut' || key === 'mixed' ? 'max_tokens' : 'end_turn'

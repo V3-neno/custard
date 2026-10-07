@@ -11,6 +11,7 @@ export type Segment =
       write?: boolean
     }
   | { kind: 'fallback'; to: string }
+  | { kind: 'compacting' }
 
 type Stage = {
   label: string
@@ -67,6 +68,8 @@ function toStages(segments: Segment[]): Stage[] {
                 : 'done',
         orb: seg.write ? 'weaving' : 'searching'
       })
+    else if (seg.kind === 'compacting')
+      stages.push({ label: 'Summarizing earlier messages to make room', status, orb: 'weaving' })
     else if (seg.kind === 'fallback')
       stages.push({ label: `Continuing with ${seg.to}`, status, orb: 'connecting' })
     else if (seg.kind === 'thinking')

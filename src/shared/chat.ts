@@ -76,7 +76,9 @@ export type ActionRecord = {
   result?: string
 }
 
-export type NoticeKind = 'stopped' | 'error' | 'interrupted' | 'cut-off' | 'step-limit'
+// too-long: the chat no longer fits what the model can take; it can go on in
+// a new chat (see main/continue).
+export type NoticeKind = 'stopped' | 'error' | 'interrupted' | 'cut-off' | 'step-limit' | 'too-long'
 
 // Shown in the chat after message `after - 1`.
 export type Notice = { after: number; kind: NoticeKind; text: string }
@@ -139,6 +141,27 @@ export type ChatMemory = {
   job?: CaptureJob
 }
 
+// A chat that continues an earlier one that grew too long. The earlier chat
+// is left exactly as it was.
+export type Continuation = {
+  from: { id: string; title: string }
+  // Written by a tool-less model from bounded evidence; null when the user
+  // continued without one (it failed, or they chose not to wait).
+  summary: {
+    goal: string
+    constraints: string[]
+    decisions: string[]
+    open: string[]
+    state: string
+  } | null
+  // Written by code from the earlier chat's action records. Authoritative.
+  ledger: string
+  counts: Record<string, number>
+  // Actions whose outcome is unknown, still guarded against repeats here.
+  unknown: { key: string; name: string; label: string }[]
+  at: number
+}
+
 export type Conversation = ConversationSummary & {
   createdAt: number
   // Code mode only: which folder the file tools may touch. Fixed when the
@@ -152,6 +175,38 @@ export type Conversation = ConversationSummary & {
   notices?: Notice[]
   sources?: WebSource[]
   memory?: ChatMemory
+  continuedFrom?: Continuation
+  // Where a provider's compaction summarized everything before message
+  // `after`. The messages themselves are kept and shown in full.
+  compactions?: Compaction[]
+  // How much of the model's input budget the last request used.
+  context?: ContextUse
+}
+
+// Claude's compaction block is part of the assistant message at `after`, as
+// the API requires; OpenAI's encrypted item is kept here, with the model it
+// came from, and is only sent back to that model.
+export type Compaction = {
+  after: number
+  at: number
+  provider: Provider
+  model: string
+  item?: { id?: string; encrypted_content: string }
+}
+
+export type ContinueResult =
+  { ok: true; conversation: Conversation } | { ok: false; error: string; canSkipSummary: boolean }
+
+export type ChatLink = { id: string; title: string; mode: Mode }
+
+export type ContextUse = {
+  tokens: number
+  budget: number
+  // Counted by the provider, or Custard's estimate.
+  exact: boolean
+  // Past the share of the budget where the chat says it is getting long.
+  warn: boolean
+  model: string
 }
 
 export type ChatEvent =
@@ -187,7 +242,11 @@ export type ChatEvent =
       message: string
       conversation: Conversation | null
       kept: boolean
+      // The chat is too long for the model: offer to continue in a new chat.
+      overflow?: boolean
     }
+  // The provider is summarizing earlier messages to make room.
+  | { requestId: string; type: 'compacting' }
 
 export type SendChatRequest = {
   requestId: string

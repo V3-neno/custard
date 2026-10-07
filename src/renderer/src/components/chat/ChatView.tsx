@@ -5,6 +5,7 @@ import {
   providerNames,
   providerOf,
   type ActionRecord,
+  type ChatLink,
   type WebSource,
   type ChatSettings,
   type Conversation,
@@ -18,6 +19,14 @@ import Composer from './Composer'
 import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
+import {
+  CompactionLine,
+  ContinuedIn,
+  HandoffCard,
+  HandoffProgress,
+  LengthNotice,
+  type HandoffState
+} from './LongChat'
 import type { Workspace } from '../../../../shared/plugins'
 type Live = { requestId: string; userText: string; segments: Segment[]; approvals: Approval[] }
 
@@ -82,6 +91,11 @@ function ChatView(props: Props): React.JSX.Element {
   const [live, setLive] = useState<Live | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  // The last send stopped because the chat is too long (nothing was kept).
+  const [overflow, setOverflow] = useState(false)
+  // Both belong to the chat they were made for.
+  const [handoffFor, setHandoffFor] = useState<{ id: string; state: HandoffState } | null>(null)
+  const [linksFor, setLinksFor] = useState<{ id: string; links: ChatLink[] } | null>(null)
   // Code mode: the workspace for the next new conversation.
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
@@ -145,6 +159,9 @@ function ChatView(props: Props): React.JSX.Element {
                 }
             )
             break
+          case 'compacting':
+            setLive((l) => l && { ...l, segments: [...l.segments, { kind: 'compacting' }] })
+            break
           case 'approval-done':
             setLive((l) => l && { ...l, approvals: l.approvals.filter((a) => a.id !== e.id) })
             break
@@ -159,6 +176,7 @@ function ChatView(props: Props): React.JSX.Element {
               setError(e.message)
               setDraft(p.userText)
             }
+            setOverflow(e.type === 'error' && !e.kept && !!e.overflow)
             refreshList()
             break
         }
@@ -200,9 +218,44 @@ function ChatView(props: Props): React.JSX.Element {
 
   useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [current, live])
 
+  // Chats that carry this one on.
+  const currentId = current?.id ?? null
+  useEffect(() => {
+    if (!currentId) return
+    let gone = false
+    window.custard.conversations
+      .continuations(currentId)
+      .then((links) => !gone && setLinksFor({ id: currentId, links }))
+    return () => {
+      gone = true
+    }
+  }, [currentId])
+  const continuedIn = linksFor?.id === currentId ? linksFor.links : []
+  const handoff = handoffFor?.id === currentId ? handoffFor.state : null
+
+  // Continue in a new chat. The original is never changed; the new chat
+  // opens once its handoff is ready, and whatever is in the box stays there.
+  const continueNew = async (withoutSummary = false): Promise<void> => {
+    if (!current || live) return
+    const id = current.id
+    setHandoffFor({ id, state: { busy: true } })
+    const r = await window.custard.chat.continue(id, withoutSummary)
+    if (!r.ok)
+      return setHandoffFor({
+        id,
+        state: { busy: false, error: r.error, canSkip: r.canSkipSummary }
+      })
+    setHandoffFor(null)
+    setError(null)
+    setOverflow(false)
+    setCurrent(r.conversation)
+    refreshList()
+  }
+
   const send = (text: string): void => {
     const requestId = crypto.randomUUID()
     setError(null)
+    setOverflow(false)
     setDraft('')
     pending.current = { requestId, userText: text }
     setLive({ requestId, userText: text, segments: [], approvals: [] })
@@ -220,6 +273,7 @@ function ChatView(props: Props): React.JSX.Element {
   const open = async (id: string): Promise<void> => {
     if (live) return
     setError(null)
+    setOverflow(false)
     setCurrent(await window.custard.conversations.get(id))
     onCloseHistory()
   }
@@ -229,6 +283,7 @@ function ChatView(props: Props): React.JSX.Element {
     onTemporary(false)
     setCurrent(null)
     setError(null)
+    setOverflow(false)
     onCloseHistory()
   }
 
@@ -281,8 +336,13 @@ function ChatView(props: Props): React.JSX.Element {
 
   const notices = current?.notices ?? []
   const lastNotice = notices[notices.length - 1]
-  const canContinue =
-    !live && lastNotice?.kind === 'cut-off' && lastNotice.after === current?.messages.length
+  const atEnd = lastNotice?.after === current?.messages.length
+  const canContinue = !live && lastNotice?.kind === 'cut-off' && atEnd
+  // Offered when the chat stopped for length, or when it is getting long;
+  // not once it has been continued.
+  const tooLong = overflow || (lastNotice?.kind === 'too-long' && atEnd)
+  const showLength =
+    !!current && !live && !continuedIn.length && (tooLong || !!current.context?.warn)
 
   const empty = !current && !live
   const modeLabel = modes.find((m) => m.id === mode)?.label ?? 'Chat'
@@ -311,8 +371,15 @@ function ChatView(props: Props): React.JSX.Element {
           </div>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 pt-8 pb-6">
+            {current?.continuedFrom && <HandoffCard k={current.continuedFrom} onOpen={open} />}
             {current?.messages.map((m, i) => (
               <Fragment key={i}>
+                {(current.compactions ?? [])
+                  .filter((k) => k.after === i)
+                  .slice(-1)
+                  .map((k) => (
+                    <CompactionLine key={`k${i}`} k={k} />
+                  ))}
                 {!isToolResults(m) && (
                   // A reply that continues after vault actions sits flush with the part before it.
                   <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
@@ -326,7 +393,8 @@ function ChatView(props: Props): React.JSX.Element {
                   />
                 )}
                 {notices
-                  .filter((n) => n.after === i + 1)
+                  // The length notice below says it, with the way on.
+                  .filter((n) => n.after === i + 1 && !(showLength && n === lastNotice && tooLong))
                   .map((n, j) => (
                     <NoticeLine
                       key={j}
@@ -338,6 +406,23 @@ function ChatView(props: Props): React.JSX.Element {
                   ))}
               </Fragment>
             ))}
+            {showLength && !handoff && (
+              <LengthNotice
+                use={current.context}
+                tooLong={tooLong}
+                busy={!!handoff}
+                onContinue={() => continueNew()}
+              />
+            )}
+            {handoff && (
+              <HandoffProgress
+                state={handoff}
+                onRetry={() => continueNew()}
+                onSkip={() => continueNew(true)}
+                onCancel={() => setHandoffFor(null)}
+              />
+            )}
+            {!live && continuedIn.length > 0 && <ContinuedIn links={continuedIn} onOpen={open} />}
             {live && (
               <>
                 <UserBubble text={live.userText} />
@@ -350,7 +435,10 @@ function ChatView(props: Props): React.JSX.Element {
       </div>
 
       <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-        {error && <div className="mb-2 px-2 text-sm text-ember-600">{error}</div>}
+        {/* The length notice in the chat already says it, with the way on. */}
+        {error && !(overflow && showLength) && (
+          <div className="mb-2 px-2 text-sm text-ember-600">{error}</div>
+        )}
         {mode === 'code' && (
           <WorkspaceBar
             fixed={current ? current.workspace : null}

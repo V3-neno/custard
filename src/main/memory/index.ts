@@ -4,6 +4,7 @@ import { getApiKey } from '../apiKey'
 import { pluginHost } from '../plugins'
 import { isPluginContents } from '../plugins/runtime'
 import {
+  allConversations,
   getConversation,
   getMemorySettings,
   getVaultPath,
@@ -14,6 +15,7 @@ import { handle } from '../ipc'
 import type { ChatMemory } from '../../shared/chat'
 import type { MemorySettings } from '../../shared/memory'
 import { Capture } from './capture'
+import { continuationsOf } from '../continue'
 import { ensurePluginFolder, type PluginInfo } from './plugins'
 import { summarizer } from './summarize'
 
@@ -100,8 +102,11 @@ export function registerMemoryHandlers(): void {
       memory().setChatMemory(id, off)?.memory ?? null
   )
   // Asks first, listing every note it will delete, then forgets the chat.
+  // A chat's continuations carry a summary of it, so they are forgotten too.
   handle('memory:forgetChat', async (e, id: string): Promise<ChatMemory | null> => {
-    const notes = memory().savedNotes(id)
+    const later = continuationsOf(allConversations(), id)
+    const ids = [id, ...later.map((c) => c.id)]
+    const notes = ids.flatMap((i) => memory().savedNotes(i))
     const win = BrowserWindow.fromWebContents(e.sender)
     const opts = {
       type: 'warning' as const,
@@ -113,12 +118,17 @@ export function registerMemoryHandlers(): void {
         notes.length
           ? `Custard will delete ${notes.length === 1 ? 'this note' : `these ${notes.length} notes`} it saved from this chat:\n${notes.map((n) => `• ${n}`).join('\n')}`
           : "Custard hasn't saved any notes from this chat.",
+        ...(later.length
+          ? [
+              `It was continued in ${later.length === 1 ? 'another chat' : `${later.length} other chats`} (${later.map((c) => `"${c.title}"`).join(', ')}), which ${later.length === 1 ? 'is' : 'are'} forgotten too; the notes above include theirs.`
+            ]
+          : []),
         'This chat will never be remembered again. The chat itself stays in your history until you delete it, and notes saved from other chats are not changed.'
       ].join('\n\n')
     }
     const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
     if (r.response !== 1) return getConversation(id)?.memory ?? null
-    const { left } = memory().forget(id)
+    const left = ids.flatMap((i) => memory().forget(i).left)
     if (left.length)
       await dialog.showMessageBox({
         type: 'error',

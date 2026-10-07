@@ -75,6 +75,19 @@ export function updateConversation(
   return c
 }
 
+// Every saved conversation, whatever its mode (for links between chats).
+export function allConversations(): Conversation[] {
+  return readdirSync(dir())
+    .filter((f) => f.endsWith('.json'))
+    .flatMap((f) => {
+      try {
+        return [withMode(JSON.parse(readFileSync(join(dir(), f), 'utf8')))]
+      } catch {
+        return []
+      }
+    })
+}
+
 export function getConversation(id: string): Conversation | null {
   if (!existsSync(file(id))) return null
   return withMode(JSON.parse(readFileSync(file(id), 'utf8')))

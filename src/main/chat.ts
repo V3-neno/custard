@@ -13,6 +13,8 @@ import { existsSync } from 'fs'
 import { getApiKey } from './apiKey'
 import OpenAI from 'openai'
 import {
+  allConversations,
+  getChatSettings,
   getConversation,
   getMemorySettings,
   getVaultPath,
@@ -24,6 +26,25 @@ import {
 import { allPluginInfo, memory } from './memory'
 import { pluginContext } from './memory/plugins'
 import { runOpenAI } from './openai'
+import { carriedContext, handoffSummarizer } from './handoff'
+import { continueChat } from './continue'
+import {
+  claudeCounter,
+  capResult,
+  COMPACT_TRIGGER,
+  COMPACTION_INSTRUCTIONS,
+  estimateTokens,
+  fromLastCompaction,
+  isContextError,
+  measure
+} from './context'
+import {
+  claudeHistory,
+  compactionRefused,
+  isCompactionRejected,
+  recordClaudeCompaction,
+  usesCompaction
+} from './compaction'
 import { runVaultTool, vaultSystemPrompt, vaultTools } from './vault'
 import { withoutUnavailableTools } from './history'
 import { handle, on } from './ipc'
@@ -34,10 +55,12 @@ import { isWebTool, runWebTool, webTools } from './web'
 import { repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
   chatModels,
+  providerOf,
   type ActionStatus,
   type ApprovalDecision,
   providerNames,
   type ChatEvent,
+  type ContinueResult,
   type Conversation,
   type Mode,
   type SendChatRequest
@@ -219,6 +242,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       console.error('Plugin notes:', err)
     }
   }
+  // A continued or compacted chat: the handoff, Custard's action record and
+  // the search-gate reasons they bring (summaries may hold private or
+  // outside text, so searches keep asking).
+  const carried = carriedContext(conversation)
+  for (const text of carried.system) system.push({ type: 'text', text })
+  injected.push(...carried.injected)
   const web = webTools(model)
   system.push({ type: 'text', text: web.prompt })
   system.push({
@@ -234,8 +263,25 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   ]
   const available = new Set(tools.map((t) => t.name))
   // Calls in the history to tools that aren't offered now go in as text.
-  const history = (): Conversation['messages'] =>
-    withoutUnavailableTools(conversation.messages, available)
+  // Claude models that don't compact get the history without compaction blocks.
+  const history = (): Conversation['messages'] => {
+    const h = withoutUnavailableTools(conversation.messages, available)
+    return model.provider === 'claude' ? claudeHistory(h, model.id) : h
+  }
+
+  // Checks the next request against the model's budget (see context.ts) and
+  // keeps the result, so the chat can say when it's getting long.
+  const fits = async (estimate: number, count: () => Promise<number>): Promise<boolean> => {
+    const fit = await measure(model.id, estimate, count)
+    conversation.context = {
+      tokens: fit.tokens,
+      budget: fit.budget,
+      exact: fit.exact,
+      warn: fit.warn,
+      model: model.id
+    }
+    return !fit.over
+  }
 
   // Asks the user before an action, unless they allowed it for this chat. A
   // repeat of an action whose outcome is unknown (`warning`) always asks.
@@ -335,12 +381,18 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     return { content: `There is no tool called ${c.name} here.`, isError: true, outcome: 'not-run' }
   }
 
+  // A result too large for the chat is shortened, with a note saying so.
+  const runCapped = async (c: Call): Promise<ToolRun> => {
+    const r = await runTool(c)
+    return { ...r, content: capResult(r.content, model.id) }
+  }
+
   const runRound = (
     uses: { id: string; name: string; input: unknown }[]
   ): Promise<BetaToolResultBlockParam[]> =>
     log.runRound(
       uses.map((u) => toCall(u.id, u.name, u.input)),
-      runTool,
+      runCapped,
       controller.signal,
       (c, status) =>
         emit({
@@ -372,6 +424,25 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     params.betas = ['server-side-fallback-2026-07-01']
     params.fallbacks = 'default'
   }
+  // Claude summarizes earlier messages itself once the input passes the
+  // trigger, and returns a compaction block that is kept in the history.
+  const compact = (on: boolean): void => {
+    params.betas = (params.betas ?? []).filter((b) => b !== 'compact-2026-01-12')
+    if (on) {
+      params.betas.push('compact-2026-01-12')
+      params.context_management = {
+        edits: [
+          {
+            type: 'compact_20260112',
+            trigger: { type: 'input_tokens', value: COMPACT_TRIGGER },
+            instructions: COMPACTION_INSTRUCTIONS
+          }
+        ]
+      }
+    } else delete params.context_management
+    if (!params.betas.length) delete params.betas
+  }
+  if (model.provider === 'claude') compact(usesCompaction(model.id))
 
   running.set(requestId, controller)
   active.add(conversation.id)
@@ -382,7 +453,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   // Ends the turn early. Whatever already happened stays in the chat with a
   // notice; only a turn where nothing happened is taken back, and then the
   // message goes back in the box.
-  const stopEarly = (kind: 'stopped' | 'error' | 'cut-off', message: string): void => {
+  const stopEarly = (kind: 'stopped' | 'error' | 'cut-off' | 'too-long', message: string): void => {
     const keptTurn = log.interrupt(kind, message)
     kept = keptTurn || log.startLength > 0
     if (kept) saveConversation(conversation)
@@ -391,7 +462,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       type: 'error',
       message,
       conversation: kept ? conversation : null,
-      kept: keptTurn
+      kept: keptTurn,
+      // A new chat has nothing to carry on from: its message is too long.
+      ...(kind === 'too-long' && log.startLength > 0 ? { overflow: true } : {})
     })
   }
   const finish = (): void => {
@@ -403,6 +476,11 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const CUT_OFF = 'The reply hit the length limit and was cut off. Continue to let it carry on.'
   const CUT_OFF_TOOL =
     'The reply was cut off in the middle of a tool action, so that action was not run.'
+  const TOO_LONG =
+    log.startLength > 0
+      ? `This chat has grown too long for ${model.label}. Continue in a new chat to carry on; this one stays as it is.`
+      : `This message is too long for ${model.label} to take in. Try a shorter one.`
+  const FULL_WINDOW = `The reply stopped because the chat filled ${model.label}'s context window. Continue in a new chat to carry on.`
 
   try {
     if (model.provider === 'openai') {
@@ -414,6 +492,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         effort: req.settings.effort,
         instructions: system.map((b) => b.text).join('\n\n'),
         history: history(),
+        conversation,
+        fits,
         tools,
         signal: controller.signal,
         emit,
@@ -422,6 +502,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       })
       if (controller.signal.aborted) return stopEarly('stopped', 'Stopped by you.')
       if (end === 'cut-off-tool') return stopEarly('cut-off', CUT_OFF_TOOL)
+      if (end === 'too-long') return stopEarly('too-long', TOO_LONG)
       if (end === 'cut-off') log.notice('cut-off', CUT_OFF)
       if (end === 'step-limit') log.notice('step-limit', STEP_LIMIT)
       return finish()
@@ -433,21 +514,49 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         break
       }
       params.messages = history()
+      const { messages, system: sys, tools: offered, thinking, betas } = params
+      const count = claudeCounter(client, {
+        model: params.model,
+        system: sys,
+        ...(offered ? { tools: offered } : {}),
+        ...(thinking ? { thinking } : {}),
+        ...(betas ? { betas } : {}),
+        ...(params.context_management ? { context_management: params.context_management } : {})
+      })
+      const estimate = estimateTokens(sys, offered, fromLastCompaction(messages))
+      if (!(await fits(estimate, () => count(messages)))) return stopEarly('too-long', TOO_LONG)
       const stream = client.beta.messages.stream(params, { signal: controller.signal })
-      for await (const event of stream) {
-        if (event.type === 'content_block_start' && event.content_block.type === 'fallback') {
-          const { from, to } = event.content_block
-          emit({ requestId, type: 'fallback', from: from.model, to: to.model })
-        } else if (event.type === 'content_block_delta') {
-          if (event.delta.type === 'thinking_delta') {
-            emit({ requestId, type: 'thinking', text: event.delta.thinking })
-          } else if (event.delta.type === 'text_delta') {
-            log.text(event.delta.text)
-            emit({ requestId, type: 'text', text: event.delta.text })
+      let streamed = false
+      let message: Awaited<ReturnType<typeof stream.finalMessage>>
+      try {
+        for await (const event of stream) {
+          streamed = true
+          if (event.type === 'content_block_start' && event.content_block.type === 'compaction') {
+            emit({ requestId, type: 'compacting' })
+          } else if (
+            event.type === 'content_block_start' &&
+            event.content_block.type === 'fallback'
+          ) {
+            const { from, to } = event.content_block
+            emit({ requestId, type: 'fallback', from: from.model, to: to.model })
+          } else if (event.type === 'content_block_delta') {
+            if (event.delta.type === 'thinking_delta') {
+              emit({ requestId, type: 'thinking', text: event.delta.thinking })
+            } else if (event.delta.type === 'text_delta') {
+              log.text(event.delta.text)
+              emit({ requestId, type: 'text', text: event.delta.text })
+            }
           }
         }
+        message = await stream.finalMessage()
+      } catch (err) {
+        // The model doesn't take compaction: send without it from now on.
+        if (streamed || !params.context_management || !isCompactionRejected(err)) throw err
+        compactionRefused(model.id)
+        compact(false)
+        step--
+        continue
       }
-      const message = await stream.finalMessage()
       if (message.stop_reason === 'refusal') {
         const category = message.stop_details?.category
         return stopEarly(
@@ -456,9 +565,16 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         )
       }
       const toolUses = message.content.filter((b) => b.type === 'tool_use')
-      if (toolUses.length > 0 && message.stop_reason === 'max_tokens')
-        return stopEarly('cut-off', CUT_OFF_TOOL)
+      const full = message.stop_reason === 'model_context_window_exceeded'
+      if (toolUses.length > 0 && (message.stop_reason === 'max_tokens' || full))
+        return stopEarly(full ? 'too-long' : 'cut-off', full ? FULL_WINDOW : CUT_OFF_TOOL)
+      // Before the message goes in, so the record points at it.
+      recordClaudeCompaction(conversation, message.content, model.id)
       log.addAssistant(echoableContent(message.content))
+      if (full) {
+        log.notice('too-long', FULL_WINDOW)
+        break
+      }
       if (message.stop_reason === 'max_tokens') {
         log.notice('cut-off', CUT_OFF)
         break
@@ -470,6 +586,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     finish()
   } catch (err) {
     if (controller.signal.aborted) stopEarly('stopped', 'Stopped by you.')
+    // The provider said the request is too large: the budget estimate was
+    // short or the count failed. Same way out as a budget stop.
+    else if (isContextError(err)) stopEarly('too-long', TOO_LONG)
     else stopEarly('error', describeError(err, provider))
   } finally {
     running.delete(requestId)
@@ -480,7 +599,49 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
 }
 
+// "Continue in a new chat". The original is only read. The summary is
+// written by the provider the original was last sent to, so its text goes
+// nowhere it hasn't been already.
+const continuing = new Set<string>()
+async function continueFrom(id: string, withoutSummary: boolean): Promise<ContinueResult> {
+  if (active.has(id) || continuing.has(id))
+    return {
+      ok: false as const,
+      error: 'This chat is still busy. Try again when it has finished.',
+      canSkipSummary: false
+    }
+  continuing.add(id)
+  try {
+    return await continueChat(
+      {
+        load: getConversation,
+        create: (mode, title) => ({ ...newConversation(mode, title), title }),
+        save: saveConversation,
+        summarizer: (original) => {
+          const p = providerOf(original.context?.model ?? getChatSettings().model)
+          const key = getApiKey(p)
+          return key ? handoffSummarizer(p, key) : null
+        }
+      },
+      id,
+      { withoutSummary }
+    )
+  } finally {
+    continuing.delete(id)
+  }
+}
+
 export function registerChatHandlers(): void {
+  handle('chat:continue', (_, id: string, withoutSummary?: boolean) =>
+    continueFrom(id, !!withoutSummary)
+  )
+  // The chats that continue this one, for "Continued in".
+  handle('conversations:continuations', (_, id: string) =>
+    allConversations()
+      .filter((c) => c.continuedFrom?.from.id === id)
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((c) => ({ id: c.id, title: c.title, mode: c.mode }))
+  )
   on('chat:send', (e, req: SendChatRequest) => void send(e.sender, req))
   on('chat:stop', (_, requestId: string) => running.get(requestId)?.abort())
   handle('chat:approve', (_, id: string, decision: ApprovalDecision) => {
