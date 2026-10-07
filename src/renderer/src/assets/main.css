@@ -25,6 +25,36 @@
   --font-mono: 'JetBrains Mono Variable', Consolas, monospace;
 }
 
+/* Glow colors as RGB channels, for use with an alpha: rgb(var(--glow) / 0.3). */
+:root {
+  --glow: 245 174 63;
+  --glow-deep: 224 138 30;
+  --glow-ember: 180 83 26;
+}
+
+/* OpenAI tint: the same forge, cooled to blue-grey steel. */
+:root[data-provider='openai'] {
+  --color-forge-950: #07090c;
+  --color-forge-900: #0c1015;
+  --color-forge-850: #11161d;
+  --color-forge-800: #171d26;
+  --color-forge-700: #212a35;
+  --color-forge-600: #2f3a48;
+  --color-ash-500: #66717f;
+  --color-ash-400: #838e9c;
+  --color-ash-300: #a3adba;
+  --color-ash-100: #e3e8ee;
+  --color-molten-200: #dbe6f3;
+  --color-molten-300: #bccfe4;
+  --color-molten-400: #95afcc;
+  --color-molten-500: #7190b3;
+  --color-ember-600: #4f6b8c;
+  --color-ember-700: #2d3f55;
+  --glow: 149 175 204;
+  --glow-deep: 113 144 179;
+  --glow-ember: 79 107 140;
+}
+
 html,
 body,
 #root {
@@ -35,12 +65,12 @@ body {
   @apply bg-forge-950 font-sans text-ash-100 antialiased;
   /* A faint heat glow rising from the bottom, where the input sits. */
   background-image:
-    radial-gradient(ellipse 70% 45% at 50% 115%, rgb(224 138 30 / 0.13), transparent 70%),
-    radial-gradient(ellipse 50% 35% at 50% -10%, rgb(180 83 26 / 0.06), transparent 70%);
+    radial-gradient(ellipse 70% 45% at 50% 115%, rgb(var(--glow-deep) / 0.13), transparent 70%),
+    radial-gradient(ellipse 50% 35% at 50% -10%, rgb(var(--glow-ember) / 0.06), transparent 70%);
 }
 
 ::selection {
-  background: rgb(245 174 63 / 0.3);
+  background: rgb(var(--glow) / 0.3);
 }
 
 * {
@@ -50,7 +80,7 @@ body {
 
 /* Hairline with a molten center, used for dividers and focus edges. */
 .forge-line {
-  background: linear-gradient(90deg, transparent, rgb(245 174 63 / 0.35), transparent);
+  background: linear-gradient(90deg, transparent, rgb(var(--glow) / 0.35), transparent);
   height: 1px;
 }
 
@@ -61,6 +91,45 @@ body {
     var(--color-molten-500) 55%,
     var(--color-ember-600)
   );
+}
+
+/* ---------- Working stages ---------- */
+
+.stage-in {
+  animation: stage-in 0.35s ease-out both;
+}
+@keyframes stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* A hairline under each stage: lit when done, a travelling spark while active. */
+.stage-track {
+  height: 1px;
+  background: linear-gradient(90deg, rgb(var(--glow) / 0.45), rgb(var(--glow) / 0.08));
+}
+.stage-track.is-active {
+  background:
+    linear-gradient(90deg, transparent, rgb(var(--glow) / 0.9), transparent) -40% 0 / 40% 100%
+      no-repeat,
+    var(--color-forge-700);
+  animation: stage-spark 1.4s ease-in-out infinite;
+}
+@keyframes stage-spark {
+  to {
+    background-position:
+      140% 0,
+      0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-in,
+  .stage-track.is-active {
+    animation: none;
+  }
 }
 
 /* ---------- Drawer ---------- */

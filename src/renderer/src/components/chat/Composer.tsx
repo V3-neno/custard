@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { chatModels, efforts, type ChatSettings, type Effort } from '../../../../shared/chat'
+import {
+  chatModels,
+  efforts,
+  providerNames,
+  type ChatSettings,
+  type Effort,
+  type Provider
+} from '../../../../shared/chat'
 import { ArrowUpIcon, StopIcon } from '../icons'
 
 type Props = {
@@ -37,7 +44,7 @@ function Composer(props: Props): React.JSX.Element {
     <div
       className={`rounded-3xl border bg-forge-850/90 p-3 backdrop-blur transition-all ${
         focused
-          ? 'border-molten-500/50 shadow-[0_0_40px_rgb(224_138_30/0.12)]'
+          ? 'border-molten-500/50 shadow-[0_0_40px_rgb(var(--glow-deep)/0.12)]'
           : 'border-forge-700 shadow-[0_10px_40px_rgb(0_0_0/0.4)]'
       }`}
     >
@@ -61,15 +68,22 @@ function Composer(props: Props): React.JSX.Element {
       <div className="mt-2 flex items-center gap-2">
         <select
           className={chip}
+          title="Model"
           value={settings.model}
           onChange={(e) =>
             onSettings({ ...settings, model: e.target.value as ChatSettings['model'] })
           }
         >
-          {chatModels.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
+          {(['claude', 'openai'] as Provider[]).map((p) => (
+            <optgroup key={p} label={providerNames[p]}>
+              {chatModels
+                .filter((m) => m.provider === p)
+                .map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+            </optgroup>
           ))}
         </select>
         {model?.effort && (
@@ -77,7 +91,7 @@ function Composer(props: Props): React.JSX.Element {
             className={chip}
             value={settings.effort}
             onChange={(e) => onSettings({ ...settings, effort: e.target.value as Effort })}
-            title="Effort: how hard Claude thinks"
+            title="Effort: how hard the model thinks"
           >
             {efforts.map((e) => (
               <option key={e} value={e}>

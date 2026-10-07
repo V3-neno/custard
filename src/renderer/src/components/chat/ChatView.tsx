@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import {
-  defaultChatSettings,
   modes,
+  providerNames,
+  providerOf,
   type ChatSettings,
   type Conversation,
   type ConversationSummary,
@@ -12,13 +13,8 @@ import HistoryDrawer from '../HistoryDrawer'
 import ModeBubbles from '../ModeBubbles'
 import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
-import MessageView, { FallbackNote, Thinking, ToolLine, UserBubble } from './MessageView'
-import Markdown from '../Markdown'
-
-type Segment =
-  | { kind: 'thinking' | 'text'; text: string }
-  | { kind: 'tool'; id: string; label: string; status: 'running' | 'done' | 'error' }
-  | { kind: 'fallback'; to: string }
+import MessageView, { UserBubble } from './MessageView'
+import Working, { type Segment } from './Working'
 type Live = { requestId: string; userText: string; segments: Segment[] }
 
 const isToolResults = (m: BetaMessageParam | undefined): boolean =>
@@ -38,7 +34,7 @@ function upsertTool(segments: Segment[], tool: Extract<Segment, { kind: 'tool' }
 }
 
 const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState }> = {
-  chat: { headline: "What's on your mind?", placeholder: 'Message Claude…', orb: 'breathing' },
+  chat: { headline: "What's on your mind?", placeholder: 'Message {provider}…', orb: 'breathing' },
   code: {
     headline: 'What are we building?',
     placeholder: 'Describe the code you need…',
@@ -55,19 +51,21 @@ type Props = {
   mode: Mode
   onModeChange: (mode: Mode) => void
   hasKey: boolean
+  settings: ChatSettings
+  onSettings: (s: ChatSettings) => void
   onOpenSettings: () => void
   historyOpen: boolean
   onCloseHistory: () => void
 }
 
 function ChatView(props: Props): React.JSX.Element {
-  const { mode, onModeChange, hasKey, onOpenSettings, historyOpen, onCloseHistory } = props
+  const { mode, onModeChange, hasKey, settings, onSettings, onOpenSettings } = props
+  const { historyOpen, onCloseHistory } = props
   const [list, setList] = useState<ConversationSummary[]>([])
   const [current, setCurrent] = useState<Conversation | null>(null)
   const [live, setLive] = useState<Live | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
-  const [settings, setSettings] = useState<ChatSettings>(defaultChatSettings)
   const bottom = useRef<HTMLDivElement>(null)
   // The request in flight, read by the event listener without re-subscribing.
   const pending = useRef<{ requestId: string; userText: string } | null>(null)
@@ -76,10 +74,6 @@ function ChatView(props: Props): React.JSX.Element {
     () => window.custard.conversations.list(mode).then(setList),
     [mode]
   )
-
-  useEffect(() => {
-    window.custard.settings.get().then(setSettings)
-  }, [])
 
   useEffect(() => {
     refreshList()
@@ -167,11 +161,6 @@ function ChatView(props: Props): React.JSX.Element {
     refreshList()
   }
 
-  const updateSettings = (s: ChatSettings): void => {
-    setSettings(s)
-    window.custard.settings.set(s)
-  }
-
   const failedTools = useMemo(() => {
     const ids = new Set<string>()
     for (const m of current?.messages ?? [])
@@ -183,7 +172,7 @@ function ChatView(props: Props): React.JSX.Element {
 
   const empty = !current && !live
   const modeLabel = modes.find((m) => m.id === mode)?.label ?? 'Chat'
-  const lastKind = live?.segments[live.segments.length - 1]?.kind
+  const providerName = providerNames[providerOf(settings.model)]
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -200,7 +189,7 @@ function ChatView(props: Props): React.JSX.Element {
                   modes.find((m) => m.id === mode)?.hint
                 ) : (
                   <button onClick={onOpenSettings} className="text-molten-300 hover:underline">
-                    Add your Claude API key to get started
+                    Add your {providerName} API key to get started
                   </button>
                 )}
               </p>
@@ -219,19 +208,7 @@ function ChatView(props: Props): React.JSX.Element {
             {live && (
               <>
                 <UserBubble text={live.userText} />
-                <div>
-                  {live.segments.map((seg, i) => {
-                    if (seg.kind === 'thinking')
-                      return (
-                        <Thinking key={i} text={seg.text} live={i === live.segments.length - 1} />
-                      )
-                    if (seg.kind === 'fallback') return <FallbackNote key={i} to={seg.to} />
-                    if (seg.kind === 'tool')
-                      return <ToolLine key={i} label={seg.label} status={seg.status} />
-                    return <Markdown key={i} text={seg.text} />
-                  })}
-                  {lastKind !== 'text' && lastKind !== 'thinking' && <Thinking text="" live />}
-                </div>
+                <Working segments={live.segments} />
               </>
             )}
             <div ref={bottom} />
@@ -244,9 +221,9 @@ function ChatView(props: Props): React.JSX.Element {
         <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
         <Composer
           busy={!!live}
-          placeholder={copy[mode].placeholder}
+          placeholder={copy[mode].placeholder.replace('{provider}', providerName)}
           settings={settings}
-          onSettings={updateSettings}
+          onSettings={onSettings}
           onSend={send}
           onStop={() => live && window.custard.chat.stop(live.requestId)}
           draft={draft}

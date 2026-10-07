@@ -20,7 +20,7 @@ npm run build:win  # build a Windows installer into dist/
 
 ## Chat mode
 
-Open **Settings** and paste a Claude API key from [console.anthropic.com](https://console.anthropic.com). It's encrypted with Windows secure storage. Chats are saved as JSON files in `%APPDATA%\custard\conversations`.
+Open **Settings** and paste a Claude API key from [console.anthropic.com](https://console.anthropic.com), an OpenAI key from [platform.openai.com](https://platform.openai.com), or both. Keys are encrypted with Windows secure storage. Pick a model from either provider under the message box; the app turns amber for Claude and blue-grey for OpenAI. Chats are saved as JSON files in `%APPDATA%\custard\conversations`, and either provider can continue a chat the other started.
 
 Pick the model and effort under the message box. Opus 5.5 and Sonnet 5.5 show a summary of Claude's thinking and fall back to another model automatically if a safety check declines a request.
 

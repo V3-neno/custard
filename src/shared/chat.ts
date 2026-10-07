@@ -1,12 +1,35 @@
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 
+export type Provider = 'claude' | 'openai'
+
+export const providerNames: Record<Provider, string> = { claude: 'Claude', openai: 'OpenAI' }
+
+// Picking a model picks its provider; the app's tint follows it.
 export const chatModels = [
-  { id: 'claude-opus-5-5', label: 'Opus 5.5', effort: true, fallbacks: true },
-  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', effort: true, fallbacks: true },
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', effort: false, fallbacks: false }
+  { id: 'claude-opus-5-5', label: 'Opus 5.5', provider: 'claude', effort: true, fallbacks: true },
+  {
+    id: 'claude-sonnet-5-5',
+    label: 'Sonnet 5.5',
+    provider: 'claude',
+    effort: true,
+    fallbacks: true
+  },
+  {
+    id: 'claude-haiku-4-5',
+    label: 'Haiku 4.5',
+    provider: 'claude',
+    effort: false,
+    fallbacks: false
+  },
+  { id: 'gpt-6-astra', label: 'GPT-6 Astra', provider: 'openai', effort: true, fallbacks: false },
+  { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', provider: 'openai', effort: true, fallbacks: false },
+  { id: 'gpt-6-luna', label: 'GPT-6 Luna', provider: 'openai', effort: true, fallbacks: false }
 ] as const
 
 export type ChatModel = (typeof chatModels)[number]['id']
+export const providerOf = (model: string): Provider =>
+  chatModels.find((m) => m.id === model)?.provider ?? 'claude'
+
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export const efforts: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']

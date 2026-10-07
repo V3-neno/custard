@@ -54,7 +54,7 @@ export function ToolLine({
         <Orb size={16} state={/^(Created|Added|Saved)/.test(label) ? 'composing' : 'searching'} />
       ) : (
         <span
-          className={`h-2 w-2 rounded-full ${status === 'error' ? 'bg-ember-600' : 'bg-molten-400 shadow-[0_0_8px_rgb(245_174_63/0.6)]'}`}
+          className={`h-2 w-2 rounded-full ${status === 'error' ? 'bg-ember-600' : 'bg-molten-400 shadow-[0_0_8px_rgb(var(--glow)/0.6)]'}`}
         />
       )}
       {label}

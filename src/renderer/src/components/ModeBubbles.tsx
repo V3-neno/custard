@@ -15,7 +15,7 @@ function ModeBubbles({ mode, disabled, onChange }: Props): React.JSX.Element {
             title={m.hint}
             className={`rounded-full px-4 py-1.5 text-sm font-medium transition-all disabled:opacity-40 ${
               active
-                ? 'molten-fill text-forge-950 shadow-[0_0_24px_rgb(245_174_63/0.35)]'
+                ? 'molten-fill text-forge-950 shadow-[0_0_24px_rgb(var(--glow)/0.35)]'
                 : 'border border-forge-700 bg-forge-850/80 text-ash-300 backdrop-blur hover:border-molten-500/50 hover:text-molten-200'
             }`}
           >

@@ -9,10 +9,13 @@ import type {
 import { ipcMain, type WebContents } from 'electron'
 import { existsSync } from 'fs'
 import { getApiKey } from './apiKey'
+import OpenAI from 'openai'
 import { getConversation, getVaultPath, newConversation, saveConversation } from './store'
+import { runOpenAI } from './openai'
 import { runVaultTool, vaultSystemPrompt, vaultTools } from './vault'
 import {
   chatModels,
+  providerNames,
   type ChatEvent,
   type Conversation,
   type Mode,
@@ -20,8 +23,9 @@ import {
 } from '../shared/chat'
 import { toolLabel } from '../shared/vault'
 
-const SYSTEM_PROMPT =
-  'You are Claude, working with the user through Custard, their personal desktop client. ' +
+const systemPrompt = (model: (typeof chatModels)[number]): string =>
+  `${model.provider === 'claude' ? 'You are Claude' : `You are ${model.label}, an OpenAI model`}, ` +
+  'working with the user through Custard, their personal desktop client. ' +
   'Format responses in Markdown when it helps readability.'
 
 // Each mode keeps its own history and nudges Claude toward that kind of work.
@@ -56,12 +60,13 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const emit = (e: ChatEvent): void => {
     if (!sender.isDestroyed()) sender.send('chat:event', e)
   }
-  const apiKey = getApiKey()
+  const model = chatModels.find((m) => m.id === req.settings.model) ?? chatModels[0]
+  const apiKey = getApiKey(model.provider)
   if (!apiKey) {
     emit({
       requestId,
       type: 'error',
-      message: 'Add your API key in Settings first.',
+      message: `Add your ${providerNames[model.provider]} API key in Settings first.`,
       conversation: null
     })
     return
@@ -76,11 +81,25 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const vault = getVaultPath()
   const vaultReady = vault !== null && existsSync(vault)
   const system: BetaTextBlockParam[] = [
-    { type: 'text', text: `${SYSTEM_PROMPT}\n\n${MODE_PROMPTS[conversation.mode]}` }
+    { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
   ]
   if (vaultReady) system.push({ type: 'text', text: vaultSystemPrompt(vault) })
 
-  const model = chatModels.find((m) => m.id === req.settings.model) ?? chatModels[0]
+  // Runs one vault tool call and reports it to the UI.
+  const runTool = (
+    id: string,
+    name: string,
+    input: unknown
+  ): { content: string; isError: boolean } => {
+    const label = toolLabel(name, input)
+    emit({ requestId, type: 'tool', id, label, status: 'running' })
+    const r = vaultReady
+      ? runVaultTool(vault, name, input)
+      : { content: 'The vault is not connected right now.', isError: true }
+    emit({ requestId, type: 'tool', id, label, status: r.isError ? 'error' : 'done' })
+    return r
+  }
+
   const params: MessageCreateParamsStreaming = {
     model: model.id,
     max_tokens: 64000,
@@ -108,7 +127,6 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
 
   const controller = new AbortController()
   running.set(requestId, controller)
-  const client = new Anthropic({ apiKey })
   let partialText = ''
 
   // A failed turn is removed from the end of the history so it can be resent.
@@ -119,6 +137,26 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
 
   try {
+    if (model.provider === 'openai') {
+      await runOpenAI({
+        requestId,
+        maxSteps: MAX_STEPS,
+        apiKey,
+        model: model.id,
+        effort: req.settings.effort,
+        instructions: system.map((b) => b.text).join('\n\n'),
+        conversation,
+        withTools: vaultReady || usedTools,
+        signal: controller.signal,
+        emit,
+        runTool,
+        onText: (t) => (partialText += t)
+      })
+      saveConversation(conversation)
+      emit({ requestId, type: 'done', conversation })
+      return
+    }
+    const client = new Anthropic({ apiKey })
     for (let step = 0; step < MAX_STEPS; step++) {
       const stream = client.beta.messages.stream(params, { signal: controller.signal })
       for await (const event of stream) {
@@ -150,12 +188,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
 
       // Run every tool call from this turn and return all results together.
       const results: BetaToolResultBlockParam[] = toolUses.map((t) => {
-        const label = toolLabel(t.name, t.input)
-        emit({ requestId, type: 'tool', id: t.id, label, status: 'running' })
-        const r = vaultReady
-          ? runVaultTool(vault, t.name, t.input)
-          : { content: 'The vault is not connected right now.', isError: true }
-        emit({ requestId, type: 'tool', id: t.id, label, status: r.isError ? 'error' : 'done' })
+        const r = runTool(t.id, t.name, t.input)
         return { type: 'tool_result', tool_use_id: t.id, content: r.content, is_error: r.isError }
       })
       conversation.messages.push({ role: 'user', content: results })
@@ -172,11 +205,14 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       emit({ requestId, type: 'done', conversation })
     } else if (controller.signal.aborted) {
       fail('Stopped.')
-    } else if (err instanceof Anthropic.AuthenticationError) {
-      fail('Your API key was rejected. Check it in Settings.')
-    } else if (err instanceof Anthropic.RateLimitError) {
-      fail('Rate limited by the API. Try again in a moment.')
-    } else if (err instanceof Anthropic.APIError) {
+    } else if (
+      err instanceof Anthropic.AuthenticationError ||
+      err instanceof OpenAI.AuthenticationError
+    ) {
+      fail(`Your ${providerNames[model.provider]} API key was rejected. Check it in Settings.`)
+    } else if (err instanceof Anthropic.RateLimitError || err instanceof OpenAI.RateLimitError) {
+      fail(`${providerNames[model.provider]} said: ${err.message}`)
+    } else if (err instanceof Anthropic.APIError || err instanceof OpenAI.APIError) {
       fail(`API error${err.status ? ` ${err.status}` : ''}: ${err.message}`)
     } else {
       fail(err instanceof Error ? err.message : String(err))

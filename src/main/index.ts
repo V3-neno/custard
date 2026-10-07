@@ -15,7 +15,7 @@ import {
   setVaultPath
 } from './store'
 import type { VaultInfo } from '../shared/vault'
-import type { Mode } from '../shared/chat'
+import type { Mode, Provider } from '../shared/chat'
 import { listSkills } from './vault'
 import { createStarterVault } from './vaultTemplate'
 
@@ -78,9 +78,9 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ipcMain.handle('apiKey:has', () => getApiKey() !== null)
-  ipcMain.handle('apiKey:set', (_, key: string) => setApiKey(key))
-  ipcMain.handle('apiKey:clear', () => clearApiKey())
+  ipcMain.handle('apiKey:has', (_, p: Provider) => getApiKey(p) !== null)
+  ipcMain.handle('apiKey:set', (_, p: Provider, key: string) => setApiKey(p, key))
+  ipcMain.handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
   ipcMain.handle('settings:get', () => getChatSettings())
   ipcMain.handle('settings:set', (_, s) => setChatSettings(s))
   ipcMain.handle('conversations:list', (_, mode: Mode) => listConversations(mode))
