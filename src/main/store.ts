@@ -76,6 +76,13 @@ export function updateConversation(
 }
 
 // Every saved conversation, whatever its mode (for links between chats).
+// Every saved chat's id, from the file names (a file that can't be read
+// still counts).
+export const conversationIds = (): string[] =>
+  readdirSync(dir())
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => f.slice(0, -'.json'.length))
+
 export function allConversations(): Conversation[] {
   return readdirSync(dir())
     .filter((f) => f.endsWith('.json'))

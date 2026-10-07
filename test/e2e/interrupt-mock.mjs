@@ -280,7 +280,9 @@ http
                                   ? 'search'
                                   : /parts test/.test(ask)
                                     ? 'parts'
-                                    : 'plain'
+                                    : /reject test/.test(ask)
+                                      ? 'reject'
+                                      : 'plain'
       // The provider says the request is too large.
       if (key === 'toolong')
         return j(400, {
@@ -298,6 +300,12 @@ http
             type: 'invalid_request_error',
             message: 'context_management: Extra inputs are not permitted'
           }
+        })
+      // Step 5: a request turned down before anything happened.
+      if (key === 'reject')
+        return j(400, {
+          type: 'error',
+          error: { type: 'invalid_request_error', message: 'Rejected for the test.' }
         })
       if (key === 'error' && step === 1)
         return j(400, {
@@ -348,6 +356,7 @@ http
       }
       const scripts = {
         // Step 4: a long note read in two parts.
+        reject: ['unused'],
         parts: [
           () => tool('vault_read', { path: 'Projects/Long.md' }),
           () => tool('vault_read', { path: 'Projects/Long.md', ...nextPart() }),

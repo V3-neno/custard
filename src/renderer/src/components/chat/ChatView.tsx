@@ -17,6 +17,8 @@ import ModeBubbles from '../ModeBubbles'
 import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
 import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
+import { SentFiles } from './Attachments'
+import { ATTACHMENT_LIMITS, type DraftAttachment } from '../../../../shared/attachments'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
 import {
@@ -28,7 +30,13 @@ import {
   type HandoffState
 } from './LongChat'
 import type { Workspace } from '../../../../shared/plugins'
-type Live = { requestId: string; userText: string; segments: Segment[]; approvals: Approval[] }
+type Live = {
+  requestId: string
+  userText: string
+  files?: number
+  segments: Segment[]
+  approvals: Approval[]
+}
 
 const isToolResults = (m: BetaMessageParam | undefined): boolean =>
   !!m && typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
@@ -91,6 +99,12 @@ function ChatView(props: Props): React.JSX.Element {
   const [live, setLive] = useState<Live | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  // Chat mode: files for the next message. They live in a draft folder in
+  // app data until sent (see main/attachments).
+  const [draftId, setDraftId] = useState<string>(() => crypto.randomUUID())
+  const [files, setFiles] = useState<DraftAttachment[]>([])
+  const [fileErrors, setFileErrors] = useState<{ name: string; error: string }[]>([])
+  const [adding, setAdding] = useState(false)
   // The last send stopped because the chat is too long (nothing was kept).
   const [overflow, setOverflow] = useState(false)
   // Both belong to the chat they were made for.
@@ -100,7 +114,12 @@ function ChatView(props: Props): React.JSX.Element {
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
   // The request in flight, read by the event listener without re-subscribing.
-  const pending = useRef<{ requestId: string; userText: string } | null>(null)
+  const pending = useRef<{
+    requestId: string
+    userText: string
+    files: DraftAttachment[]
+    draft: string
+  } | null>(null)
 
   const refreshList = useCallback(
     () => window.custard.conversations.list(mode).then(setList),
@@ -175,6 +194,11 @@ function ChatView(props: Props): React.JSX.Element {
             if (e.type === 'error' && !e.kept) {
               setError(e.message)
               setDraft(p.userText)
+              // The files went back to their draft; show them again.
+              if (p.files.length) {
+                setDraftId(p.draft)
+                void window.custard.attachments.list(p.draft).then(setFiles)
+              }
             }
             setOverflow(e.type === 'error' && !e.kept && !!e.overflow)
             refreshList()
@@ -252,14 +276,58 @@ function ChatView(props: Props): React.JSX.Element {
     refreshList()
   }
 
+  // Files picked, pasted or dropped: checked and copied by the main process.
+  const addFiles = async (picked: File[]): Promise<void> => {
+    setAdding(true)
+    const errors: { name: string; error: string }[] = []
+    const max = Math.max(ATTACHMENT_LIMITS.imageBytes, ATTACHMENT_LIMITS.pdfBytes)
+    for (const f of picked.slice(0, ATTACHMENT_LIMITS.perMessage + 1)) {
+      // Not read at all when it's plainly too big.
+      if (f.size > max) {
+        errors.push({
+          name: f.name || 'file',
+          error: `It is ${(f.size / 1_000_000).toFixed(1)} MB; attached files can be up to ${max / 1_000_000} MB.`
+        })
+        continue
+      }
+      const name = f.name || `pasted.${f.type.split('/')[1] ?? 'bin'}`
+      const r = await window.custard.attachments.add(
+        draftId,
+        name,
+        new Uint8Array(await f.arrayBuffer())
+      )
+      if (r.ok) setFiles((x) => [...x, r.attachment])
+      else errors.push({ name: r.name, error: r.error })
+    }
+    setFileErrors(errors)
+    setAdding(false)
+  }
+  const pickFiles = async (): Promise<void> => {
+    setAdding(true)
+    const results = await window.custard.attachments.pick(draftId)
+    setFiles((x) => [...x, ...results.flatMap((r) => (r.ok ? [r.attachment] : []))])
+    setFileErrors(results.flatMap((r) => (r.ok ? [] : [{ name: r.name, error: r.error }])))
+    setAdding(false)
+  }
+  const removeFile = (id: string): void => {
+    setFiles((x) => x.filter((f) => f.id !== id))
+    void window.custard.attachments.remove(draftId, id)
+  }
+
   const send = (text: string): void => {
     const requestId = crypto.randomUUID()
+    const sending = mode === 'chat' ? files : []
     setError(null)
     setOverflow(false)
     setDraft('')
-    pending.current = { requestId, userText: text }
-    setLive({ requestId, userText: text, segments: [], approvals: [] })
+    setFiles([])
+    setFileErrors([])
+    pending.current = { requestId, userText: text, files: sending, draft: draftId }
+    // The next message gets a new draft; this one is consumed by the send.
+    if (sending.length) setDraftId(crypto.randomUUID())
+    setLive({ requestId, userText: text, files: sending.length, segments: [], approvals: [] })
     window.custard.chat.send({
+      ...(sending.length ? { attachments: { draft: draftId, ids: sending.map((f) => f.id) } } : {}),
       requestId,
       conversationId: current?.id ?? null,
       mode,
@@ -384,6 +452,10 @@ function ChatView(props: Props): React.JSX.Element {
                   // A reply that continues after vault actions sits flush with the part before it.
                   <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
                     <MessageView message={m} actions={actions} />
+                    <SentFiles
+                      chat={current.id}
+                      files={(current.attachments ?? []).filter((a) => a.message === i)}
+                    />
                   </div>
                 )}
                 {turnSources.has(i) && (
@@ -426,6 +498,11 @@ function ChatView(props: Props): React.JSX.Element {
             {live && (
               <>
                 <UserBubble text={live.userText} />
+                {live.files ? (
+                  <p className="-mt-4 text-right text-[11px] text-ash-500">
+                    Sending with {live.files} {live.files === 1 ? 'file' : 'files'}
+                  </p>
+                ) : null}
                 <Working segments={live.segments} approvals={live.approvals} />
               </>
             )}
@@ -457,6 +534,19 @@ function ChatView(props: Props): React.JSX.Element {
           onStop={() => live && window.custard.chat.stop(live.requestId)}
           draft={draft}
           setDraft={setDraft}
+          {...(mode === 'chat'
+            ? {
+                files: {
+                  items: files,
+                  errors: fileErrors,
+                  adding,
+                  onPick: () => void pickFiles(),
+                  onAdd: (f: File[]) => void addFiles(f),
+                  onRemove: removeFile,
+                  onDismiss: () => setFileErrors([])
+                }
+              }
+            : {})}
         />
       </div>
 

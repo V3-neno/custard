@@ -5,6 +5,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { openConversation, registerChatHandlers } from './chat'
+import { attachments, registerAttachmentHandlers } from './attachments'
 import { memory, registerMemoryHandlers } from './memory'
 import { handle } from './ipc'
 import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
@@ -92,7 +93,11 @@ app.whenReady().then(() => {
   handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
   handle('conversations:list', (_, mode: Mode) => listConversations(mode))
   handle('conversations:get', (_, id: string) => openConversation(id))
-  handle('conversations:delete', (_, id: string) => deleteConversation(id))
+  handle('conversations:delete', async (_, id: string) => {
+    deleteConversation(id)
+    // The chat's attached files go with it.
+    await attachments().deleteChat(id)
+  })
   handle('vault:get', () => vaultInfo())
   handle('vault:pick', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -131,6 +136,7 @@ app.whenReady().then(() => {
     return { added: addMissingStarterSkills(path), vault: vaultInfo() }
   })
   registerChatHandlers()
+  registerAttachmentHandlers()
   registerPluginHandlers()
   registerMemoryHandlers()
 

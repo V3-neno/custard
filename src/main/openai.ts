@@ -7,6 +7,7 @@ import type {
 import OpenAI from 'openai'
 import type {
   FunctionTool,
+  ResponseInputContent,
   ResponseInputItem,
   ResponseOutputItem,
   ResponseStreamEvent
@@ -64,6 +65,35 @@ const textOf = (content: string | BetaToolResultBlockParam['content']): string =
     ? content
     : (content ?? []).map((b) => (b.type === 'text' ? b.text : '')).join('')
 
+// An attached file (see attachments/request) as Responses input: images as
+// base64 data URLs with detail "high" (at most 2,500 patches, so never
+// rejected for size), PDFs as base64 file data with the file's name, and
+// text files as text, so both providers get exactly the same characters.
+function filePart(b: BetaContentBlockParam): ResponseInputContent | null {
+  if (b.type === 'image' && b.source.type === 'base64')
+    return {
+      type: 'input_image',
+      image_url: `data:${b.source.media_type};base64,${b.source.data}`,
+      detail: 'high'
+    }
+  if (b.type === 'document' && b.source.type === 'base64')
+    return {
+      type: 'input_file',
+      filename: b.title ?? 'file.pdf',
+      file_data: `data:${b.source.media_type};base64,${b.source.data}`
+    }
+  if (b.type === 'document' && b.source.type === 'text')
+    return {
+      type: 'input_text',
+      text: `<file name=${JSON.stringify(b.title ?? 'file')}>\n${b.source.data}\n</file>${b.context ? `\n${b.context}` : ''}`
+    }
+  return null
+}
+
+const hasFiles = (m: BetaMessageParam): boolean =>
+  typeof m.content !== 'string' &&
+  m.content.some((b) => b.type === 'image' || b.type === 'document')
+
 // Conversations are stored in Claude's message format so either provider can
 // continue them. This converts that history into OpenAI Responses input.
 // Claude's thinking blocks are left out: they only mean something to Claude.
@@ -73,6 +103,16 @@ export function toInput(messages: BetaMessageParam[]): ResponseInputItem[] {
   for (const m of messages) {
     if (typeof m.content === 'string') {
       items.push({ role: m.role, content: m.content })
+      continue
+    }
+    // A user message with files: one message holding the files and the text.
+    if (m.role === 'user' && hasFiles(m)) {
+      const parts: ResponseInputContent[] = []
+      for (const b of m.content) {
+        const part = b.type === 'text' ? { type: 'input_text' as const, text: b.text } : filePart(b)
+        if (part) parts.push(part)
+      }
+      items.push({ role: 'user', content: parts })
       continue
     }
     for (const b of m.content) {

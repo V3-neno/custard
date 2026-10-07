@@ -1,5 +1,6 @@
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { Workspace } from './plugins'
+import type { Attachment } from './attachments'
 
 export type Provider = 'claude' | 'openai'
 
@@ -78,7 +79,15 @@ export type ActionRecord = {
 
 // too-long: the chat no longer fits what the model can take; it can go on in
 // a new chat (see main/continue).
-export type NoticeKind = 'stopped' | 'error' | 'interrupted' | 'cut-off' | 'step-limit' | 'too-long'
+export type NoticeKind =
+  | 'stopped'
+  | 'error'
+  | 'interrupted'
+  | 'cut-off'
+  | 'step-limit'
+  | 'too-long'
+  // Earlier attached files that weren't sent with this turn, and why.
+  | 'files'
 
 // Shown in the chat after message `after - 1`.
 export type Notice = { after: number; kind: NoticeKind; text: string }
@@ -181,6 +190,9 @@ export type Conversation = ConversationSummary & {
   compactions?: Compaction[]
   // How much of the model's input budget the last request used.
   context?: ContextUse
+  // Files sent with user messages (Chat mode). The bytes are in app data;
+  // each request builds the provider's blocks from them.
+  attachments?: Attachment[]
 }
 
 // Claude's compaction block is part of the assistant message at `after`, as
@@ -259,6 +271,8 @@ export type SendChatRequest = {
   workspace?: Workspace
   // Start the new conversation as a temporary chat, never remembered.
   temporary?: boolean
+  // Chat mode: the files picked for this message, from its draft, in order.
+  attachments?: { draft: string; ids: string[] }
 }
 
 export type ApprovalDecision = 'once' | 'chat' | 'deny'

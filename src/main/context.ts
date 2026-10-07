@@ -87,8 +87,42 @@ export function fromLastCompaction(messages: BetaMessageParam[]): BetaMessagePar
 // overestimates ordinary text (about 4 per token in English) and so errs on
 // the safe side. Signatures and encrypted reasoning inflate it further. It is
 // a heuristic, not a guarantee that a request fits.
-export const estimateTokens = (...parts: unknown[]): number =>
-  Math.ceil(parts.reduce<number>((n, p) => n + (JSON.stringify(p)?.length ?? 0), 0) / 3)
+//
+// An attached file's base64 data would count as millions of "characters", so
+// its own estimate (see attachments/request) is used instead.
+// Held only while a turn that sends them runs (see release()).
+const fileData = new Map<string, { tokens: number; refs: number }>()
+export function registerFileData(entries: [data: string, tokens: number][]): () => void {
+  for (const [data, tokens] of entries) {
+    const e = fileData.get(data)
+    if (e) e.refs++
+    else fileData.set(data, { tokens, refs: 1 })
+  }
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    for (const [data] of entries) {
+      const e = fileData.get(data)
+      if (e && --e.refs <= 0) fileData.delete(data)
+    }
+  }
+}
+export function estimateTokens(...parts: unknown[]): number {
+  let files = 0
+  const replacer = (_: string, v: unknown): unknown => {
+    if (typeof v === 'string' && v.length > 1024) {
+      const e = fileData.get(v)
+      if (e) {
+        files += e.tokens
+        return ''
+      }
+    }
+    return v
+  }
+  const chars = parts.reduce<number>((n, p) => n + (JSON.stringify(p, replacer)?.length ?? 0), 0)
+  return Math.ceil(chars / 3) + files
+}
 
 // `counted`: the provider's token-counting endpoint gave the figure. Its docs
 // call that an estimate too (Claude's may differ "by a small amount"), so a

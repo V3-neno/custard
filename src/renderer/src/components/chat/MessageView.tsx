@@ -177,7 +177,9 @@ export function SourcesList({
   )
 }
 
-export function UserBubble({ text }: { text: string }): React.JSX.Element {
+export function UserBubble({ text }: { text: string }): React.JSX.Element | null {
+  // A message of files only.
+  if (!text.trim()) return null
   return (
     <div className="flex justify-end">
       <div className="max-w-[80%] rounded-3xl rounded-br-lg border border-forge-700 bg-forge-800 px-4 py-2.5 text-[15px] whitespace-pre-wrap text-ash-100 [overflow-wrap:anywhere]">

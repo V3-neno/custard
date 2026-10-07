@@ -7,7 +7,9 @@ import {
   type Effort,
   type Provider
 } from '../../../../shared/chat'
-import { ArrowUpIcon, StopIcon } from '../icons'
+import { ArrowUpIcon, PaperclipIcon, StopIcon } from '../icons'
+import type { DraftAttachment } from '../../../../shared/attachments'
+import { DraftFiles } from './Attachments'
 
 type Props = {
   busy: boolean
@@ -18,18 +20,31 @@ type Props = {
   onStop: () => void
   draft: string
   setDraft: (text: string) => void
+  // Chat mode only: files to send with the message.
+  files?: {
+    items: DraftAttachment[]
+    errors: { name: string; error: string }[]
+    adding: boolean
+    onPick: () => void
+    onAdd: (files: File[]) => void
+    onRemove: (id: string) => void
+    onDismiss: () => void
+  }
 }
 
 const chip =
   'cursor-pointer appearance-none rounded-full border border-forge-700 bg-forge-900 px-3 py-1 text-xs text-ash-400 outline-none transition-colors hover:border-forge-600 hover:text-ash-100'
 
 function Composer(props: Props): React.JSX.Element {
-  const { busy, placeholder, settings, onSettings, onSend, onStop, draft, setDraft } = props
+  const { busy, placeholder, settings, onSettings, onSend, onStop, draft, setDraft, files } = props
   const [focused, setFocused] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const hasFiles = !!files?.items.length
+  const canSend = !busy && !files?.adding && (!!draft.trim() || hasFiles)
   const input = useRef<HTMLTextAreaElement>(null)
   const model = chatModels.find((m) => m.id === settings.model)
   const submit = (): void => {
-    if (!busy && draft.trim()) onSend(draft)
+    if (canSend) onSend(draft)
   }
 
   // Grow with the text, up to a limit.
@@ -42,14 +57,44 @@ function Composer(props: Props): React.JSX.Element {
 
   return (
     <div
+      onDragOver={(e) => {
+        if (!files || busy || !e.dataTransfer.types.includes('Files')) return
+        e.preventDefault()
+        setDragging(true)
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => {
+        setDragging(false)
+        if (!files || busy || !e.dataTransfer.files.length) return
+        e.preventDefault()
+        files.onAdd([...e.dataTransfer.files])
+      }}
       className={`rounded-3xl border bg-forge-850/90 p-3 backdrop-blur transition-all ${
-        focused
-          ? 'border-molten-500/50 shadow-[0_0_40px_rgb(var(--glow-deep)/0.12)]'
-          : 'border-forge-700 shadow-[0_10px_40px_rgb(0_0_0/0.4)]'
+        dragging
+          ? 'border-molten-400 shadow-[0_0_40px_rgb(var(--glow)/0.25)]'
+          : focused
+            ? 'border-molten-500/50 shadow-[0_0_40px_rgb(var(--glow-deep)/0.12)]'
+            : 'border-forge-700 shadow-[0_10px_40px_rgb(0_0_0/0.4)]'
       }`}
     >
+      {files && (
+        <DraftFiles
+          files={files.items}
+          errors={files.errors}
+          onRemove={files.onRemove}
+          onDismiss={files.onDismiss}
+          disabled={busy}
+        />
+      )}
       <textarea
         ref={input}
+        onPaste={(e) => {
+          // Pasted files (a screenshot, files copied in the file manager)
+          // are attached; pasted text goes in as usual.
+          if (!files || busy || !e.clipboardData.files.length) return
+          e.preventDefault()
+          files.onAdd([...e.clipboardData.files])
+        }}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onFocus={() => setFocused(true)}
@@ -66,6 +111,17 @@ function Composer(props: Props): React.JSX.Element {
         className="block max-h-60 min-h-[44px] w-full resize-none bg-transparent px-2 pt-1.5 text-[15px] text-ash-100 outline-none placeholder:text-ash-500"
       />
       <div className="mt-2 flex items-center gap-2">
+        {files && (
+          <button
+            onClick={files.onPick}
+            disabled={busy || files.adding}
+            title="Attach images, PDFs or text files (or paste or drop them here)"
+            aria-label="Attach files"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-forge-700 text-base text-ash-400 transition-colors hover:border-molten-500/50 hover:text-molten-200 disabled:opacity-40"
+          >
+            <PaperclipIcon />
+          </button>
+        )}
         <select
           className={chip}
           title="Model"
@@ -112,7 +168,7 @@ function Composer(props: Props): React.JSX.Element {
           ) : (
             <button
               onClick={submit}
-              disabled={!draft.trim()}
+              disabled={!canSend}
               title="Send"
               className="molten-fill flex h-9 w-9 items-center justify-center rounded-full text-lg text-forge-950 transition-opacity disabled:opacity-30"
             >

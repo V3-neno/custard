@@ -64,3 +64,9 @@ export const VaultIcon = ({ className }: IconProps): React.JSX.Element => (
     <path d="M9 12l2 2 4-4" />
   </svg>
 )
+
+export const PaperclipIcon = ({ className }: IconProps): React.JSX.Element => (
+  <svg {...base} className={className}>
+    <path d="M21 11.5 12.4 20a5.5 5.5 0 0 1-7.8-7.8l8.9-8.8a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.8a1.8 1.8 0 0 1-2.6-2.6l8.2-8.1" />
+  </svg>
+)

@@ -14,6 +14,7 @@ import type {
   SendChatRequest
 } from '../shared/chat'
 import type { VaultInfo } from '../shared/vault'
+import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision } from '../shared/chat'
 import type {
   PluginReview,
@@ -95,6 +96,22 @@ const custard = {
     delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id),
     continuations: (id: string): Promise<ChatLink[]> =>
       ipcRenderer.invoke('conversations:continuations', id)
+  },
+  // Files for a Chat-mode message (see main/attachments). A draft is one
+  // message's files before it is sent.
+  attachments: {
+    pick: (draft: string): Promise<AttachResult[]> => ipcRenderer.invoke('attachments:pick', draft),
+    add: (draft: string, name: string, bytes: Uint8Array): Promise<AttachResult> =>
+      ipcRenderer.invoke('attachments:add', draft, name, bytes),
+    remove: (draft: string, id: string): Promise<void> =>
+      ipcRenderer.invoke('attachments:remove', draft, id),
+    discard: (draft: string): Promise<void> => ipcRenderer.invoke('attachments:discard', draft),
+    list: (draft: string): Promise<DraftAttachment[]> =>
+      ipcRenderer.invoke('attachments:list', draft),
+    preview: (
+      where: { chat?: string; draft?: string },
+      a: Pick<Attachment, 'id' | 'ext' | 'mime' | 'kind'>
+    ): Promise<string | null> => ipcRenderer.invoke('attachments:preview', where, a)
   },
   chat: {
     send: (req: SendChatRequest): void => ipcRenderer.send('chat:send', req),

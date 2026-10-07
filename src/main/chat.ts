@@ -42,11 +42,15 @@ import {
   claudeHistory,
   compactionRefused,
   isCompactionRejected,
+  openaiStart,
   recordClaudeCompaction,
   usesCompaction
 } from './compaction'
 import { runVaultTool, unreachableVaultPrompt, vaultSystemPrompt, vaultTools } from './vault'
 import { withoutUnavailableTools } from './history'
+import { attachments } from './attachments'
+import { claudeFilesFrom, prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
+import type { Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
 import { pluginHost, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
@@ -177,9 +181,13 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     emit({ requestId, type: 'error', message, conversation: null, kept: false })
   if (!apiKey) return refuse(`Add your ${provider} API key in Settings first.`)
 
+  const fileIds = req.attachments?.ids ?? []
+  if (!req.text.trim() && !fileIds.length) return refuse('Write a message or attach a file first.')
   const existing = (req.conversationId && openConversation(req.conversationId)) || null
   if (existing && active.has(existing.id))
     return refuse('This chat is still answering. Wait for it to finish or stop it first.')
+  if (fileIds.length && (existing?.mode ?? req.mode) !== 'chat')
+    return refuse('Files can be attached in Chat mode only.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
   // Off before anything is said, so no part of it is ever captured.
   if (!existing && req.temporary) conversation.memory = { off: true, temporary: true, watermark: 0 }
@@ -193,6 +201,27 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   // if nothing at all happens.
   const log = new TurnLog(conversation, saveConversation)
   conversation.messages.push({ role: 'user', content: req.text })
+  // The message's files move from the composer's draft to the chat. Taken
+  // back (see stopEarly) if the turn doesn't happen.
+  const current = conversation.messages.length - 1
+  let committed: Attachment[] = []
+  if (req.attachments && fileIds.length) {
+    try {
+      committed = await attachments().commit(
+        req.attachments.draft,
+        conversation.id,
+        fileIds,
+        current
+      )
+    } catch (err) {
+      conversation.messages.length = log.startLength
+      return refuse(
+        `The files couldn't be added to the chat (${err instanceof Error ? err.message : String(err)}). They're still in the message box.`
+      )
+    }
+    ;(conversation.attachments ??= []).push(...committed)
+    if (!existing && !req.text.trim()) conversation.title = committed[0].name.slice(0, 60)
+  }
 
   const controller = new AbortController()
   const vault = getVaultPath()
@@ -228,7 +257,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const injected = [
     ...(vaultReady ? ['your vault notes (memory, recent activity and the skills list)'] : []),
     ...(plugins.instructions.length ? ['text from enabled plugins'] : []),
-    ...(workspace ? ['your code workspace'] : [])
+    ...(workspace ? ['your code workspace'] : []),
+    ...(conversation.attachments?.length ? ['files you attached'] : [])
   ]
   // Notes about the plugins this message is about (at most two).
   if (vaultReady) {
@@ -263,10 +293,15 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ...plugins.tools
   ]
   const available = new Set(tools.map((t) => t.name))
+  // Attached files, read once the turn starts (see attachments/request).
+  let files: PreparedFiles | null = null
   // Calls in the history to tools that aren't offered now go in as text.
   // Claude models that don't compact get the history without compaction blocks.
   const history = (): Conversation['messages'] => {
-    const h = withoutUnavailableTools(conversation.messages, available)
+    const h = withoutUnavailableTools(
+      withFiles(conversation.messages, files?.blocks ?? new Map()),
+      available
+    )
     return model.provider === 'claude' ? claudeHistory(h, model.id) : h
   }
 
@@ -454,8 +489,13 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   // Ends the turn early. Whatever already happened stays in the chat with a
   // notice; only a turn where nothing happened is taken back, and then the
   // message goes back in the box.
-  const stopEarly = (kind: 'stopped' | 'error' | 'cut-off' | 'too-long', message: string): void => {
+  const stopEarly = async (
+    kind: 'stopped' | 'error' | 'cut-off' | 'too-long',
+    message: string
+  ): Promise<void> => {
     const keptTurn = log.interrupt(kind, message)
+    if (keptTurn) recordFiles()
+    else if (committed.length) message += await takeBackFiles()
     kept = keptTurn || log.startLength > 0
     if (kept) saveConversation(conversation)
     emit({
@@ -468,8 +508,42 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       ...(kind === 'too-long' && log.startLength > 0 ? { overflow: true } : {})
     })
   }
+  // A turn that happened: its files reached the provider, and the user is
+  // told about earlier files that couldn't go this time.
+  const recordFiles = (): void => {
+    if (!files) return
+    for (const a of files.sent)
+      if (!a.sentTo?.includes(model.provider)) a.sentTo = [...(a.sentTo ?? []), model.provider]
+    if (files.notes.length) {
+      // Right after the user's message, ahead of any notice the turn ended
+      // with (the chat looks at the last notice for the way on).
+      const notices = (conversation.notices ??= [])
+      const after = log.startLength + 1
+      const at = notices.findIndex((n) => n.after >= after)
+      notices.splice(at < 0 ? notices.length : at, 0, {
+        after,
+        kind: 'files',
+        text: files.notes.join(' ')
+      })
+    }
+  }
+  // A turn that didn't happen: the files go back to the composer's draft.
+  const takeBackFiles = async (): Promise<string> => {
+    conversation.attachments = (conversation.attachments ?? []).filter(
+      (a) => !committed.includes(a)
+    )
+    try {
+      await attachments().uncommit(conversation.id, req.attachments?.draft ?? '', committed)
+      if (log.startLength === 0) await attachments().deleteChat(conversation.id)
+      return ''
+    } catch (err) {
+      console.error('Attachments:', err)
+      return " Some attached files couldn't be put back in the message box; attach them again."
+    }
+  }
   const finish = (): void => {
     kept = true
+    recordFiles()
     saveConversation(conversation)
     emit({ requestId, type: 'done', conversation })
   }
@@ -477,13 +551,32 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const CUT_OFF = 'The reply hit the length limit and was cut off. Continue to let it carry on.'
   const CUT_OFF_TOOL =
     'The reply was cut off in the middle of a tool action, so that action was not run.'
-  const TOO_LONG =
-    log.startLength > 0
+  const TOO_LONG = committed.length
+    ? `This message's files are more than ${model.label} can take in${log.startLength > 0 ? ' alongside this chat' : ''}. Attach fewer or smaller files, or split them${log.startLength > 0 ? ', or continue in a new chat' : ''}.`
+    : log.startLength > 0
       ? `This chat has grown too long for ${model.label}. Continue in a new chat to carry on; this one stays as it is.`
       : `This message is too long for ${model.label} to take in. Try a shorter one.`
   const FULL_WINDOW = `The reply stopped because the chat filled ${model.label}'s context window. Continue in a new chat to carry on.`
 
   try {
+    if (conversation.attachments?.length) {
+      const prepared = await prepareFiles({
+        conversation,
+        model,
+        current,
+        from:
+          model.provider === 'openai'
+            ? openaiStart(conversation, model.id).from
+            : usesCompaction(model.id)
+              ? claudeFilesFrom(conversation.messages)
+              : 0,
+        store: attachments()
+      })
+      if (!prepared.ok)
+        return await stopEarly(prepared.overflow ? 'too-long' : 'error', prepared.error)
+      files = prepared.files
+      for (const a of files.missing) a.missing = true
+    }
     if (model.provider === 'openai') {
       const end = await runOpenAI({
         requestId,
@@ -501,9 +594,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         log,
         runRound
       })
-      if (controller.signal.aborted) return stopEarly('stopped', 'Stopped by you.')
-      if (end === 'cut-off-tool') return stopEarly('cut-off', CUT_OFF_TOOL)
-      if (end === 'too-long') return stopEarly('too-long', TOO_LONG)
+      if (controller.signal.aborted) return await stopEarly('stopped', 'Stopped by you.')
+      if (end === 'cut-off-tool') return await stopEarly('cut-off', CUT_OFF_TOOL)
+      if (end === 'too-long') return await stopEarly('too-long', TOO_LONG)
       if (end === 'cut-off') log.notice('cut-off', CUT_OFF)
       if (end === 'step-limit') log.notice('step-limit', STEP_LIMIT)
       return finish()
@@ -525,7 +618,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         ...(params.context_management ? { context_management: params.context_management } : {})
       })
       const estimate = estimateTokens(sys, offered, fromLastCompaction(messages))
-      if (!(await fits(estimate, () => count(messages)))) return stopEarly('too-long', TOO_LONG)
+      if (!(await fits(estimate, () => count(messages))))
+        return await stopEarly('too-long', TOO_LONG)
       const stream = client.beta.messages.stream(params, { signal: controller.signal })
       let streamed = false
       let message: Awaited<ReturnType<typeof stream.finalMessage>>
@@ -560,7 +654,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       }
       if (message.stop_reason === 'refusal') {
         const category = message.stop_details?.category
-        return stopEarly(
+        return await stopEarly(
           'error',
           `Claude declined this request${category ? ` (${category})` : ''}.`
         )
@@ -568,7 +662,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       const toolUses = message.content.filter((b) => b.type === 'tool_use')
       const full = message.stop_reason === 'model_context_window_exceeded'
       if (toolUses.length > 0 && (message.stop_reason === 'max_tokens' || full))
-        return stopEarly(full ? 'too-long' : 'cut-off', full ? FULL_WINDOW : CUT_OFF_TOOL)
+        return await stopEarly(full ? 'too-long' : 'cut-off', full ? FULL_WINDOW : CUT_OFF_TOOL)
       // Before the message goes in, so the record points at it.
       recordClaudeCompaction(conversation, message.content, model.id)
       log.addAssistant(echoableContent(message.content))
@@ -582,16 +676,17 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       }
       if (message.stop_reason !== 'tool_use') break
       await runRound(toolUses)
-      if (controller.signal.aborted) return stopEarly('stopped', 'Stopped by you.')
+      if (controller.signal.aborted) return await stopEarly('stopped', 'Stopped by you.')
     }
     finish()
   } catch (err) {
-    if (controller.signal.aborted) stopEarly('stopped', 'Stopped by you.')
+    if (controller.signal.aborted) await stopEarly('stopped', 'Stopped by you.')
     // The provider said the request is too large: the budget estimate was
     // short or the count failed. Same way out as a budget stop.
-    else if (isContextError(err)) stopEarly('too-long', TOO_LONG)
-    else stopEarly('error', describeError(err, provider))
+    else if (isContextError(err)) await stopEarly('too-long', TOO_LONG)
+    else await stopEarly('error', describeError(err, provider))
   } finally {
+    files?.release()
     running.delete(requestId)
     active.delete(conversation.id)
     releaseConversation(conversation.id)
