@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { providerNames, type Provider } from '../../../shared/chat'
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
+import type { MemorySettings } from '../../../shared/memory'
 
 import PluginsTab from './settings/PluginsTab'
 import { cleanError, primary, secondary } from './settings/ui'
@@ -74,6 +75,44 @@ function KeySection({
           Remove key
         </button>
       )}
+    </section>
+  )
+}
+
+function MemorySection(): React.JSX.Element {
+  const [settings, setSettings] = useState<MemorySettings | null>(null)
+  useEffect(() => {
+    window.custard.memory.getSettings().then(setSettings)
+  }, [])
+  return (
+    <section className="mb-6">
+      <h3 className="mb-1 text-sm font-medium">Memory</h3>
+      <label className="flex items-start gap-2 text-sm text-ash-300">
+        <input
+          type="checkbox"
+          className="mt-1"
+          aria-label="Remember automatically"
+          checked={settings?.auto ?? true}
+          disabled={settings === null}
+          onChange={(e) => {
+            const next = { ...settings!, auto: e.target.checked }
+            setSettings(next)
+            window.custard.memory.setSettings(next)
+          }}
+        />
+        <span>
+          Remember automatically. After a chat where something happened (plugin actions, changes,
+          tests, failures) or that went on for a while, Custard makes one short summary with your
+          provider&apos;s cheapest model and adds it to Custard/Memory.md and Custard/Activity.md in
+          your vault. Small talk and plain questions aren&apos;t saved, and neither are keys,
+          passwords, note contents or web pages.
+        </span>
+      </label>
+      <p className="mt-2 text-xs text-ash-400">
+        {settings && !settings.auto
+          ? "Off: nothing new is saved, and waiting summaries are cancelled. Notes already in your vault stay until you edit them, and chats from while it was off aren't saved later."
+          : 'You can turn it off for one chat above that chat, and for a plugin in its settings. Edit or delete anything in your vault; what you delete is not added back.'}
+      </p>
     </section>
   )
 }
@@ -241,6 +280,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
               {vaultError && <p className="mt-2 text-sm text-ember-600">{vaultError}</p>}
             </section>
             <div className="mt-6">
+              <MemorySection />
               <SecuritySection />
             </div>
           </>

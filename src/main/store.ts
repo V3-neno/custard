@@ -18,6 +18,7 @@ import {
   type Mode
 } from '../shared/chat'
 import type { SecurityDefaults } from '../shared/plugins'
+import { defaultMemorySettings, type MemorySettings } from '../shared/memory'
 
 // Conversations are plain JSON files in the app's data folder, one per chat.
 const dir = (): string => {
@@ -47,6 +48,25 @@ export function listConversations(mode: Mode): ConversationSummary[] {
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+// Conversations with a turn in progress are held in memory by the chat and
+// saved whole; anything else that changes them (memory capture) must change
+// that copy, or its change would be overwritten by the chat's next save.
+const live = new Map<string, Conversation>()
+export const holdConversation = (c: Conversation): void => void live.set(c.id, c)
+export const releaseConversation = (id: string): void => void live.delete(id)
+
+// Applies a change to the current copy of a conversation and saves it.
+export function updateConversation(
+  id: string,
+  change: (c: Conversation) => void
+): Conversation | null {
+  const c = live.get(id) ?? getConversation(id)
+  if (!c) return null
+  change(c)
+  saveConversation(c)
+  return c
+}
+
 export function getConversation(id: string): Conversation | null {
   if (!existsSync(file(id))) return null
   return withMode(JSON.parse(readFileSync(file(id), 'utf8')))
@@ -71,7 +91,12 @@ export function deleteConversation(id: string): void {
   rmSync(file(id), { force: true })
 }
 
-type Config = { chat: ChatSettings; vaultPath: string | null; security: SecurityDefaults }
+type Config = {
+  chat: ChatSettings
+  vaultPath: string | null
+  security: SecurityDefaults
+  memory: MemorySettings
+}
 
 const defaultSecurity: SecurityDefaults = { askBeforeWriteTools: true }
 
@@ -88,7 +113,8 @@ function readConfig(): Config {
   return {
     chat: { ...defaultChatSettings, ...legacy, ...raw.chat },
     vaultPath: raw.vaultPath ?? null,
-    security: { ...defaultSecurity, ...raw.security }
+    security: { ...defaultSecurity, ...raw.security },
+    memory: { ...defaultMemorySettings, ...raw.memory }
   }
 }
 
@@ -109,3 +135,5 @@ export const getVaultPath = (): string | null => readConfig().vaultPath
 export const setVaultPath = (vaultPath: string | null): void => writeConfig({ vaultPath })
 export const getSecurityDefaults = (): SecurityDefaults => readConfig().security
 export const setSecurityDefaults = (security: SecurityDefaults): void => writeConfig({ security })
+export const getMemorySettings = (): MemorySettings => readConfig().memory
+export const setMemorySettings = (memory: MemorySettings): void => writeConfig({ memory })

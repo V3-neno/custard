@@ -18,6 +18,7 @@ import Composer from './Composer'
 import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
+import MemoryBar from './MemoryBar'
 import type { Workspace } from '../../../../shared/plugins'
 type Live = { requestId: string; userText: string; segments: Segment[]; approvals: Approval[] }
 
@@ -160,6 +161,21 @@ function ChatView(props: Props): React.JSX.Element {
       }),
     [refreshList]
   )
+
+  // Memory capture finishes after the turn; its status comes separately.
+  useEffect(
+    () =>
+      window.custard.memory.onUpdate((u) =>
+        setCurrent((c) => (c && c.id === u.conversationId ? { ...c, memory: u.memory } : c))
+      ),
+    []
+  )
+
+  const setChatMemory = async (off: boolean): Promise<void> => {
+    if (!current) return
+    const memory = await window.custard.memory.setChat(current.id, off)
+    setCurrent((c) => (c && c.id === current.id ? { ...c, memory: memory ?? undefined } : c))
+  }
 
   useEffect(() => bottom.current?.scrollIntoView({ block: 'end' }), [current, live])
 
@@ -319,6 +335,9 @@ function ChatView(props: Props): React.JSX.Element {
             onChange={setWorkspace}
             disabled={!!live}
           />
+        )}
+        {current && (
+          <MemoryBar memory={current.memory} disabled={!!live} onToggle={setChatMemory} />
         )}
         <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
         <Composer

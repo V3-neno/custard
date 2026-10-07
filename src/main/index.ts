@@ -5,6 +5,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { openConversation, registerChatHandlers } from './chat'
+import { memory, registerMemoryHandlers } from './memory'
 import { handle } from './ipc'
 import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
 import { isPluginContents } from './plugins/runtime'
@@ -82,7 +83,10 @@ app.whenReady().then(() => {
   })
 
   handle('apiKey:has', (_, p: Provider) => getApiKey(p) !== null)
-  handle('apiKey:set', (_, p: Provider, key: string) => setApiKey(p, key))
+  handle('apiKey:set', (_, p: Provider, key: string) => {
+    setApiKey(p, key)
+    void memory().run()
+  })
   handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
   handle('settings:get', () => getChatSettings())
   handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
@@ -99,7 +103,10 @@ app.whenReady().then(() => {
     const result = win
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
-    if (!result.canceled && result.filePaths[0]) setVaultPath(result.filePaths[0])
+    if (!result.canceled && result.filePaths[0]) {
+      setVaultPath(result.filePaths[0])
+      void memory().run()
+    }
     return vaultInfo()
   })
   handle('vault:createStarter', async (e) => {
@@ -111,8 +118,10 @@ app.whenReady().then(() => {
     const result = win
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
-    if (!result.canceled && result.filePaths[0])
+    if (!result.canceled && result.filePaths[0]) {
       setVaultPath(createStarterVault(result.filePaths[0]))
+      void memory().run()
+    }
     return vaultInfo()
   })
   handle('vault:clear', () => setVaultPath(null))
@@ -123,6 +132,7 @@ app.whenReady().then(() => {
   })
   registerChatHandlers()
   registerPluginHandlers()
+  registerMemoryHandlers()
 
   createWindow()
   // Plugins start after the window so a slow plugin can't delay the app.

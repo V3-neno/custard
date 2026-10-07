@@ -95,6 +95,43 @@ export type WebSource = {
   citedText?: string
 }
 
+// Automatic memory for a chat (see main/memory). Capture only ever writes
+// notes; it never runs an action.
+//   pending: waiting to run (or for the vault to be connected)
+//   saved: written to the notes in `notes`
+//   skipped: nothing worth keeping, the user asked not to, or the vault changed
+//   failed: couldn't be written; `reason` says why
+//   off: memory is off for this chat or for Custard
+export type CaptureStatus = 'pending' | 'saved' | 'skipped' | 'failed' | 'off'
+
+export type CaptureJob = {
+  // Chat id and message range: the same range always gets the same id.
+  id: string
+  from: number
+  to: number
+  status: CaptureStatus
+  attempts: number
+  // Which vault it belongs to (see memory/write vaultId), and whose cheapest
+  // model summarizes it.
+  vault?: string
+  provider?: Provider
+  // The note text, once summarized, so a retry after a crash writes the same
+  // entries instead of asking the model again. Removed once saved.
+  plan?: { memory: string[]; activity: { plugin: string; text: string }[] }
+  notes?: string[]
+  // Why it was skipped or failed, in words for the user.
+  reason?: string
+  at: number
+}
+
+export type ChatMemory = {
+  // "Don't remember this chat".
+  off?: boolean
+  // Messages before this index are never captured again.
+  watermark: number
+  job?: CaptureJob
+}
+
 export type Conversation = ConversationSummary & {
   createdAt: number
   // Code mode only: which folder the file tools may touch. Fixed when the
@@ -107,6 +144,7 @@ export type Conversation = ConversationSummary & {
   actions?: Record<string, ActionRecord>
   notices?: Notice[]
   sources?: WebSource[]
+  memory?: ChatMemory
 }
 
 export type ChatEvent =

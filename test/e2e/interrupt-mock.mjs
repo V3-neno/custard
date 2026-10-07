@@ -6,6 +6,7 @@ import fs from 'fs'
 const [, , OUT] = process.argv
 const anth = []
 const spotify = []
+const memory = []
 const save = () => {
   fs.writeFileSync(OUT + '/anthropic.json', JSON.stringify(anth, null, 1))
   fs.writeFileSync(OUT + '/spotify.json', JSON.stringify(spotify, null, 1))
@@ -69,6 +70,52 @@ http
         return j(404, { error: { status: 404, message: 'nope' } })
       }
       const b = JSON.parse(body)
+      // Custard's memory summary: one call, no tools, JSON out. Recorded on
+      // its own so the chat's request list stays as the other tests expect.
+      if (typeof b.system === 'string' && b.system.startsWith('You decide what Custard')) {
+        const evidence = String(b.messages[0].content)
+        memory.push({
+          model: b.model,
+          tools: b.tools ?? null,
+          format: b.output_config?.format?.type ?? null,
+          max_tokens: b.max_tokens,
+          evidence
+        })
+        fs.writeFileSync(OUT + '/memory.json', JSON.stringify(memory, null, 1))
+        const ids = [...evidence.matchAll(/^- (A\d+): /gm)].map((m) => m[1])
+        const summary = {
+          save: ids.length > 0,
+          preferences: /warm jazz/.test(evidence)
+            ? [{ text: 'Prefers warm jazz', replaces: '' }]
+            : [],
+          decisions: [],
+          workflows: ids.length
+            ? [
+                {
+                  plugin: 'Spotify',
+                  title: 'Looked up Nils Frahm',
+                  request: 'Find Nils Frahm',
+                  actions: ids,
+                  observed: '',
+                  uncertain: '',
+                  outcome: 'worked'
+                }
+              ]
+            : [],
+          resolutions: [],
+          unresolved: []
+        }
+        return j(200, {
+          id: 'msg_memory',
+          type: 'message',
+          role: 'assistant',
+          model: b.model,
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 10 },
+          content: [{ type: 'text', text: JSON.stringify(summary) }]
+        })
+      }
       anth.push({
         tools: (b.tools ?? []).map((t) => t.name),
         toolTypes: (b.tools ?? []).map((t) => t.type ?? 'custom'),
@@ -154,7 +201,9 @@ http
                       ? 'loop'
                       : /web test/.test(ask)
                         ? 'web'
-                        : 'plain'
+                        : /memory test/.test(ask)
+                          ? 'memory'
+                          : 'plain'
       if (key === 'error' && step === 1)
         return j(400, {
           type: 'error',
@@ -228,6 +277,8 @@ http
           () => tool('web_search', { query: 'secret plan from my notes' }),
           'Brew green tea at about 80°C, per [the tea guide](https://tea.example.com/guide).'
         ],
+        // One plugin read, then an answer: enough to be remembered.
+        memory: [() => tool('spotify__search', { query: 'Nils Frahm' }), 'Found Nils Frahm.'],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]

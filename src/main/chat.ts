@@ -12,7 +12,16 @@ import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { getApiKey } from './apiKey'
 import OpenAI from 'openai'
-import { getConversation, getVaultPath, newConversation, saveConversation } from './store'
+import {
+  getConversation,
+  getMemorySettings,
+  getVaultPath,
+  holdConversation,
+  newConversation,
+  releaseConversation,
+  saveConversation
+} from './store'
+import { memory } from './memory'
 import { runOpenAI } from './openai'
 import { runVaultTool, vaultSystemPrompt, vaultTools } from './vault'
 import { withoutUnavailableTools } from './history'
@@ -171,7 +180,15 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
   ]
   if (workspace) system.push({ type: 'text', text: workspace.prompt })
-  if (vaultReady) system.push({ type: 'text', text: vaultSystemPrompt(vault, conversation.mode) })
+  if (vaultReady)
+    system.push({
+      type: 'text',
+      text: vaultSystemPrompt(
+        vault,
+        conversation.mode,
+        getMemorySettings().auto && !conversation.memory?.off
+      )
+    })
   if (plugins.instructions.length)
     system.push({
       type: 'text',
@@ -335,22 +352,27 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
 
   running.set(requestId, controller)
   active.add(conversation.id)
+  holdConversation(conversation)
+  // Whether the turn stayed in the history, so there is something to remember.
+  let kept = false
 
   // Ends the turn early. Whatever already happened stays in the chat with a
   // notice; only a turn where nothing happened is taken back, and then the
   // message goes back in the box.
   const stopEarly = (kind: 'stopped' | 'error' | 'cut-off', message: string): void => {
-    const kept = log.interrupt(kind, message)
-    if (kept || log.startLength > 0) saveConversation(conversation)
+    const keptTurn = log.interrupt(kind, message)
+    kept = keptTurn || log.startLength > 0
+    if (kept) saveConversation(conversation)
     emit({
       requestId,
       type: 'error',
       message,
-      conversation: kept || log.startLength > 0 ? conversation : null,
-      kept
+      conversation: kept ? conversation : null,
+      kept: keptTurn
     })
   }
   const finish = (): void => {
+    kept = true
     saveConversation(conversation)
     emit({ requestId, type: 'done', conversation })
   }
@@ -429,6 +451,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   } finally {
     running.delete(requestId)
     active.delete(conversation.id)
+    releaseConversation(conversation.id)
+    // Memory capture looks at the chat after the turn; it only writes notes.
+    if (kept) memory().afterTurn(conversation, model.provider)
   }
 }
 

@@ -3,6 +3,7 @@
 This folder belongs to Claude in Custard.
 
 - [[Custard/Memory|Memory]] is what Claude remembers about you. It's loaded into every chat. Edit it freely: fix anything wrong, delete anything you don't want remembered.
+- [[Custard/Activity|Activity]] is what you and Custard did: actions, tests and how they turned out, added after chats. Older entries move to the `Activity/` folder.
 - `Skills/` holds skills: instructions that teach Claude how to do a specific task in this vault. Each skill is a folder with a `SKILL.md` file. Claude sees every skill's name and description and reads the full skill when a request matches.
 
 ## Writing your own skill

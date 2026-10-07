@@ -1,7 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { MemorySettings } from '../shared/memory'
 import type {
   ChatEvent,
+  ChatMemory,
   ChatSettings,
   Conversation,
   ConversationSummary,
@@ -62,6 +64,18 @@ const custard = {
       ipcRenderer.invoke('plugins:create', id, name),
     labels: (): Promise<Record<string, string>> => ipcRenderer.invoke('plugins:labels'),
     sourceRoot: (): Promise<string> => ipcRenderer.invoke('plugins:sourceRoot')
+  },
+  memory: {
+    getSettings: (): Promise<MemorySettings> => ipcRenderer.invoke('memory:getSettings'),
+    setSettings: (s: MemorySettings): Promise<void> => ipcRenderer.invoke('memory:setSettings', s),
+    setChat: (id: string, off: boolean): Promise<ChatMemory | null> =>
+      ipcRenderer.invoke('memory:setChat', id, off),
+    onUpdate: (cb: (u: { conversationId: string; memory?: ChatMemory }) => void): (() => void) => {
+      const listener = (_: unknown, u: { conversationId: string; memory?: ChatMemory }): void =>
+        cb(u)
+      ipcRenderer.on('memory:update', listener)
+      return () => ipcRenderer.removeListener('memory:update', listener)
+    }
   },
   security: {
     get: (): Promise<SecurityDefaults> => ipcRenderer.invoke('security:get'),
