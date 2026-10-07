@@ -12,7 +12,10 @@ const deps = (ctx: PluginContext): SpotifyDeps => ({
 })
 type Input = Record<string, unknown>
 
-async function wait(input: Input, ctx: PluginContext) {
+async function wait(
+  input: Input,
+  ctx: PluginContext
+): Promise<{ content: string; isError: boolean }> {
   try {
     const devices = await waitForDevices(ctx, {
       deviceId: typeof input.device_id === 'string' ? input.device_id : undefined,

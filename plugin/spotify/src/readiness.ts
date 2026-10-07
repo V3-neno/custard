@@ -18,7 +18,7 @@ export type WaitRuntime = {
 export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new PluginError('Spotify readiness wait cancelled.')); return }
-    const abort = () => {
+    const abort = (): void => {
       clearTimeout(timer)
       signal.removeEventListener('abort', abort)
       reject(new PluginError('Spotify readiness wait cancelled.'))
@@ -52,11 +52,11 @@ export async function waitForDevices(
   clock: WaitRuntime = runtime
 ): Promise<ReadyDevice[]> {
   const controller = new AbortController()
-  const cancelled = () => controller.abort()
+  const cancelled = (): void => controller.abort()
   ctx.signal.addEventListener('abort', cancelled, { once: true })
   if (ctx.signal.aborted) controller.abort()
   const deadline = clock.now() + timeoutMs
-  const timeout = () => new ReadinessTimeout(
+  const timeout = (): ReadinessTimeout => new ReadinessTimeout(
     `Spotify did not expose a matching controllable device within ${timeoutMs / 1000} seconds. ` +
     'The app may still be opening or may need sign-in. No playback or queue changes were made by this wait.'
   )
