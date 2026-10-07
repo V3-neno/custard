@@ -197,6 +197,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         ...plugins.instructions
       ].join('\n\n')
     })
+  // What besides the user's own words the model can see, for the search gate.
+  const injected = [
+    ...(vaultReady ? ['your vault notes (Memory.md and the skills list)'] : []),
+    ...(plugins.instructions.length ? ['text from enabled plugins'] : []),
+    ...(workspace ? ['your code workspace'] : [])
+  ]
   const web = webTools(model)
   system.push({ type: 'text', text: web.prompt })
   system.push({
@@ -288,6 +294,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     if (isWebTool(c.name))
       return runWebTool(c.name, c.input, {
         conversation,
+        injected,
         model,
         apiKey,
         signal: controller.signal,

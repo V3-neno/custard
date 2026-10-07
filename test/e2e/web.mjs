@@ -66,8 +66,28 @@ try {
   step('Search, read a result, refuse a leaking link and a later search')
   await w.fill('textarea', 'web test: how hot should green tea water be?')
   await w.keyboard.press('Enter')
-  // The first search runs without asking; then the result is read.
-  await w.waitForSelector(card, { timeout: 30000 })
+  // The vault is connected, so its notes are in the context: even the
+  // first search asks, with the exact query.
+  await w.waitForSelector(`${card}:has-text("green tea temperature")`, { timeout: 30000 })
+  const firstCard = await w.locator(card).textContent()
+  check(
+    /your vault notes/.test(firstCard) &&
+      /This exact query goes to the search provider/.test(firstCard),
+    'with notes in the context, the first search asks and says why'
+  )
+  check(
+    (await w.locator(`${card} button:text-is("Allow for this chat")`).count()) === 0,
+    'searches can only be allowed one exact query at a time'
+  )
+  check(
+    !requests().some(
+      (r) => typeof r.system === 'string' && r.system.startsWith('You run one web search')
+    ),
+    'nothing was sent to the search provider before approval'
+  )
+  await w.click(`${card} button:text-is("Allow")`)
+  // Then the search result is read without asking.
+  await w.waitForSelector(`${card}:has-text("tracker.example.net")`, { timeout: 30000 })
   const search = requests().find(
     (r) => typeof r.system === 'string' && r.system.startsWith('You run one web search')
   )
