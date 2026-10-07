@@ -314,7 +314,7 @@ describe('running the web tools', () => {
     c.actions = { p: { name: tool, label: tool, write: false, status: 'completed', key: 'p' } }
     return c
   }
-  const searchWith = (queries: string[]) => ({
+  const searchWith = (queries: string[]): { search: (q: string) => Promise<SearchOutcome> } => ({
     search: async (q: string): Promise<SearchOutcome> => {
       queries.push(q)
       return ok
