@@ -23,6 +23,8 @@ type Turn = {
   effort: Effort
   instructions: string
   conversation: Conversation
+  // The history as sent this time (calls to unavailable tools turned into text).
+  history: BetaMessageParam[]
   tools: BetaTool[]
   signal: AbortSignal
   emit: Emit
@@ -100,7 +102,7 @@ function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
 export async function runOpenAI(turn: Turn): Promise<void> {
   const { conversation, emit, requestId } = turn
   const client = new OpenAI({ apiKey: turn.apiKey })
-  const input = toInput(conversation.messages)
+  const input = toInput(turn.history)
 
   for (let step = 0; step < turn.maxSteps; step++) {
     const stream = await client.responses.create(

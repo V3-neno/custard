@@ -1,8 +1,23 @@
 {
   "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
-  "include": ["electron.vite.config.*", "src/main/**/*", "src/preload/**/*", "src/shared/**/*"],
+  "include": [
+    "electron.vite.config.*",
+    "vitest.config.*",
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*",
+    "src/plugin-sdk/**/*",
+    "plugin/**/*.ts",
+    "test/**/*"
+  ],
   "compilerOptions": {
     "composite": true,
-    "types": ["electron-vite/node"]
+    "types": ["electron-vite/node", "vite/client"],
+    "lib": ["ES2023", "DOM"],
+    "baseUrl": ".",
+    "paths": {
+      "custard-plugin-sdk": ["src/plugin-sdk/index.ts"],
+      "custard-plugin-sdk/testing": ["src/plugin-sdk/testing.ts"]
+    }
   }
 }

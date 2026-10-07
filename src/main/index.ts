@@ -1,11 +1,13 @@
-import { app, dialog, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, dialog, shell, BrowserWindow } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { registerChatHandlers } from './chat'
-import { registerSpotifyHandlers } from './spotify'
+import { handle } from './ipc'
+import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
+import { isPluginContents } from './plugins/runtime'
 import {
   deleteConversation,
   getChatSettings,
@@ -16,7 +18,7 @@ import {
   setVaultPath
 } from './store'
 import type { VaultInfo } from '../shared/vault'
-import type { Mode, Provider } from '../shared/chat'
+import type { ChatSettings, Mode, Provider } from '../shared/chat'
 import { listSkills } from './vault'
 import { addMissingStarterSkills, createStarterVault } from './vaultTemplate'
 
@@ -79,16 +81,16 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ipcMain.handle('apiKey:has', (_, p: Provider) => getApiKey(p) !== null)
-  ipcMain.handle('apiKey:set', (_, p: Provider, key: string) => setApiKey(p, key))
-  ipcMain.handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
-  ipcMain.handle('settings:get', () => getChatSettings())
-  ipcMain.handle('settings:set', (_, s) => setChatSettings(s))
-  ipcMain.handle('conversations:list', (_, mode: Mode) => listConversations(mode))
-  ipcMain.handle('conversations:get', (_, id: string) => getConversation(id))
-  ipcMain.handle('conversations:delete', (_, id: string) => deleteConversation(id))
-  ipcMain.handle('vault:get', () => vaultInfo())
-  ipcMain.handle('vault:pick', async (e) => {
+  handle('apiKey:has', (_, p: Provider) => getApiKey(p) !== null)
+  handle('apiKey:set', (_, p: Provider, key: string) => setApiKey(p, key))
+  handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
+  handle('settings:get', () => getChatSettings())
+  handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
+  handle('conversations:list', (_, mode: Mode) => listConversations(mode))
+  handle('conversations:get', (_, id: string) => getConversation(id))
+  handle('conversations:delete', (_, id: string) => deleteConversation(id))
+  handle('vault:get', () => vaultInfo())
+  handle('vault:pick', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const options = {
       title: 'Choose your Obsidian vault folder',
@@ -100,7 +102,7 @@ app.whenReady().then(() => {
     if (!result.canceled && result.filePaths[0]) setVaultPath(result.filePaths[0])
     return vaultInfo()
   })
-  ipcMain.handle('vault:createStarter', async (e) => {
+  handle('vault:createStarter', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const options = {
       title: 'Choose where to create the starter vault',
@@ -113,23 +115,38 @@ app.whenReady().then(() => {
       setVaultPath(createStarterVault(result.filePaths[0]))
     return vaultInfo()
   })
-  ipcMain.handle('vault:clear', () => setVaultPath(null))
-  ipcMain.handle('vault:addStarterSkills', () => {
+  handle('vault:clear', () => setVaultPath(null))
+  handle('vault:addStarterSkills', () => {
     const path = getVaultPath()
     if (!path || !existsSync(path)) throw new Error('Connect a vault first.')
     return { added: addMissingStarterSkills(path), vault: vaultInfo() }
   })
   registerChatHandlers()
-  registerSpotifyHandlers()
+  registerPluginHandlers()
 
   createWindow()
+  // Plugins start after the window so a slow plugin can't delay the app.
+  void startPlugins()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (appWindows().length === 0) createWindow()
   })
 })
+
+// Plugin sandboxes are hidden windows too; they don't count as the app.
+const appWindows = (): BrowserWindow[] =>
+  BrowserWindow.getAllWindows().filter((w) => !isPluginContents(w.webContents))
+
+app.on('browser-window-created', (_, win) => {
+  win.on('closed', () => {
+    // When the last app window closes, stop the plugins so the app can quit.
+    if (appWindows().length === 0 && process.platform !== 'darwin') pluginHost().shutdown()
+  })
+})
+
+app.on('before-quit', () => pluginHost().shutdown())
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

@@ -3,7 +3,7 @@ export const MEMORY_NOTE = 'Custard/Memory.md'
 export type VaultInfo = { path: string; isObsidian: boolean; skills: string[] } | null
 
 // A short human-readable line for a tool call, used in the chat UI.
-export function toolLabel(name: string, input: unknown): string {
+export function toolLabel(name: string, input: unknown, labels?: Record<string, string>): string {
   const i = (input ?? {}) as Record<string, unknown>
   const str = (v: unknown): string => (typeof v === 'string' ? v : '')
   switch (name) {
@@ -17,21 +17,43 @@ export function toolLabel(name: string, input: unknown): string {
       return `Created ${str(i.path)}`
     case 'vault_append':
       return str(i.path) === MEMORY_NOTE ? 'Saved to memory' : `Added to ${str(i.path)}`
-    case 'spotify_search':
-      return `Searched Spotify for "${str(i.query)}"`
-    case 'spotify_now_playing':
-      return 'Checked what is playing'
-    case 'spotify_devices':
-      return 'Listed Spotify devices'
-    case 'spotify_add_to_queue': {
-      const n = Array.isArray(i.uris) ? i.uris.length : 0
-      return `Spotify queue: ${n} ${n === 1 ? 'track' : 'tracks'}`
+    case 'fs_list':
+      return `Looked in ${str(i.path) || 'the workspace'}`
+    case 'fs_read':
+      return `Read ${str(i.path)}`
+    case 'fs_search':
+      return `Searched files for "${str(i.query)}"`
+    case 'fs_write':
+      return `Wrote ${str(i.path)}`
+    case 'fs_delete':
+      return `Deleted ${str(i.path)}`
+    case 'fs_rename':
+      return `Renamed ${str(i.from)} to ${str(i.to)}`
+    case 'reference_list':
+      return `Looked in the plugin docs${str(i.path) ? `: ${str(i.path)}` : ''}`
+    case 'reference_read':
+      return `Read the plugin docs: ${str(i.path)}`
+    case 'plugin_validate':
+      return 'Validated the plugin'
+    case 'plugin_test':
+      return 'Ran the plugin tests'
+    default: {
+      const template = labels?.[name]
+      if (template) return formatLabel(template, i)
+      const plugin = /^([a-z][a-z0-9-]*)__(\w+)$/.exec(name)
+      return plugin ? `${plugin[1]}: ${plugin[2].replace(/_/g, ' ')}` : name
     }
-    case 'spotify_open':
-      return 'Opened Spotify'
-    case 'spotify_transfer_playback':
-      return i.play === true ? 'Started playback on a device' : 'Moved playback to a device'
-    default:
-      return name
   }
+}
+
+// Plugin tool labels come from their manifests, e.g. 'Searched Spotify for "{query}"'.
+export function formatLabel(template: string, input: Record<string, unknown>): string {
+  return template.replace(/\{(\w+)\}/g, (_, k: string) => {
+    const v = input[k]
+    return Array.isArray(v)
+      ? String(v.length)
+      : v === undefined || v === null
+        ? ''
+        : String(v).slice(0, 60)
+  })
 }

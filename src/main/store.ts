@@ -9,6 +9,7 @@ import {
   type ConversationSummary,
   type Mode
 } from '../shared/chat'
+import type { SecurityDefaults } from '../shared/plugins'
 
 // Conversations are plain JSON files in the app's data folder, one per chat.
 const dir = (): string => {
@@ -58,7 +59,9 @@ export function deleteConversation(id: string): void {
   rmSync(file(id), { force: true })
 }
 
-type Config = { chat: ChatSettings; vaultPath: string | null; spotifyClientId: string | null }
+type Config = { chat: ChatSettings; vaultPath: string | null; security: SecurityDefaults }
+
+const defaultSecurity: SecurityDefaults = { askBeforeWriteTools: true }
 
 function readConfig(): Config {
   let raw: Partial<Config> & Partial<ChatSettings> = {}
@@ -73,18 +76,24 @@ function readConfig(): Config {
   return {
     chat: { ...defaultChatSettings, ...legacy, ...raw.chat },
     vaultPath: raw.vaultPath ?? null,
-    spotifyClientId: raw.spotifyClientId ?? null
+    security: { ...defaultSecurity, ...raw.security }
   }
 }
 
+// Unknown keys in the file are kept, so settings from other versions survive.
 function writeConfig(patch: Partial<Config>): void {
-  writeFileSync(settingsFile(), JSON.stringify({ ...readConfig(), ...patch }))
+  let raw: Record<string, unknown> = {}
+  try {
+    raw = JSON.parse(readFileSync(settingsFile(), 'utf8'))
+  } catch {
+    // First write.
+  }
+  writeFileSync(settingsFile(), JSON.stringify({ ...raw, ...readConfig(), ...patch }))
 }
 
 export const getChatSettings = (): ChatSettings => readConfig().chat
 export const setChatSettings = (chat: ChatSettings): void => writeConfig({ chat })
 export const getVaultPath = (): string | null => readConfig().vaultPath
 export const setVaultPath = (vaultPath: string | null): void => writeConfig({ vaultPath })
-export const getSpotifyClientId = (): string | null => readConfig().spotifyClientId
-export const setSpotifyClientId = (spotifyClientId: string | null): void =>
-  writeConfig({ spotifyClientId })
+export const getSecurityDefaults = (): SecurityDefaults => readConfig().security
+export const setSecurityDefaults = (security: SecurityDefaults): void => writeConfig({ security })

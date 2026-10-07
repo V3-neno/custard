@@ -10,7 +10,14 @@ import type {
   SendChatRequest
 } from '../shared/chat'
 import type { VaultInfo } from '../shared/vault'
-import type { SpotifyStatus } from '../shared/spotify'
+import type { ApprovalDecision } from '../shared/chat'
+import type {
+  PluginReview,
+  PluginStatus,
+  SecurityDefaults,
+  TestReport,
+  Workspace
+} from '../shared/plugins'
 
 // API exposed to the renderer as window.custard. The renderer never sees the
 // API keys; all model calls happen in the main process.
@@ -33,12 +40,35 @@ const custard = {
     addStarterSkills: (): Promise<{ added: string[]; vault: VaultInfo }> =>
       ipcRenderer.invoke('vault:addStarterSkills')
   },
-  spotify: {
-    status: (): Promise<SpotifyStatus> => ipcRenderer.invoke('spotify:status'),
-    setClientId: (id: string | null): Promise<SpotifyStatus> =>
-      ipcRenderer.invoke('spotify:setClientId', id),
-    connect: (): Promise<SpotifyStatus> => ipcRenderer.invoke('spotify:connect'),
-    disconnect: (): Promise<SpotifyStatus> => ipcRenderer.invoke('spotify:disconnect')
+  plugins: {
+    list: (): Promise<PluginStatus[]> => ipcRenderer.invoke('plugins:list'),
+    status: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:status', id),
+    review: (id: string): Promise<PluginReview> => ipcRenderer.invoke('plugins:review', id),
+    test: (id: string): Promise<TestReport> => ipcRenderer.invoke('plugins:test', id),
+    activate: (id: string, buildId: string, approved: string[]): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:activate', id, buildId, approved),
+    rollback: (id: string, approved: string[] = []): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:rollback', id, approved),
+    enable: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:enable', id),
+    disable: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disable', id),
+    uninstall: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:uninstall', id),
+    setConfig: (id: string, values: Record<string, unknown>): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:setConfig', id, values),
+    setAskEveryTime: (id: string, tool: string, ask: boolean): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:setAskEveryTime', id, tool, ask),
+    connect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:connect', id),
+    disconnect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disconnect', id),
+    create: (id: string, name: string): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:create', id, name),
+    labels: (): Promise<Record<string, string>> => ipcRenderer.invoke('plugins:labels'),
+    sourceRoot: (): Promise<string> => ipcRenderer.invoke('plugins:sourceRoot')
+  },
+  security: {
+    get: (): Promise<SecurityDefaults> => ipcRenderer.invoke('security:get'),
+    set: (s: SecurityDefaults): Promise<void> => ipcRenderer.invoke('security:set', s)
+  },
+  workspace: {
+    pickGeneral: (): Promise<Workspace | null> => ipcRenderer.invoke('workspace:pickGeneral')
   },
   conversations: {
     list: (mode: Mode): Promise<ConversationSummary[]> =>
@@ -49,6 +79,8 @@ const custard = {
   chat: {
     send: (req: SendChatRequest): void => ipcRenderer.send('chat:send', req),
     stop: (requestId: string): void => ipcRenderer.send('chat:stop', requestId),
+    approve: (id: string, decision: ApprovalDecision): Promise<void> =>
+      ipcRenderer.invoke('chat:approve', id, decision),
     onEvent: (cb: (e: ChatEvent) => void): (() => void) => {
       const listener = (_: unknown, e: ChatEvent): void => cb(e)
       ipcRenderer.on('chat:event', listener)

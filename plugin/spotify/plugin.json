@@ -1,0 +1,141 @@
+{
+  "manifestVersion": 1,
+  "id": "spotify",
+  "name": "Spotify",
+  "description": "Search Spotify, see what's playing and your devices, add songs to your queue, open the app and move playback.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "src/index.ts",
+  "instructions": "instructions.md",
+  "permissions": {
+    "network": ["api.spotify.com", "accounts.spotify.com"],
+    "openExternal": ["spotify:"],
+    "storage": false
+  },
+  "config": {
+    "clientId": {
+      "type": "string",
+      "title": "Client ID",
+      "description": "From your app at developer.spotify.com/dashboard. Add http://127.0.0.1:43821/callback as a Redirect URI there.",
+      "pattern": "^[0-9a-fA-F]{32}$"
+    }
+  },
+  "auth": {
+    "type": "oauth-pkce",
+    "authorizeUrl": "https://accounts.spotify.com/authorize",
+    "tokenUrl": "https://accounts.spotify.com/api/token",
+    "redirectPort": 43821,
+    "redirectPath": "/callback",
+    "scopes": [
+      "user-read-playback-state",
+      "user-read-currently-playing",
+      "user-modify-playback-state"
+    ],
+    "clientIdConfigKey": "clientId",
+    "apiHosts": ["api.spotify.com"]
+  },
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search Spotify for tracks. Returns up to 10 real tracks with title, artists, album, explicit flag, duration and Spotify URI. Search one specific track or artist per call (e.g. \"Nils Frahm Says\"), not a mood. Only URIs returned by this tool can be queued.",
+      "effect": "read",
+      "label": "Searched Spotify for \"{query}\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Track and/or artist to find"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Defaults to 5"
+          }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "now_playing",
+      "description": "Get the user's current Spotify playback: the track, whether it is playing, and on which device. Read-only.",
+      "effect": "read",
+      "label": "Checked what is playing",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "name": "devices",
+      "description": "List the user's available Spotify devices, with which one is active. Read-only.",
+      "effect": "read",
+      "label": "Listed Spotify devices",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "name": "add_to_queue",
+      "description": "Add tracks to the end of the user's Spotify queue, in the given order. Does not start, pause or replace playback. Needs an active device, or a device_id from spotify__devices. Each URI must come from a spotify__search or spotify__now_playing result. Use only when the user asked for songs to be queued.",
+      "effect": "write",
+      "label": "Spotify queue: {uris} tracks",
+      "timeoutMs": 45000,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uris": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^spotify:track:[0-9A-Za-z]{22}$" },
+            "minItems": 1,
+            "maxItems": 10,
+            "description": "Spotify track URIs, e.g. spotify:track:4uLU6hMCjMI75M1A2tKUQC"
+          },
+          "device_id": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Optional device from spotify__devices. Leave out to use the active device."
+          }
+        },
+        "required": ["uris"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "open",
+      "description": "Open the Spotify desktop app on this computer, optionally on a track, album, artist or playlist page. Does not start playback or change the queue. Use when the user asks to open Spotify or there is no device to play on.",
+      "effect": "write",
+      "label": "Opened Spotify",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string",
+            "pattern": "^spotify:(track|album|artist|playlist):[0-9A-Za-z]{22}$",
+            "description": "Optional Spotify URI to show, e.g. spotify:album:..."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "transfer_playback",
+      "description": "Move Spotify playback to another device. `play` must be set: true starts playing there, false moves without changing play/pause. Use only when the user asked to switch devices or start playback.",
+      "effect": "write",
+      "label": "Moved Spotify playback to a device",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "A device id from spotify__devices"
+          },
+          "play": { "type": "boolean", "description": "Start playback on the device" }
+        },
+        "required": ["device_id", "play"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

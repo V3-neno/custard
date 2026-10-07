@@ -1,4 +1,5 @@
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import type { Workspace } from './plugins'
 
 export type Provider = 'claude' | 'openai'
 
@@ -56,6 +57,9 @@ export type ConversationSummary = {
 
 export type Conversation = ConversationSummary & {
   createdAt: number
+  // Code mode only: which folder the file tools may touch. Fixed when the
+  // conversation starts.
+  workspace?: Workspace
   // Exactly what is sent to the API, so assistant turns keep their thinking
   // blocks unchanged between requests.
   messages: BetaMessageParam[]
@@ -71,7 +75,18 @@ export type ChatEvent =
       id: string
       label: string
       status: 'running' | 'done' | 'error'
+      write?: boolean
     }
+  // A plugin action waits for the user's go-ahead.
+  | {
+      requestId: string
+      type: 'approval'
+      id: string
+      plugin: string
+      label: string
+      detail: string
+    }
+  | { requestId: string; type: 'approval-done'; id: string }
   | { requestId: string; type: 'done'; conversation: Conversation }
   | { requestId: string; type: 'error'; message: string; conversation: Conversation | null }
 
@@ -81,4 +96,8 @@ export type SendChatRequest = {
   mode: Mode
   text: string
   settings: ChatSettings
+  // For a new Code-mode conversation.
+  workspace?: Workspace
 }
+
+export type ApprovalDecision = 'once' | 'chat' | 'deny'
