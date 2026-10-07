@@ -39,7 +39,15 @@ export function listConversations(mode: Mode): ConversationSummary[] {
       try {
         const c = withMode(JSON.parse(readFileSync(join(dir(), f), 'utf8')))
         return c.mode === mode
-          ? [{ id: c.id, mode: c.mode, title: c.title, updatedAt: c.updatedAt }]
+          ? [
+              {
+                id: c.id,
+                mode: c.mode,
+                title: c.title,
+                updatedAt: c.updatedAt,
+                ...(c.memory?.temporary ? { temporary: true } : {})
+              }
+            ]
           : []
       } catch {
         return []

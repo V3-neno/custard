@@ -1,5 +1,5 @@
 import type { ConversationSummary } from '../../../shared/chat'
-import { CloseIcon, PlusIcon } from './icons'
+import { CloseIcon, PlusIcon, TemporaryIcon } from './icons'
 
 type Props = {
   modeLabel: string
@@ -8,6 +8,7 @@ type Props = {
   onOpen: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
+  onForget: (id: string) => void
   onClose: () => void
 }
 
@@ -19,7 +20,7 @@ function when(ts: number): string {
 }
 
 function HistoryDrawer(props: Props): React.JSX.Element {
-  const { modeLabel, conversations, currentId, onOpen, onNew, onDelete, onClose } = props
+  const { modeLabel, conversations, currentId, onOpen, onNew, onDelete, onForget, onClose } = props
   return (
     <div className="fixed inset-0 z-20 flex" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" />
@@ -63,8 +64,24 @@ function HistoryDrawer(props: Props): React.JSX.Element {
             >
               <button onClick={() => onOpen(c.id)} className="min-w-0 flex-1 px-3 py-2.5 text-left">
                 <div className="truncate text-sm">{c.title}</div>
-                <div className="text-xs text-ash-500">{when(c.updatedAt)}</div>
+                <div className="flex items-center gap-1.5 text-xs text-ash-500">
+                  {when(c.updatedAt)}
+                  {c.temporary && (
+                    <span className="flex items-center gap-1 text-ash-500">
+                      · <TemporaryIcon /> Temporary
+                    </span>
+                  )}
+                </div>
               </button>
+              {!c.temporary && (
+                <button
+                  onClick={() => onForget(c.id)}
+                  title="Delete the notes Custard saved from this chat and never remember it again. Asks first."
+                  className="hidden rounded-full px-2 py-1 text-xs text-ash-500 group-hover:block hover:text-molten-200"
+                >
+                  Forget
+                </button>
+              )}
               <button
                 onClick={() => onDelete(c.id)}
                 title="Delete"

@@ -106,11 +106,10 @@ const send = async (t) => {
   await w.keyboard.press('Enter')
 }
 const idle = () => w.waitForSelector('button[title=Send]', { timeout: 30000 })
-const status = async () => {
-  const l = w.locator('[aria-label="Memory status"]')
-  return (await l.count()) ? l.textContent() : ''
-}
-const memorySwitch = '[aria-label="Remember this chat"]'
+// What became of a chat's latest capture, from the saved chat.
+const chat = (start) => conversations().find((c) => c.title.startsWith(start))
+const job = (start) => chat(start)?.memory?.job
+const tempSwitch = '[aria-label="Temporary chat"]'
 const newChat = async () => {
   await w.click('button[title="Chat history"]')
   await w.click('button:has-text("New chat")')
@@ -146,8 +145,8 @@ try {
   await send('memory test: I like warm jazz. Find Nils Frahm for me')
   await idle()
   check(
-    await until(async () => /^Saved to memory/.test(await status())),
-    `the chat says it was saved (${await status()})`
+    await until(() => job('memory test: I like warm jazz')?.status === 'saved'),
+    `it was saved (${job('memory test: I like warm jazz')?.status})`
   )
   const s1 = summaries()
   check(s1.length === 1, 'one summary call')
@@ -194,26 +193,32 @@ try {
   )
   check(sys.includes('never authorize an action'), 'and says notes are not permission to act')
   check(summaries().length === 1, 'small talk is not summarized')
-  check((await status()) === '', 'and the chat shows no memory status')
+  check(!job('hello'), 'and nothing was captured from it')
+  check((await w.locator('[aria-label="Memory status"]').count()) === 0, 'there is no memory bar')
 
   step('A preference in a one-message chat is remembered')
   await newChat()
   await send('From now on I prefer short answers')
   await idle()
   check(
-    await until(async () => /^Saved to memory/.test(await status())),
-    `saved after one message, with no action (${await status()})`
+    await until(() => job('From now on I prefer')?.status === 'saved'),
+    'saved after one message, with no action'
   )
   check(summaries().length === 2, 'with one summary call')
   const prefNote = captures().find((f) => capture(f).includes('Prefers short answers'))
   check(!!prefNote, 'in a new note of its own')
 
-  step('Forget this chat')
-  await w.click('button:text-is("Forget")')
+  step('Forget this chat, from the history')
+  await w.click('button[title="Chat history"]')
+  const row = w.locator('div.group:has-text("From now on I prefer")')
+  await row.hover()
+  await row.locator('button:text-is("Forget")').click()
   check(
-    await until(async () => /^Forgotten/.test(await status())),
-    `the chat says it was forgotten (${await status()})`
+    await until(() => chat('From now on I prefer')?.memory?.forgotten === true),
+    'the chat is forgotten'
   )
+  await w.screenshot({ path: `${SHOTS}/step2-05b-history-forget.png` })
+  await w.click('div.group:has-text("From now on I prefer") >> nth=0')
   const asked = await app.evaluate(() => globalThis.__asked.at(-1))
   check(
     asked?.message === 'Forget this chat?' && asked.detail.includes(`Custard/Captures/${prefNote}`),
@@ -221,35 +226,53 @@ try {
   )
   check(!captures().includes(prefNote), 'the note is deleted')
   check(captures().length === 1, "and the other chat's note is kept")
-  check(await w.locator(memorySwitch).isDisabled(), 'the switch can no longer turn it back on')
-  await w.screenshot({ path: `${SHOTS}/step2-05b-memory-forgotten.png` })
   await send('I prefer long answers again, remember that')
   await idle()
   await new Promise((r) => setTimeout(r, 1000))
   check(summaries().length === 2, 'a later preference in that chat is not summarized')
 
-  step("Don't remember this chat")
+  step('Temporary chat')
   await newChat()
-  await send('hello there')
-  await idle()
   check(
-    (await w.getAttribute(memorySwitch, 'aria-checked')) === 'true',
-    'a new chat is remembered by default'
+    (await w.getAttribute(tempSwitch, 'aria-checked')) === 'false',
+    'a new chat is not temporary by default'
   )
-  await w.click(memorySwitch)
+  await w.click(tempSwitch)
   check(
-    await until(
-      async () =>
-        (await w.getAttribute(memorySwitch, 'aria-checked')) === 'false' &&
-        (await w.textContent(memorySwitch)).includes('Not remembering')
-    ),
-    'the switch says the chat is not being remembered'
+    (await w.getAttribute(tempSwitch, 'aria-checked')) === 'true',
+    'the header switch says the chat is temporary'
   )
-  await send('memory test: find Nils Frahm again')
+  await w.screenshot({ path: `${SHOTS}/step2-05-temporary-chat.png` })
+  await send('memory test: find Nils Frahm in a temporary chat')
   await idle()
   await new Promise((r) => setTimeout(r, 1000))
-  check(summaries().length === 2, 'a plugin action in that chat is not summarized')
-  await w.screenshot({ path: `${SHOTS}/step2-05-memory-off-chat.png` })
+  check(summaries().length === 2, 'a plugin action in a temporary chat is not summarized')
+  check(
+    chat('memory test: find Nils Frahm in a temporary')?.memory?.temporary === true,
+    'it is saved as temporary from its first message'
+  )
+  check(
+    JSON.stringify(chatRequests().at(-1)?.system).includes('Automatic memory is off'),
+    'and the model is told it is not remembered'
+  )
+  await w.click(tempSwitch)
+  check(
+    (await w.getAttribute(tempSwitch, 'aria-checked')) === 'false' &&
+      (await w.locator('text=memory test: find Nils Frahm in a temporary').count()) === 0,
+    'switching it off starts a new, normal chat'
+  )
+  await w.click('button[title="Chat history"]')
+  check(
+    (await w
+      .locator('div.group:has-text("in a temporary chat") >> span:has(svg):has-text("Temporary")')
+      .count()) === 1,
+    'the history marks it as temporary'
+  )
+  await w.click('div.group:has-text("in a temporary chat") >> nth=0')
+  check(
+    (await w.getAttribute(tempSwitch, 'aria-checked')) === 'true',
+    'opening it again shows the switch on'
+  )
 
   step('Remember automatically off')
   await w.click('button[title=Settings]')
@@ -264,8 +287,10 @@ try {
   await send('memory test: find Nils Frahm, third time')
   await idle()
   check(
-    await until(async () => /Remember automatically is off/.test(await status())),
-    `the chat says why it was not saved (${await status()})`
+    await until(
+      () => job('memory test: find Nils Frahm, third')?.reason === 'Remember automatically is off.'
+    ),
+    'the chat records why it was not saved'
   )
   check(summaries().length === 2, 'nothing was summarized')
   check(
@@ -282,8 +307,10 @@ try {
   await send('memory test: find Nils Frahm while the vault is away')
   await idle()
   check(
-    await until(async () => /vault isn't available/.test(await status())),
-    `the chat says it is waiting for the vault (${await status()})`
+    await until(() =>
+      /vault isn't available/.test(job('memory test: find Nils Frahm while')?.reason ?? '')
+    ),
+    'the capture waits for the vault'
   )
   check(summaries().length === 2, 'no summary is made while the vault is missing')
   // Quit hard, as a crash would.

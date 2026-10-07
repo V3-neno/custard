@@ -157,6 +157,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   if (existing && active.has(existing.id))
     return refuse('This chat is still answering. Wait for it to finish or stop it first.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
+  // Off before anything is said, so no part of it is ever captured.
+  if (!existing && req.temporary) conversation.memory = { off: true, temporary: true, watermark: 0 }
   if (!existing && req.mode === 'code')
     try {
       conversation.workspace = verifyWorkspace(req.workspace)

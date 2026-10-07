@@ -1032,6 +1032,22 @@ describe('opt-out, deletion and forgetting', () => {
     expect(notes()).toEqual([])
   })
 
+  it('a temporary chat is never captured, and memory cannot be turned on for it', async () => {
+    const c = newChat()
+    c.memory = { off: true, temporary: true, watermark: 0 }
+    played(c)
+    const cap = capture()
+    await captured(cap, c)
+    expect(calls).toHaveLength(0)
+    expect(job().reason).toBe('This is a temporary chat.')
+    cap.setChatMemory('chat-1', false)
+    expect(chats.get('chat-1')!.memory!.off).toBe(true)
+    turn(chats.get('chat-1')!, 'From now on I prefer jazz')
+    await captured(cap, chats.get('chat-1')!)
+    expect(calls).toHaveLength(0)
+    expect(notes()).toEqual([])
+  })
+
   it('manual deletion: a deleted note is not written again, and that part is not captured again', async () => {
     const c = newChat()
     played(c)
