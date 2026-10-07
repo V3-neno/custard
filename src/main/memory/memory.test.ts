@@ -8,6 +8,7 @@ import {
   symlinkSync,
   writeFileSync
 } from 'fs'
+import { createHash } from 'crypto'
 import { createServer, type Server } from 'http'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -133,6 +134,7 @@ function capture(extra: Partial<CaptureDeps> = {}): Capture {
   })
 }
 
+const hashOf = (job: string): string => createHash('sha256').update(job).digest('hex').slice(0, 8)
 const note = (p: string): string => readFileSync(join(vault, p), 'utf8')
 // Capture notes, oldest first, and the text of all of them.
 const notes = (): string[] => captureNotes(vault).reverse()
@@ -495,7 +497,11 @@ describe('capture', () => {
       })
     await captured(capture(), c)
     expect(job().status).toBe('saved')
-    expect(job().notes).toEqual(['Custard/Captures/2026-10-07 1200 Spotify test.md'])
+    // Date, time, title and an id from the capture, so names made in the
+    // same minute (here or on another device) differ.
+    expect(job().notes).toEqual([
+      `Custard/Captures/2026-10-07 1200 Spotify test ${hashOf('chat-1:0-4')}.md`
+    ])
     expect(job().plan).toBeUndefined()
     const a = note(job().notes![0])
     expect(a).toMatch(
@@ -752,7 +758,7 @@ describe('capture', () => {
     await captured(cap, c)
     expect(note(first)).toBe(edited)
     expect(notes()).toHaveLength(2)
-    expect(note(notes()[1])).toContain('### Pause')
+    expect(note(notes().find((n) => n !== first)!)).toContain('### Pause')
     expect(note('Custard/Memory.md')).toBe('# Memory\n\nmine\n')
   })
 
@@ -934,7 +940,7 @@ describe('capture', () => {
       })
     await captured(cap, c)
     expect(note(first)).toBe(before)
-    const second = note(notes()[1])
+    const second = note(notes().find((n) => n !== first)!)
     expect(second).toContain(
       '## Resolved\n\n- Spotify has no active device: Opened Spotify on the laptop first'
     )
@@ -1087,15 +1093,16 @@ describe('opt-out, deletion and forgetting', () => {
     await captured(cap, other)
     writeFileSync(join(vault, 'Custard/Captures/mine.md'), 'chat: "chat-1"\nmy own note')
     expect(cap.savedNotes('chat-1')).toEqual([
-      'Custard/Captures/2026-10-07 1200 Spotify test.md',
+      `Custard/Captures/2026-10-07 1200 Spotify test ${hashOf('chat-1:0-4')}.md`,
       elsewhere
     ])
     const r = cap.forget('chat-1')
     expect(r.left).toEqual([])
     expect(r.deleted).toHaveLength(2)
     expect(chatCaptures(vault, 'chat-1')).toEqual([])
-    expect(notes()).toEqual([
-      'Custard/Captures/2026-10-07 1200 Other.md',
+    // Same minute: their order is only by file time, so compare as a set.
+    expect(notes().sort()).toEqual([
+      `Custard/Captures/2026-10-07 1200 Other ${hashOf('chat-2:0-4')}.md`,
       'Custard/Captures/mine.md'
     ])
     const m = chats.get('chat-1')!.memory!

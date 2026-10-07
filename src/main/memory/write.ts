@@ -1,5 +1,5 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { randomUUID } from 'crypto'
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { createHash, randomUUID } from 'crypto'
 import { dirname, join } from 'path'
 import { resolveInVault, safeName } from './paths'
 
@@ -12,9 +12,14 @@ import { resolveInVault, safeName } from './paths'
 export const CAPTURES = 'Custard/Captures'
 export const RETRIEVAL = { notes: 20, chars: 2000, activity: 5 }
 
-// "2026-10-07 1432 Spotify test", the name before any " (2)".
-export const captureName = (date: string, time: string, title: string): string =>
-  `${date} ${time.replace(':', '')} ${safeName(title, 'Chat')}`
+// "2026-10-07 1432 Spotify test 3f9a1c2e", the name before any " (2)". The
+// last part comes from the capture's job id (chat id and message range), so
+// two captures made in the same minute, on this device or another, get
+// different names, and a retry of the same capture gets the same one. It
+// makes clashes unlikely, not impossible: a sync tool can still make
+// conflict copies.
+export const captureName = (date: string, time: string, title: string, job: string): string =>
+  `${date} ${time.replace(':', '')} ${safeName(title, 'Chat').slice(0, 60)} ${createHash('sha256').update(job).digest('hex').slice(0, 8)}`
 
 // A note's frontmatter, as written by noteText (values are JSON strings).
 export function frontmatter(text: string): Record<string, string> {
@@ -68,19 +73,37 @@ export function writeCapture(
   throw new Error('Too many notes with the same name.')
 }
 
-// Capture notes in a folder, newest first (by name, which starts with the
-// date and time; "x (2)" is newer than "x").
+// Capture notes in a folder, newest first: by the date and time their
+// names start with, then by when the file was last written (captures in the
+// same minute), then by name.
 export function captureNotes(vault: string, folder = CAPTURES): string[] {
   try {
-    return readdirSync(resolveInVault(vault, folder, false))
+    const dir = resolveInVault(vault, folder, false)
+    return readdirSync(dir)
       .filter((f) => f.endsWith('.md') && !f.startsWith('.'))
       .map((f) => {
-        const m = /^(.*?)(?: \((\d+)\))?\.md$/.exec(f)!
-        return { f, base: m[1], n: Number(m[2] ?? 1) }
+        let t = 0n
+        try {
+          t = statSync(join(dir, f), { bigint: true }).mtimeNs
+        } catch {
+          // Gone meanwhile.
+        }
+        return { f, stamp: /^\d{4}-\d{2}-\d{2} \d{4}/.exec(f)?.[0] ?? '', t }
       })
-      .sort((a, b) => (a.base === b.base ? b.n - a.n : a.base < b.base ? 1 : -1))
-      .map((x) => x.f)
-      .map((f) => `${folder}/${f}`)
+      .sort((a, b) =>
+        a.stamp !== b.stamp
+          ? a.stamp < b.stamp
+            ? 1
+            : -1
+          : a.t !== b.t
+            ? a.t < b.t
+              ? 1
+              : -1
+            : a.f < b.f
+              ? 1
+              : -1
+      )
+      .map((x) => `${folder}/${x.f}`)
   } catch {
     return []
   }

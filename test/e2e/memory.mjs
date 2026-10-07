@@ -243,6 +243,10 @@ try {
   check(summaries().length === 2, 'with one summary call')
   const prefNote = captures().find((f) => capture(f).includes('Prefers short answers'))
   check(!!prefNote, 'in a new note of its own')
+  check(
+    / [0-9a-f]{8}\.md$/.test(prefNote ?? ''),
+    `its name ends with an id from the capture, not only the minute (${prefNote})`
+  )
 
   step('Forget this chat, from the history')
   await w.click('button[title="Chat history"]')
