@@ -8,13 +8,15 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
   const str = (v: unknown): string => (typeof v === 'string' ? v : '')
   switch (name) {
     case 'vault_search':
-      return `Searched notes for "${str(i.query)}"`
+      return `Searched notes for "${str(i.query)}"${typeof i.page === 'number' && i.page > 1 ? ` (page ${i.page})` : ''}`
     case 'vault_list':
       return `Looked in ${str(i.folder) || 'the vault'}`
     case 'vault_read':
-      return `Read ${str(i.path)}`
+      return `Read ${str(i.path)}${typeof i.offset === 'number' && i.offset > 0 ? ' (continued)' : ''}`
     case 'vault_create_note':
       return `Created ${str(i.path)}`
+    case 'vault_edit':
+      return `Edited ${str(i.path)}`
     case 'vault_append':
       return str(i.path) === MEMORY_NOTE ? 'Saved to memory' : `Added to ${str(i.path)}`
     case 'fs_list':

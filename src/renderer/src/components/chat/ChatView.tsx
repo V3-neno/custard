@@ -17,6 +17,7 @@ import ModeBubbles from '../ModeBubbles'
 import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
 import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
+import { VaultEditsContext } from '../../vaultEdits'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
 import {
@@ -153,7 +154,9 @@ function ChatView(props: Props): React.JSX.Element {
                       plugin: e.plugin,
                       label: e.label,
                       detail: e.detail,
-                      warning: e.warning
+                      warning: e.warning,
+                      once: e.once,
+                      edit: e.edit
                     }
                   ]
                 }
@@ -345,134 +348,147 @@ function ChatView(props: Props): React.JSX.Element {
     !!current && !live && !continuedIn.length && (tooLong || !!current.context?.warn)
 
   const empty = !current && !live
+  const editsValue = {
+    edits: current?.vaultEdits ?? {},
+    undo: async (callId: string): Promise<{ ok: boolean; message: string }> => {
+      if (!current) return { ok: false, message: 'No chat is open.' }
+      const r = await window.custard.chat.undoEdit(current.id, callId)
+      if (r.ok) setCurrent((c) => (c && c.id === r.conversation.id ? r.conversation : c))
+      return { ok: r.ok, message: r.message }
+    }
+  }
   const modeLabel = modes.find((m) => m.id === mode)?.label ?? 'Chat'
   const providerName = providerNames[providerOf(settings.model)]
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto">
-        {empty ? (
-          <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
-            <Orb size={128} state={copy[mode].orb} />
-            <div className="text-center">
-              <h1 className="text-3xl font-semibold tracking-tight text-molten-200">
-                {copy[mode].headline}
-              </h1>
-              <p className="mt-2 text-sm text-ash-400">
-                {hasKey ? (
-                  modes.find((m) => m.id === mode)?.hint
-                ) : (
-                  <button onClick={onOpenSettings} className="text-molten-300 hover:underline">
-                    Add your {providerName} API key to get started
-                  </button>
-                )}
-              </p>
+    <VaultEditsContext.Provider value={editsValue}>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="flex-1 overflow-y-auto">
+          {empty ? (
+            <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
+              <Orb size={128} state={copy[mode].orb} />
+              <div className="text-center">
+                <h1 className="text-3xl font-semibold tracking-tight text-molten-200">
+                  {copy[mode].headline}
+                </h1>
+                <p className="mt-2 text-sm text-ash-400">
+                  {hasKey ? (
+                    modes.find((m) => m.id === mode)?.hint
+                  ) : (
+                    <button onClick={onOpenSettings} className="text-molten-300 hover:underline">
+                      Add your {providerName} API key to get started
+                    </button>
+                  )}
+                </p>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 pt-8 pb-6">
-            {current?.continuedFrom && <HandoffCard k={current.continuedFrom} onOpen={open} />}
-            {current?.messages.map((m, i) => (
-              <Fragment key={i}>
-                {(current.compactions ?? [])
-                  .filter((k) => k.after === i)
-                  .slice(-1)
-                  .map((k) => (
-                    <CompactionLine key={`k${i}`} k={k} />
-                  ))}
-                {!isToolResults(m) && (
-                  // A reply that continues after vault actions sits flush with the part before it.
-                  <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
-                    <MessageView message={m} actions={actions} />
-                  </div>
-                )}
-                {turnSources.has(i) && (
-                  <SourcesList
-                    sources={turnSources.get(i)!.sources}
-                    answer={turnSources.get(i)!.answer}
-                  />
-                )}
-                {notices
-                  // The length notice below says it, with the way on.
-                  .filter((n) => n.after === i + 1 && !(showLength && n === lastNotice && tooLong))
-                  .map((n, j) => (
-                    <NoticeLine
-                      key={j}
-                      notice={n}
-                      onContinue={
-                        canContinue && n === lastNotice ? () => send(CONTINUE) : undefined
-                      }
+          ) : (
+            <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 pt-8 pb-6">
+              {current?.continuedFrom && <HandoffCard k={current.continuedFrom} onOpen={open} />}
+              {current?.messages.map((m, i) => (
+                <Fragment key={i}>
+                  {(current.compactions ?? [])
+                    .filter((k) => k.after === i)
+                    .slice(-1)
+                    .map((k) => (
+                      <CompactionLine key={`k${i}`} k={k} />
+                    ))}
+                  {!isToolResults(m) && (
+                    // A reply that continues after vault actions sits flush with the part before it.
+                    <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
+                      <MessageView message={m} actions={actions} />
+                    </div>
+                  )}
+                  {turnSources.has(i) && (
+                    <SourcesList
+                      sources={turnSources.get(i)!.sources}
+                      answer={turnSources.get(i)!.answer}
                     />
-                  ))}
-              </Fragment>
-            ))}
-            {showLength && !handoff && (
-              <LengthNotice
-                use={current.context}
-                tooLong={tooLong}
-                busy={!!handoff}
-                onContinue={() => continueNew()}
-              />
-            )}
-            {handoff && (
-              <HandoffProgress
-                state={handoff}
-                onRetry={() => continueNew()}
-                onSkip={() => continueNew(true)}
-                onCancel={() => setHandoffFor(null)}
-              />
-            )}
-            {!live && continuedIn.length > 0 && <ContinuedIn links={continuedIn} onOpen={open} />}
-            {live && (
-              <>
-                <UserBubble text={live.userText} />
-                <Working segments={live.segments} approvals={live.approvals} />
-              </>
-            )}
-            <div ref={bottom} />
-          </div>
-        )}
-      </div>
+                  )}
+                  {notices
+                    // The length notice below says it, with the way on.
+                    .filter(
+                      (n) => n.after === i + 1 && !(showLength && n === lastNotice && tooLong)
+                    )
+                    .map((n, j) => (
+                      <NoticeLine
+                        key={j}
+                        notice={n}
+                        onContinue={
+                          canContinue && n === lastNotice ? () => send(CONTINUE) : undefined
+                        }
+                      />
+                    ))}
+                </Fragment>
+              ))}
+              {showLength && !handoff && (
+                <LengthNotice
+                  use={current.context}
+                  tooLong={tooLong}
+                  busy={!!handoff}
+                  onContinue={() => continueNew()}
+                />
+              )}
+              {handoff && (
+                <HandoffProgress
+                  state={handoff}
+                  onRetry={() => continueNew()}
+                  onSkip={() => continueNew(true)}
+                  onCancel={() => setHandoffFor(null)}
+                />
+              )}
+              {!live && continuedIn.length > 0 && <ContinuedIn links={continuedIn} onOpen={open} />}
+              {live && (
+                <>
+                  <UserBubble text={live.userText} />
+                  <Working segments={live.segments} approvals={live.approvals} />
+                </>
+              )}
+              <div ref={bottom} />
+            </div>
+          )}
+        </div>
 
-      <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-        {/* The length notice in the chat already says it, with the way on. */}
-        {error && !(overflow && showLength) && (
-          <div className="mb-2 px-2 text-sm text-ember-600">{error}</div>
-        )}
-        {mode === 'code' && (
-          <WorkspaceBar
-            fixed={current ? current.workspace : null}
-            value={workspace}
-            onChange={setWorkspace}
-            disabled={!!live}
+        <div className="mx-auto w-full max-w-3xl px-6 pb-6">
+          {/* The length notice in the chat already says it, with the way on. */}
+          {error && !(overflow && showLength) && (
+            <div className="mb-2 px-2 text-sm text-ember-600">{error}</div>
+          )}
+          {mode === 'code' && (
+            <WorkspaceBar
+              fixed={current ? current.workspace : null}
+              value={workspace}
+              onChange={setWorkspace}
+              disabled={!!live}
+            />
+          )}
+          <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
+          <Composer
+            busy={!!live}
+            placeholder={copy[mode].placeholder.replace('{provider}', providerName)}
+            settings={settings}
+            onSettings={onSettings}
+            onSend={send}
+            onStop={() => live && window.custard.chat.stop(live.requestId)}
+            draft={draft}
+            setDraft={setDraft}
+          />
+        </div>
+
+        {historyOpen && (
+          <HistoryDrawer
+            modeLabel={modeLabel}
+            conversations={list}
+            currentId={current?.id ?? null}
+            onOpen={open}
+            onNew={startNew}
+            onDelete={remove}
+            onForget={forgetChat}
+            onClose={onCloseHistory}
           />
         )}
-        <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
-        <Composer
-          busy={!!live}
-          placeholder={copy[mode].placeholder.replace('{provider}', providerName)}
-          settings={settings}
-          onSettings={onSettings}
-          onSend={send}
-          onStop={() => live && window.custard.chat.stop(live.requestId)}
-          draft={draft}
-          setDraft={setDraft}
-        />
       </div>
-
-      {historyOpen && (
-        <HistoryDrawer
-          modeLabel={modeLabel}
-          conversations={list}
-          currentId={current?.id ?? null}
-          onOpen={open}
-          onNew={startNew}
-          onDelete={remove}
-          onForget={forgetChat}
-          onClose={onCloseHistory}
-        />
-      )}
-    </div>
+    </VaultEditsContext.Provider>
   )
 }
 

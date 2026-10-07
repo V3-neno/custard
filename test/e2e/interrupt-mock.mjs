@@ -276,7 +276,11 @@ http
                               ? 'toolong'
                               : /unsupported test/.test(ask)
                                 ? 'nocompact'
-                                : 'plain'
+                                : /edit test/.test(ask)
+                                  ? 'edit'
+                                  : /search test/.test(ask)
+                                    ? 'search'
+                                    : 'plain'
       // The provider says the request is too large.
       if (key === 'toolong')
         return j(400, {
@@ -332,7 +336,34 @@ http
         })
         send('content_block_stop', { index: idx++ })
       }
+      // The version the last vault_read gave, for an edit against it.
+      const lastVersion = () => {
+        for (let i = b.messages.length - 1; i >= 0; i--)
+          for (const c of Array.isArray(b.messages[i].content) ? b.messages[i].content : [])
+            if (c.type === 'tool_result') {
+              const t = typeof c.content === 'string' ? c.content : JSON.stringify(c.content)
+              const v = /version (\w+)/.exec(t)
+              if (v) return v[1]
+            }
+        return 'none'
+      }
       const scripts = {
+        // Step 4: read a note, edit one passage of it, then answer.
+        edit: [
+          () => tool('vault_read', { path: 'Projects/Plan.md' }),
+          () =>
+            tool('vault_edit', {
+              path: 'Projects/Plan.md',
+              version: lastVersion(),
+              old_text: 'Status: draft',
+              new_text: 'Status: approved'
+            }),
+          'Done with the plan.'
+        ],
+        search: [
+          () => tool('vault_search', { query: 'CAFE "release plan" folder:Projects' }),
+          'Found it.'
+        ],
         stop: [
           () => tool('vault_append', { path: 'Log.md', content: 'before' }),
           () => tool('spotify__search', { query: 'Nils Frahm Says' }),

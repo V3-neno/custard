@@ -7,9 +7,10 @@ import type {
   BetaToolResultBlockParam,
   MessageCreateParamsStreaming
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import { type WebContents } from 'electron'
+import { app, type WebContents } from 'electron'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
+import { join } from 'path'
 import { getApiKey } from './apiKey'
 import OpenAI from 'openai'
 import {
@@ -45,7 +46,8 @@ import {
   recordClaudeCompaction,
   usesCompaction
 } from './compaction'
-import { runVaultTool, vaultSystemPrompt, vaultTools } from './vault'
+import { runVaultTool, unreachableVaultPrompt, vaultSystemPrompt, vaultTools } from './vault'
+import { undoEdit } from './vault/edit'
 import { withoutUnavailableTools } from './history'
 import { handle, on } from './ipc'
 import { pluginHost, verifyWorkspace } from './plugins'
@@ -63,12 +65,16 @@ import {
   type ContinueResult,
   type Conversation,
   type Mode,
-  type SendChatRequest
+  type SendChatRequest,
+  type UndoResult
 } from '../shared/chat'
 import { toolLabel } from '../shared/vault'
 
 const isVaultTool = (name: string): boolean => name.startsWith('vault_')
-const CORE_WRITES = /^(vault_create_note|vault_append|fs_write|fs_delete|fs_rename)$/
+const CORE_WRITES = /^(vault_create_note|vault_append|vault_edit|fs_write|fs_delete|fs_rename)$/
+
+// Copies of notes from before each edit, outside the vault (see vault/edit).
+const historyDir = (): string => join(app.getPath('userData'), 'vault-history')
 
 const systemPrompt = (model: (typeof chatModels)[number]): string =>
   `${model.provider === 'claude' ? 'You are Claude' : `You are ${model.label}, an OpenAI model`}, ` +
@@ -88,9 +94,9 @@ const MODE_PROMPTS: Record<Mode, string> = {
     "The user is in Skills mode. You curate their Obsidian vault, Custard's long-term brain, so that future answers in Chat, Code and Design get better.",
     "- If the vault isn't connected, ask them to connect it in Settings and stop there.",
     '- Create skills as Custard/Skills/<kebab-case-name>/SKILL.md. Frontmatter has `name`, `description` (one sentence saying when to use the skill; this decides whether it gets used) and, optionally, `modes: code, design` to load it only in those modes (leave it out for every mode). The body is concrete, step-by-step instructions with the conventions and short examples a model needs.',
-    '- Before creating a skill, list Custard/Skills and read related skills so you extend rather than duplicate. You can only add to existing notes, so improve a skill by appending a clearly headed section.',
+    '- Before creating a skill, list Custard/Skills and read related skills so you extend rather than duplicate. Improve a skill by appending a clearly headed section, or, when the user asks for a specific change, by replacing that passage with vault_edit (they approve each edit).',
     '- Learn from the user: ask about their stack, coding conventions, design taste and writing style, and turn the answers into skills or memory.',
-    '- To improve the vault, survey it with vault_list and vault_search: look for duplicates, orphan notes, missing links and inconsistent names. You can create index notes and append links, but you cannot move, rename, rewrite or delete notes, so give the user a short checklist for those to do in Obsidian.',
+    '- To improve the vault, survey it with vault_list and vault_search: look for duplicates, orphan notes, missing links and inconsistent names. You can create index notes, append links and, when the user asks, replace a passage you have read; you cannot move, rename, rewrite whole notes or delete them, so give the user a short checklist for those to do in Obsidian.',
     '- Propose a plan before making many changes. Afterwards, list every note you created or added to.'
   ].join('\n')
 }
@@ -180,6 +186,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const existing = (req.conversationId && openConversation(req.conversationId)) || null
   if (existing && active.has(existing.id))
     return refuse('This chat is still answering. Wait for it to finish or stop it first.')
+  if (existing && undoing.has(existing.id))
+    return refuse('An Undo is still running in this chat. Send again in a moment.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
   // Off before anything is said, so no part of it is ever captured.
   if (!existing && req.temporary) conversation.memory = { off: true, temporary: true, watermark: 0 }
@@ -212,9 +220,11 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       text: vaultSystemPrompt(
         vault,
         conversation.mode,
-        getMemorySettings().auto && !conversation.memory?.off
+        getMemorySettings().auto && !conversation.memory?.off,
+        Object.values(conversation.vaultEdits ?? {}).filter((e) => e.undone)
       )
     })
+  else if (vault !== null) system.push({ type: 'text', text: unreachableVaultPrompt(vault) })
   if (plugins.instructions.length)
     system.push({
       type: 'text',
@@ -315,6 +325,34 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     return decision === 'once' || decision === 'chat'
   }
 
+  // A note edit asks every time, with exactly what changes. There is no
+  // "allow for this chat", whatever the renderer answers.
+  const approveEdit = async (
+    p: { path: string; oldText: string; newText: string },
+    warning?: string
+  ): Promise<boolean> => {
+    if (controller.signal.aborted) return false
+    const id = randomUUID()
+    emit({
+      requestId,
+      type: 'approval',
+      id,
+      plugin: 'Custard',
+      label: `Edit ${p.path}`,
+      detail: '',
+      once: true,
+      edit: { path: p.path, old: p.oldText, new: p.newText },
+      ...(warning ? { warning } : {})
+    })
+    const decision = await new Promise<ApprovalDecision>((resolve) => {
+      approvals.set(id, { requestId, resolve })
+      controller.signal.addEventListener('abort', () => resolve('deny'), { once: true })
+    })
+    approvals.delete(id)
+    emit({ requestId, type: 'approval-done', id })
+    return !controller.signal.aborted && (decision === 'once' || decision === 'chat')
+  }
+
   const toCall = (id: string, name: string, input: unknown): Call => {
     const described = pluginHost().describeCall(name, input)
     return {
@@ -331,7 +369,11 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     emit({ requestId, type: 'tool', id: c.id, label: c.label, status: 'running', write: c.write })
     const isPlugin = c.name.includes('__') && !workspace?.has(c.name)
     let preApproved = false
-    if (c.write && log.unknownRepeat(c)) {
+    const repeat = c.write && log.unknownRepeat(c)
+    const REPEAT_WARNING =
+      'This repeats an earlier action whose outcome is unknown. It may already have happened.'
+    // An edit asks on its own card, which carries the warning.
+    if (repeat && c.name !== 'vault_edit') {
       const allowed = await approve(
         {
           pluginId: isPlugin ? c.name.split('__')[0] : 'custard',
@@ -340,7 +382,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
           label: c.label,
           input: c.input
         },
-        'This repeats an earlier action whose outcome is unknown. It may already have happened.'
+        REPEAT_WARNING
       )
       if (!allowed)
         return {
@@ -369,7 +411,13 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       })
     if (isVaultTool(c.name))
       return vaultReady
-        ? runVaultTool(vault, c.name, c.input)
+        ? runVaultTool(vault, c.name, c.input, {
+            reads: (conversation.vaultReads ??= {}),
+            edits: (conversation.vaultEdits ??= {}),
+            callId: c.id,
+            approveEdit: (p) => approveEdit(p, repeat ? REPEAT_WARNING : undefined),
+            historyDir: historyDir()
+          })
         : { content: 'The vault is not connected right now.', isError: true, outcome: 'not-run' }
     if (isPlugin)
       return pluginHost().invoke(c.name, c.input, {
@@ -631,7 +679,44 @@ async function continueFrom(id: string, withoutSummary: boolean): Promise<Contin
   }
 }
 
+// Undo of a note edit, from the chat. Refused while the chat is busy, and
+// whenever the note changed after the edit (see vault/edit undoEdit).
+const undoing = new Set<string>()
+async function undo(conversationId: string, callId: string): Promise<UndoResult> {
+  if (active.has(conversationId) || undoing.has(conversationId))
+    return { ok: false, message: 'Wait for the reply to finish, then try Undo again.' }
+  undoing.add(conversationId)
+  try {
+    return await undoIn(conversationId, callId)
+  } finally {
+    undoing.delete(conversationId)
+  }
+}
+
+async function undoIn(conversationId: string, callId: string): Promise<UndoResult> {
+  const c = getConversation(conversationId)
+  const e = c?.vaultEdits?.[callId]
+  if (!c || !e) return { ok: false, message: 'That edit is no longer in this chat.' }
+  const vault = getVaultPath()
+  if (!vault || !existsSync(vault))
+    return {
+      ok: false,
+      message: `The vault isn't connected, so nothing was changed. The version from before the edit is saved at ${e.backup}.`
+    }
+  const r = await undoEdit(vault, e)
+  if (!r.ok) return { ok: false, message: r.message }
+  // No turn can start on this chat while `undoing` holds it.
+  const fresh = getConversation(conversationId) ?? c
+  const edit = fresh.vaultEdits?.[callId]
+  if (edit) edit.undone = Date.now()
+  // The read of that note is out of date now.
+  if (fresh.vaultReads) delete fresh.vaultReads[e.path]
+  saveConversation(fresh)
+  return { ok: true, message: r.message, conversation: fresh }
+}
+
 export function registerChatHandlers(): void {
+  handle('vault:undo', (_, conversationId: string, callId: string) => undo(conversationId, callId))
   handle('chat:continue', (_, id: string, withoutSummary?: boolean) =>
     continueFrom(id, !!withoutSummary)
   )

@@ -134,11 +134,14 @@ const dateOf = (rel: string): string => /(\d{4}-\d{2}-\d{2})[^/]*$/.exec(rel)?.[
 export function readCaptures(
   vault: string,
   folder = CAPTURES
-): { remembered: string[]; activity: string[]; notes: number } {
+): { remembered: string[]; activity: string[]; notes: number; cut: number } {
   const notes = captureNotes(vault, folder)
   const remembered: string[] = []
   const activity: string[] = []
   let chars = 0
+  // Entries left out for length, so the prompt can say so.
+  let cut = 0
+  let full = false
   for (const [n, rel] of notes.slice(0, RETRIEVAL.notes).entries()) {
     const text = read(resolveInVault(vault, rel))
     if (!text) continue
@@ -149,7 +152,11 @@ export function readCaptures(
       ...bullets(s.get('Decisions')).map((d) => `Decided: ${d}`)
     ]) {
       const entry = `${date}: ${line}`
-      if (chars + entry.length > RETRIEVAL.chars) break
+      if (full || chars + entry.length > RETRIEVAL.chars) {
+        full = true
+        cut++
+        continue
+      }
       chars += entry.length
       remembered.push(entry)
     }
@@ -162,7 +169,13 @@ export function readCaptures(
         ...bullets(s.get('Still open')).map((u) => `${date} · Open: ${u}`)
       )
   }
-  return { remembered, activity: activity.slice(0, RETRIEVAL.activity * 3), notes: notes.length }
+  const shown = activity.slice(0, RETRIEVAL.activity * 3)
+  return {
+    remembered,
+    activity: shown,
+    notes: notes.length,
+    cut: cut + activity.length - shown.length
+  }
 }
 
 // Every capture note Custard saved from one chat, wherever it is under
