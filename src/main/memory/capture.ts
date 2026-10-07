@@ -425,7 +425,7 @@ export class Capture {
       part.items.push({ ...i, section: i.section as Section })
       parts.set(key, part)
     }
-    const name = captureName(from.date, from.time, c.title)
+    const name = captureName(from.date, from.time, c.title, jobId)
     return [...parts].map(([plugin, part]) =>
       writeCapture(
         vault,
