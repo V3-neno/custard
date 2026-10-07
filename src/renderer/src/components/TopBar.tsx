@@ -18,7 +18,7 @@ function TopBar({ modeLabel, vaultConnected, onHistory, onSettings }: Props): Re
         <HistoryIcon />
       </button>
       <div className="flex items-center gap-2.5 pl-1">
-        <Orb size={16} />
+        <Orb size={20} state="breathing" paused />
         <span className="text-[15px] font-semibold tracking-[0.18em] text-molten-200 uppercase">
           Custard
         </span>

@@ -21,7 +21,7 @@ export function Thinking({
         onClick={() => text && setOpen(!open)}
         className="flex items-center gap-2.5 text-sm text-ash-400 hover:text-molten-300"
       >
-        <Orb size={18} state={live ? 'thinking' : 'idle'} />
+        <Orb size={20} state="working" paused={!live} />
         <span className={live ? 'animate-pulse' : ''}>
           {live ? 'Thinking' : open ? 'Hide thinking' : 'Show thinking'}
         </span>
@@ -51,7 +51,7 @@ export function ToolLine({
       className={`mb-2 flex items-center gap-2.5 text-xs ${status === 'error' ? 'text-ember-600' : 'text-ash-400'}`}
     >
       {status === 'running' ? (
-        <Orb size={10} state="thinking" />
+        <Orb size={16} state={/^(Created|Added|Saved)/.test(label) ? 'composing' : 'searching'} />
       ) : (
         <span
           className={`h-2 w-2 rounded-full ${status === 'error' ? 'bg-ember-600' : 'bg-molten-400 shadow-[0_0_8px_rgb(245_174_63/0.6)]'}`}

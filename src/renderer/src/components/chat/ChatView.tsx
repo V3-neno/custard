@@ -10,7 +10,7 @@ import {
 } from '../../../../shared/chat'
 import HistoryDrawer from '../HistoryDrawer'
 import ModeBubbles from '../ModeBubbles'
-import Orb from '../Orb'
+import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
 import MessageView, { FallbackNote, Thinking, ToolLine, UserBubble } from './MessageView'
 import Markdown from '../Markdown'
@@ -37,10 +37,18 @@ function upsertTool(segments: Segment[], tool: Extract<Segment, { kind: 'tool' }
   return i < 0 ? [...segments, tool] : segments.map((s, j) => (j === i ? tool : s))
 }
 
-const copy: Record<Mode, { headline: string; placeholder: string }> = {
-  chat: { headline: "What's on your mind?", placeholder: 'Message Claude…' },
-  code: { headline: 'What are we building?', placeholder: 'Describe the code you need…' },
-  design: { headline: 'What should we shape?', placeholder: 'Describe what you want to design…' }
+const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState }> = {
+  chat: { headline: "What's on your mind?", placeholder: 'Message Claude…', orb: 'breathing' },
+  code: {
+    headline: 'What are we building?',
+    placeholder: 'Describe the code you need…',
+    orb: 'connecting'
+  },
+  design: {
+    headline: 'What should we shape?',
+    placeholder: 'Describe what you want to design…',
+    orb: 'shaping'
+  }
 }
 
 type Props = {
@@ -182,7 +190,7 @@ function ChatView(props: Props): React.JSX.Element {
       <div className="flex-1 overflow-y-auto">
         {empty ? (
           <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
-            <Orb size={112} state="active" />
+            <Orb size={128} state={copy[mode].orb} />
             <div className="text-center">
               <h1 className="text-3xl font-semibold tracking-tight text-molten-200">
                 {copy[mode].headline}
