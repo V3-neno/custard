@@ -46,6 +46,8 @@ describe('checkUrl', () => {
     ['http://api.example.com/', /https/],
     ['https://other.example.com/', /no permission/],
     ['https://127.0.0.1/', /IP addresses/],
+    ['https://intranet/', /Local/],
+    ['https://printer.internal/', /Local/],
     ['https://[::1]/', /IP addresses/],
     ['https://localhost/', /Local/],
     ['https://user:pw@api.example.com/', /credentials/],

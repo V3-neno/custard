@@ -55,7 +55,10 @@ export function isBlockedIp(ip: string): boolean {
   return true
 }
 
-export function checkUrl(raw: string, allowedHosts: string[]): URL {
+// An https URL on the public internet: default port, no credentials, a host
+// name rather than an address, and not a local name. Where it actually
+// connects is checked again by safeLookup.
+export function checkPublicUrl(raw: string): URL {
   let url: URL
   try {
     url = new URL(raw)
@@ -66,9 +69,18 @@ export function checkUrl(raw: string, allowedHosts: string[]): URL {
   if (url.username || url.password) throw new NetError('URLs with credentials are not allowed.')
   if (url.port && url.port !== '443') throw new NetError('Only the default https port is allowed.')
   const host = url.hostname.replace(/^\[|\]$/g, '')
-  if (isIP(host)) throw new NetError('Plugins must use host names, not IP addresses.')
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local'))
+  if (isIP(host)) throw new NetError('Only host names are allowed, not IP addresses.')
+  if (
+    !host.includes('.') ||
+    /(^|\.)(localhost|local|internal|lan|home\.arpa|intranet|corp)$/i.test(host)
+  )
     throw new NetError('Local host names are not allowed.')
+  return url
+}
+
+export function checkUrl(raw: string, allowedHosts: string[]): URL {
+  const url = checkPublicUrl(raw)
+  const host = url.hostname
   if (!hostAllowed(allowedHosts, host))
     throw new NetError(`This plugin has no permission to connect to ${host}.`)
   return url
@@ -82,7 +94,7 @@ export const safeLookup: LookupFunction = (hostname, options, callback) => {
     if (!addresses.length || addresses.some((a) => isBlockedIp(a.address)))
       return callback(
         new NetError(
-          `${hostname} resolves to a private or local address, which plugins can't reach.`
+          `${hostname} resolves to a private or local address, which Custard won't connect to.`
         ),
         '',
         0

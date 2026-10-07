@@ -5,6 +5,7 @@ import {
   providerNames,
   providerOf,
   type ActionRecord,
+  type WebSource,
   type ChatSettings,
   type Conversation,
   type ConversationSummary,
@@ -14,7 +15,7 @@ import HistoryDrawer from '../HistoryDrawer'
 import ModeBubbles from '../ModeBubbles'
 import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
-import MessageView, { NoticeLine, UserBubble } from './MessageView'
+import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
 import type { Workspace } from '../../../../shared/plugins'
@@ -210,6 +211,35 @@ function ChatView(props: Props): React.JSX.Element {
     return all
   }, [current])
 
+  // Where each turn ends (the message before the next thing the user wrote)
+  // mapped to its sources and its answer text.
+  const turnSources = useMemo(() => {
+    const out = new Map<number, { sources: WebSource[]; answer: string }>()
+    const msgs = current?.messages ?? []
+    const all = current?.sources ?? []
+    if (!all.length) return out
+    let start = -1
+    msgs.forEach((m, i) => {
+      if (m.role === 'user' && !isToolResults(m)) start = i
+      const next = msgs[i + 1]
+      const ends = !next || (next.role === 'user' && !isToolResults(next))
+      if (!ends || start < 0) return
+      const sources = all.filter((s) => s.turn === start)
+      if (!sources.length) return
+      const answer = msgs
+        .slice(start, i + 1)
+        .filter((x) => x.role === 'assistant')
+        .flatMap((x) =>
+          typeof x.content === 'string'
+            ? [x.content]
+            : x.content.flatMap((b) => (b.type === 'text' ? [b.text] : []))
+        )
+        .join('\n')
+      out.set(i, { sources, answer })
+    })
+    return out
+  }, [current])
+
   const notices = current?.notices ?? []
   const lastNotice = notices[notices.length - 1]
   const canContinue =
@@ -249,6 +279,12 @@ function ChatView(props: Props): React.JSX.Element {
                   <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
                     <MessageView message={m} actions={actions} />
                   </div>
+                )}
+                {turnSources.has(i) && (
+                  <SourcesList
+                    sources={turnSources.get(i)!.sources}
+                    answer={turnSources.get(i)!.answer}
+                  />
                 )}
                 {notices
                   .filter((n) => n.after === i + 1)

@@ -29,6 +29,17 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
       return `Deleted ${str(i.path)}`
     case 'fs_rename':
       return `Renamed ${str(i.from)} to ${str(i.to)}`
+    case 'web_search':
+      return `Searched the web for "${str(i.query).slice(0, 80)}"`
+    case 'web_read': {
+      let host = str(i.url)
+      try {
+        host = new URL(host).hostname
+      } catch {
+        // Keep it as written.
+      }
+      return `Read ${host}`
+    }
     case 'reference_list':
       return `Looked in the plugin docs${str(i.path) ? `: ${str(i.path)}` : ''}`
     case 'reference_read':

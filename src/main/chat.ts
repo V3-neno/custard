@@ -20,6 +20,7 @@ import { handle, on } from './ipc'
 import { pluginHost, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
 import { workspaceTools } from './workspace'
+import { isWebTool, runWebTool, webTools } from './web'
 import { repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
   chatModels,
@@ -179,6 +180,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         ...plugins.instructions
       ].join('\n\n')
     })
+  const web = webTools(model)
+  system.push({ type: 'text', text: web.prompt })
   system.push({
     type: 'text',
     text: 'Tool results start with "Not run:" when nothing was done and "Outcome unknown:" when an action was sent but its result is not known. Report these to the user as they are, and never repeat an action whose outcome is unknown without checking or asking first.'
@@ -187,6 +190,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const tools: BetaTool[] = [
     ...(vaultReady ? vaultTools : []),
     ...(workspace?.tools ?? []),
+    ...web.tools,
     ...plugins.tools
   ]
   const available = new Set(tools.map((t) => t.name))
@@ -264,6 +268,19 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       preApproved = true
     }
     if (workspace?.has(c.name)) return workspace.run(c.name, c.input)
+    if (isWebTool(c.name))
+      return runWebTool(c.name, c.input, {
+        conversation,
+        model,
+        apiKey,
+        signal: controller.signal,
+        turn: log.startLength,
+        approve: (label, input, warning) =>
+          approve(
+            { pluginId: 'custard', pluginName: 'Custard', tool: c.name, label, input },
+            warning
+          )
+      })
     if (isVaultTool(c.name))
       return vaultReady
         ? runVaultTool(vault, c.name, c.input)

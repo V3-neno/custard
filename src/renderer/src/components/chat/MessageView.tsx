@@ -3,7 +3,8 @@ import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages
 import Markdown from '../Markdown'
 import Orb from '../Orb'
 import { toolLabel } from '../../../../shared/vault'
-import type { ActionRecord, ActionStatus, Notice } from '../../../../shared/chat'
+import type { ActionRecord, ActionStatus, Notice, WebSource } from '../../../../shared/chat'
+import { splitSources } from '../../../../shared/web'
 import { ToolLabelsContext } from '../../toolLabels'
 
 // The orb is the "buffer": it glows while Claude works and holds the
@@ -104,6 +105,73 @@ export function NoticeLine({
         <button onClick={onContinue} className="text-molten-200 hover:underline">
           Continue
         </button>
+      )}
+    </div>
+  )
+}
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
+function SourceLink({ s }: { s: WebSource }): React.JSX.Element {
+  return (
+    <li className="truncate">
+      <a
+        href={s.url}
+        target="_blank"
+        rel="noreferrer"
+        title={s.citedText ? `"${s.citedText}"` : s.url}
+        className="text-ash-300 hover:text-molten-200 hover:underline"
+      >
+        {s.title || hostOf(s.url)}
+      </a>
+      <span className="text-ash-500"> · {hostOf(s.url)}</span>
+    </li>
+  )
+}
+
+// The web pages a turn used: the ones the answer cites, and the ones only
+// searched or read. Being retrieved doesn't make a page a source for a claim.
+export function SourcesList({
+  sources,
+  answer
+}: {
+  sources: WebSource[]
+  answer: string
+}): React.JSX.Element | null {
+  const [open, setOpen] = useState(false)
+  const { cited, consulted } = splitSources(sources, answer)
+  if (!cited.length && !consulted.length) return null
+  return (
+    <div className="-mt-3 text-xs" aria-label="Sources">
+      {cited.length > 0 && (
+        <>
+          <p className="mb-1 text-ash-400">Cited</p>
+          <ol className="mb-2 flex flex-col gap-0.5">
+            {cited.map((s) => (
+              <SourceLink key={s.url} s={s} />
+            ))}
+          </ol>
+        </>
+      )}
+      {consulted.length > 0 && (
+        <>
+          <button onClick={() => setOpen(!open)} className="text-ash-500 hover:text-ash-300">
+            {open ? '▾' : '▸'} Also consulted, not cited ({consulted.length})
+          </button>
+          {open && (
+            <ul className="mt-1 flex flex-col gap-0.5">
+              {consulted.map((s) => (
+                <SourceLink key={s.url} s={s} />
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </div>
   )

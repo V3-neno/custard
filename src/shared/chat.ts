@@ -79,6 +79,22 @@ export type NoticeKind = 'stopped' | 'error' | 'interrupted' | 'cut-off' | 'step
 // Shown in the chat after message `after - 1`.
 export type Notice = { after: number; kind: NoticeKind; text: string }
 
+// A web page found by Custard's search or read with web_read. Shown under the
+// answer as cited (the answer links it) or only consulted. Fields come from
+// the provider or the page; nothing is filled in.
+export type WebSource = {
+  url: string
+  // Index of the user message that started the turn.
+  turn: number
+  origin: 'search' | 'read'
+  title?: string
+  // Search results: the query, and the provider's own page date and cited
+  // passage when it gave them.
+  query?: string
+  pageAge?: string
+  citedText?: string
+}
+
 export type Conversation = ConversationSummary & {
   createdAt: number
   // Code mode only: which folder the file tools may touch. Fixed when the
@@ -90,6 +106,7 @@ export type Conversation = ConversationSummary & {
   // By tool_use id.
   actions?: Record<string, ActionRecord>
   notices?: Notice[]
+  sources?: WebSource[]
 }
 
 export type ChatEvent =

@@ -52,8 +52,9 @@ function createWindow(): void {
     mainWindow.show()
   })
 
+  // Links in answers can come from web pages, so only web links are opened.
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (/^https?:\/\//i.test(details.url)) shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
