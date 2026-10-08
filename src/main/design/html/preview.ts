@@ -313,7 +313,7 @@ export function layout(
 }
 
 function place(l: Live): void {
-  if (l.win.isDestroyed()) return
+  if (l.win.isDestroyed() || l.view.webContents?.isDestroyed() !== false) return
   const box = l.box
   if (!box || box.width <= 0 || box.height <= 0) {
     l.view.setVisible(false)
@@ -370,6 +370,7 @@ export async function showPreview(
     destroy: () => {
       if (destroyed) return
       destroyed = true
+      if (live === l) live = null
       if (l.timer) clearTimeout(l.timer)
       previews.delete(wc.id)
       // Kill the renderer first: closing one stuck in a loop can block.
