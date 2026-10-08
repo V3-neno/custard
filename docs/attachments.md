@@ -195,9 +195,12 @@ longer sent.
   so in a line under their heading. A summarizer could still invent text,
   but it has nothing from the files to repeat.
 
-  **What this doesn't cover:** the user's own words are kept (with file
-  names replaced). If the user types or pastes a file's text themselves, it
-  is treated as their words.
+  **Pasted text is ordinary chat content.** The boundary covers attached
+  files only. Text the user types or pastes into a message is their own
+  words, kept like any other message (with file names replaced), so it can
+  be captured, even if it was copied from a file. To keep such text out of
+  memory, attach the file instead, or use a Temporary chat. Settings >
+  Memory says the same.
 
 - **Opt-outs.** Memory off, Forget and temporary chats work as before.
 

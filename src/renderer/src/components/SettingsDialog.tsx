@@ -103,15 +103,20 @@ function MemorySection(): React.JSX.Element {
         <span>
           Remember automatically. After a chat where something happened (plugin actions, changes,
           tests, failures) or that went on for a while, Custard makes one short summary with your
-          provider&apos;s cheapest model and adds it to Custard/Memory.md and Custard/Activity.md in
-          your vault. Small talk and plain questions aren&apos;t saved, and neither are keys,
-          passwords, note contents or web pages.
+          provider&apos;s cheapest model and saves it as a new note in Custard/Captures in your
+          vault. Small talk and plain questions aren&apos;t saved, and neither are keys, passwords,
+          note contents or web pages.
         </span>
       </label>
       <p className="mt-2 text-xs text-ash-400">
+        Attached files are different from what you type. Custard remembers only how many files of
+        which types a chat had, never their names or contents. Text you type or paste into a message
+        is ordinary chat content and can be saved, even if you copied it from a file.
+      </p>
+      <p className="mt-2 text-xs text-ash-400">
         {settings && !settings.auto
           ? "Off: nothing new is saved, and waiting summaries are cancelled. Notes already in your vault stay until you edit them, and chats from while it was off aren't saved later."
-          : 'You can turn it off for one chat above that chat, and for a plugin in its settings. Edit or delete anything in your vault; what you delete is not added back.'}
+          : "To keep one chat out, start it as a Temporary chat from the top bar; Forget in History deletes a chat's notes. You can also turn it off for a plugin in its settings. Edit or delete anything in your vault; what you delete is not added back."}
       </p>
     </section>
   )
