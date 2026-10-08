@@ -1,11 +1,11 @@
 import { assert, createContext, response, test } from 'custard-plugin-sdk/testing'
 import plugin from '../src/index'
-import { type PlaybackMetadata } from '../src/playback'
+import { type PlaybackMetadata, type Player } from '../src/playback'
 import { makeTrack } from './helpers'
 
 // Synthetic fixtures model the reported discrepancies; they are not a capture
 // of the original live requests and cannot establish their real-world cause.
-const snapshot = (track: number, volume: number) => ({
+const snapshot = (track: number, volume: number): Player => ({
   device: { id: 'test-tv', name: 'Test TV', type: 'TV', is_active: true, is_restricted: false, supports_volume: true, volume_percent: volume },
   item: makeTrack(track), is_playing: true, progress_ms: 1000,
   actions: { disallows: {} }
