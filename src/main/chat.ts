@@ -443,7 +443,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
             outcome: 'not-run'
           }
       }
-      return workspace.run(c.name, c.input)
+      return workspace.run(c.name, c.input, controller.signal)
     }
     if (isWebTool(c.name))
       return runWebTool(c.name, c.input, {

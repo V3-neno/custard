@@ -191,6 +191,83 @@ app.whenReady().then(async () => {
       JSON.stringify(tr.map((r) => r.ok)) === '[true,false,true]',
       tr
     )
+
+    // M6: a plugin test that never ends is stopped by the timeout and by
+    // Stop, without blocking the main process, and leaves no window behind.
+    const spinCode = await (async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'custard-sbx-spin-'))
+      mkdirSync(join(dir, 'tests'))
+      writeFileSync(
+        join(dir, 'tests', 'spin.test.ts'),
+        "import { test } from 'custard-plugin-sdk/testing'\ntest('spins forever', () => { for (;;) {} })"
+      )
+      const r = await bundle(dir, SDK, { kind: 'tests', files: ['tests/spin.test.ts'] })
+      if (!r.ok) throw new Error(r.errors.join())
+      return r.code
+    })()
+    const watchMainLoop = (): (() => number) => {
+      let last = Date.now()
+      let worst = 0
+      const t = setInterval(() => {
+        const now = Date.now()
+        worst = Math.max(worst, now - last)
+        last = now
+      }, 50)
+      return () => {
+        clearInterval(t)
+        return worst
+      }
+    }
+    const settle = async (p: Promise<unknown>): Promise<string> => {
+      try {
+        await p
+        return 'finished'
+      } catch (e) {
+        return (e as Error).message
+      }
+    }
+    let stopWatch = watchMainLoop()
+    let t1 = Date.now()
+    const timedOutRun = await settle(runTestsInSandbox(spinCode, { timeoutMs: 2000 }))
+    let took = Date.now() - t1
+    let worstGap = stopWatch()
+    await new Promise((r) => setTimeout(r, 500))
+    check(
+      'a test stuck in a loop is ended by the timeout, without blocking the app',
+      /longer than 2 seconds/.test(timedOutRun) && took < 5000 && worstGap < 1000,
+      { timedOutRun, took, worstGap }
+    )
+    check(
+      'and its sandbox window is gone',
+      BrowserWindow.getAllWindows().length === 0,
+      BrowserWindow.getAllWindows().length
+    )
+    stopWatch = watchMainLoop()
+    const stop = new AbortController()
+    setTimeout(() => stop.abort(), 700)
+    t1 = Date.now()
+    const stoppedRun = await settle(
+      runTestsInSandbox(spinCode, { timeoutMs: 60_000, signal: stop.signal })
+    )
+    took = Date.now() - t1
+    worstGap = stopWatch()
+    await new Promise((r) => setTimeout(r, 500))
+    check(
+      'Stop ends a test stuck in a loop at once, without blocking the app',
+      /were stopped/.test(stoppedRun) && took < 3000 && worstGap < 1000,
+      { stoppedRun, took, worstGap }
+    )
+    check(
+      'and leaves no window behind',
+      BrowserWindow.getAllWindows().length === 0,
+      BrowserWindow.getAllWindows().length
+    )
+    const again = await runTestsInSandbox(testCode)
+    check(
+      'tests run normally afterwards',
+      JSON.stringify(again.map((r) => r.ok)) === '[true,false,true]',
+      again
+    )
   } catch (err) {
     check('suite ran', false, String((err as Error).stack ?? err))
   }

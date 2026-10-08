@@ -20,7 +20,7 @@ export type WorkspaceTools = {
   tools: BetaTool[]
   prompt: string
   has: (name: string) => boolean
-  run: (name: string, input: unknown) => Promise<Result>
+  run: (name: string, input: unknown, signal?: AbortSignal) => Promise<Result>
   // File changes need the user's approval of exactly this preview first.
   // Throws (a PathError) when the change would be refused anyway.
   preview: (name: string, input: unknown) => FilePreview | null
@@ -68,7 +68,7 @@ function internal(pluginId: string): WorkspaceTools {
       '- Each file change you make is shown to the user in full and happens only if they allow it; a declined change did nothing.',
       '- Mark every tool that changes something outside Custard as effect "write"; Custard asks the user before each call. Never put secrets in files; secret settings are config fields with secret: true.'
     ].join('\n'),
-    run: async (name, input) => {
+    run: async (name, input, signal) => {
       if (name.startsWith('fs_')) return runFileTool(boundary, name, input)
       if (name.startsWith('reference_')) return runReferenceTool(refs, name, input)
       if (name === 'plugin_validate') {
@@ -84,7 +84,7 @@ function internal(pluginId: string): WorkspaceTools {
         return { content: lines.filter(Boolean).join('\n'), isError: !v.ok }
       }
       if (name === 'plugin_test') {
-        const r = await pluginHost().test(pluginId)
+        const r = await pluginHost().test(pluginId, signal)
         const lines = [
           r.ok ? 'All checks passed.' : 'Some checks failed.',
           ...r.results.map(

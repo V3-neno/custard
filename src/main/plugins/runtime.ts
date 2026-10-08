@@ -245,17 +245,44 @@ export const createRuntime =
     return { handle, tools }
   }
 
-// Plugin tests run in a fresh sandbox with no bridge at all.
-export const runTestsInSandbox: TestRunner = async (code) => {
+// Plugin tests run in a fresh sandbox with no bridge at all. A test that
+// never finishes (a busy loop included) is ended by the timeout, by Stop
+// (`signal`), or when its renderer stops responding: the renderer process is
+// killed first, because destroying a window whose renderer is stuck can
+// block the main process.
+const TEST_TIMEOUT_MS = 30_000
+
+export const runTestsInSandbox: TestRunner = async (code, o = {}) => {
+  const timeoutMs = o.timeoutMs ?? TEST_TIMEOUT_MS
+  if (o.signal?.aborted) throw new Error('The tests were stopped before they started.')
   await lockedSession('custard-plugin-tests')
   const win = sandboxWindow('custard-plugin-tests')
+  const wc = win.webContents
+  const kill = (): void => {
+    if (!wc.isDestroyed() && !wc.isCrashed()) wc.forcefullyCrashRenderer()
+    if (!win.isDestroyed()) win.destroy()
+  }
+  let fail: (err: Error) => void = () => {}
+  const ended = new Promise<never>((_, reject) => (fail = reject))
+  ended.catch(() => {})
+  const end = (message: string): void => {
+    fail(new Error(message))
+    kill()
+  }
+  const timer = setTimeout(
+    () =>
+      end(`Tests took longer than ${Math.round(timeoutMs / 1000)} seconds, so they were stopped.`),
+    timeoutMs
+  )
+  const onAbort = (): void => end('The tests were stopped.')
+  o.signal?.addEventListener('abort', onAbort, { once: true })
+  wc.on('unresponsive', () => end('The tests stopped responding, so they were stopped.'))
+  wc.on('render-process-gone', () => end('The test sandbox ended before the tests finished.'))
   try {
-    await win.webContents.loadURL(PAGE)
-    const run = win.webContents.executeJavaScript(`${code}\n;globalThis.__custardRunTests()`)
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Tests took longer than 30 seconds.')), 30_000)
-    )
-    const results = (await Promise.race([run, timeout])) as {
+    await Promise.race([wc.loadURL(PAGE), ended])
+    const run = wc.executeJavaScript(`${code}\n;globalThis.__custardRunTests()`)
+    run.catch(() => {})
+    const results = (await Promise.race([run, ended])) as {
       name: string
       ok: boolean
       error?: string
@@ -268,7 +295,9 @@ export const runTestsInSandbox: TestRunner = async (code) => {
         }))
       : []
   } finally {
-    if (!win.isDestroyed()) win.destroy()
+    clearTimeout(timer)
+    o.signal?.removeEventListener('abort', onAbort)
+    kill()
   }
 }
 

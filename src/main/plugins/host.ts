@@ -63,7 +63,10 @@ export type RuntimeFactory = (o: {
   onExit: (reason: string) => void
 }) => Promise<{ handle: RuntimeHandle; tools: string[] }>
 
-export type TestRunner = (code: string) => Promise<{ name: string; ok: boolean; error?: string }[]>
+export type TestRunner = (
+  code: string,
+  o?: { signal?: AbortSignal; timeoutMs?: number }
+) => Promise<{ name: string; ok: boolean; error?: string }[]>
 
 export type CapResult = { ok: true; value: unknown } | { ok: false; error: string }
 
@@ -338,7 +341,7 @@ export class PluginHost {
 
   // Runs the plugin's tests, and a load check of the plugin itself, in fresh
   // sandboxes with no capabilities.
-  async test(id: string): Promise<TestReport> {
+  async test(id: string, signal?: AbortSignal): Promise<TestReport> {
     const v = await this.validate(id)
     if (!v.ok || !v.buildId) return { ok: false, results: [], error: v.errors.join('\n') }
     const results: TestReport['results'] = []
@@ -370,7 +373,7 @@ export class PluginHost {
       const b = await bundle(this.sourceDir(id), this.d.sdkDir, { kind: 'tests', files: testFiles })
       if (!b.ok) return { ok: false, results, error: b.errors.join('\n') }
       try {
-        results.push(...(await this.d.testRunner(b.code)))
+        results.push(...(await this.d.testRunner(b.code, { signal })))
       } catch (err) {
         return { ok: false, results, error: message(err) }
       }
