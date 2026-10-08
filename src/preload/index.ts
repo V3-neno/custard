@@ -24,7 +24,8 @@ import type {
   DesignEvent,
   DesignSettings,
   ExportResult,
-  Job
+  Job,
+  SkillChange
 } from '../shared/design'
 import type {
   PluginReview,
@@ -132,6 +133,12 @@ const custard = {
     },
     capabilities: (): Promise<CapabilityReport> => ipcRenderer.invoke('design:capabilities'),
     // Workstream A registers these in main/design/html.
+    // The HTML of a version's index.html, for the Code view (text, ≤ 2 MB).
+    source: (chat: string, artifactId: string, versionId: string): Promise<string | null> =>
+      ipcRenderer.invoke('design:source', chat, artifactId, versionId),
+    // Whether the skills behind a version changed since it was made.
+    skillChanges: (chat: string, artifactId: string, versionId: string): Promise<SkillChange[]> =>
+      ipcRenderer.invoke('design:skills', chat, artifactId, versionId),
     export: (chat: string, artifactId: string, versionId: string): Promise<ExportResult> =>
       ipcRenderer.invoke('design:export', chat, artifactId, versionId),
     preview: {

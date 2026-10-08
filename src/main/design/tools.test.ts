@@ -9,6 +9,7 @@ import {
   designTools,
   jobAction,
   runDesignTool,
+  setDesignToolHandler,
   type DesignService,
   type DesignToolContext
 } from './tools'
@@ -134,6 +135,16 @@ describe('design settings', () => {
 describe('design tools', () => {
   it('offers only tools with a handler (design_html waits for Workstream A)', () => {
     expect(designTools().map((t) => t.name)).toEqual(['design_media', 'design_jobs'])
+  })
+
+  it('a handler can bring its own schema, under its own name', () => {
+    setDesignToolHandler('design_html', async () => ({ content: 'ok', isError: false }), {
+      name: 'other',
+      description: 'x',
+      input_schema: { type: 'object', properties: { files: { type: 'array' } } }
+    })
+    const html = designTools().find((t) => t.name === 'design_html')
+    expect(html?.input_schema.properties).toHaveProperty('files')
   })
 
   it('request → approval → job → result → version, through the common path', async () => {

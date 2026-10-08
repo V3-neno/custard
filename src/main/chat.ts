@@ -86,11 +86,16 @@ import { design } from './design'
 import { designTools, runDesignTool } from './design/tools'
 import type { MediaReference } from '../shared/design'
 
-// Files attached in this chat, as Design references. Only images, only from
-// this chat, and never one Custard found missing or changed.
+// Files attached in this chat, as Design references, by id or exact file
+// name (the model sees names). Only images, only from this chat, and never
+// one Custard found missing or changed.
 function designReferences(c: Conversation, ids: string[]): MediaReference[] {
   return ids.map((id) => {
-    const a = c.attachments?.find((x) => x.id === id)
+    const all = c.attachments ?? []
+    const byName = all.filter((x) => x.name === id)
+    if (byName.length > 1)
+      throw new Error(`More than one attached file is called ${id}, so nothing was sent.`)
+    const a = all.find((x) => x.id === id) ?? byName[0]
     if (!a) throw new Error(`There is no attached file ${id} in this chat, so nothing was sent.`)
     if (a.missing) throw new Error(`${a.name} is no longer available, so nothing was sent.`)
     if (a.kind !== 'image') throw new Error(`${a.name} isn't an image, so it can't be a reference.`)
@@ -147,7 +152,10 @@ const MODE_PROMPTS: Record<Mode, string> = {
     'explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
   design:
     'The user is in Design mode. Act as a product and visual designer: think about layout, hierarchy, color, typography, spacing and interaction states. ' +
-    'When showing UI, give self-contained HTML with inline CSS (or React with Tailwind when asked) in fenced code blocks, and describe the design choices.' +
+    'When the user wants a page, mockup or UI, make it with design_html: send the complete document (inline CSS and JS, or local files through `files`), never a fragment, and never only a code block. ' +
+    'Change an output by sending a new complete version with `artifact` (and `from` for an older one); `relation: "variation"` for another option beside it. ' +
+    'Before generating, read any skill whose description fits and list each one you considered in `skills` with its strength (explicit when the user named it, clear, or similar); if design_html answers with a question, ask the user that question and stop. ' +
+    "The user's own words override skill defaults. Report only the checks design_html says ran, and describe the design choices briefly." +
     USE_ONLY,
   skills: [
     "The user is in Skills mode. You curate their Obsidian vault, Custard's long-term brain, so that future answers in Chat, Code and Design get better.",
