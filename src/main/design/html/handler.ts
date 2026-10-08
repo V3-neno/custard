@@ -250,13 +250,11 @@ export function htmlHandler(deps: HtmlDeps): DesignToolHandler {
         `${plural(assets.external, 'external reference')} won't load: the preview has no network.`
       )
     if (deps.check) {
-      const r = await deps
-        .check(chat, artifact.id, versionId)
-        .catch((err): PreviewCheck => ({
-          loaded: false,
-          reason: String(err?.message ?? err),
-          errors: []
-        }))
+      const r = await deps.check(chat, artifact.id, versionId).catch((err): PreviewCheck => ({
+        loaded: false,
+        reason: String(err?.message ?? err),
+        errors: []
+      }))
       if (r.loaded) {
         checks.push(`Preview loaded in the sandbox in ${(r.ms / 1000).toFixed(1)} s.`)
         checks.push(

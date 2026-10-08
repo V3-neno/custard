@@ -56,7 +56,7 @@ export function checkDocument(html: string): void {
       `The document is over ${HTML_LIMITS.htmlBytes / 1_000_000} MB; split it into local files.`
     )
   const start = html
-    .replace(/^﻿/, '')
+    .replace(/^\uFEFF/, '')
     .replace(/^(\s|<!--[\s\S]*?-->)+/, '')
     .slice(0, 20)
     .toLowerCase()

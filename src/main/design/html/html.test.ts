@@ -10,7 +10,12 @@ import {
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { defaultDesignSettings, type DesignEvent } from '../../../shared/design'
+import {
+  defaultDesignSettings,
+  type Artifact,
+  type DesignEvent,
+  type Version
+} from '../../../shared/design'
 import { ArtifactStore } from '../store'
 import type { DesignService, DesignToolContext } from '../tools'
 import { checkAssets, checkDocument, HtmlError, planFiles } from './document'
@@ -25,7 +30,7 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 const CHAT = '11111111-2222-3333-4444-555555555555'
-const PAGE = (body = 'Hello') =>
+const PAGE = (body = 'Hello'): string =>
   `<!doctype html><html><head><title>t</title></head><body>${body}</body></html>`
 
 function service(): DesignService & { events: DesignEvent[] } {
@@ -90,7 +95,7 @@ const deps = (over: Partial<HtmlDeps> = {}): HtmlDeps => ({
 describe('complete documents only', () => {
   it('accepts a whole document and refuses fragments and cut-off ones', () => {
     expect(() => checkDocument(PAGE())).not.toThrow()
-    expect(() => checkDocument(`﻿<!-- hi -->\n<html><body></body></html>\n`)).not.toThrow()
+    expect(() => checkDocument(`\uFEFF<!-- hi -->\n<html><body></body></html>\n`)).not.toThrow()
     expect(() => checkDocument('<div>hi</div>')).toThrow(/fragment/)
     expect(() => checkDocument('<!doctype html><html><body>cut')).toThrow(/incomplete/)
     expect(() => checkDocument(`<!doctype html><html>${'x'.repeat(2_000_001)}</html>`)).toThrow(
@@ -99,7 +104,7 @@ describe('complete documents only', () => {
   })
 
   it('checks local file paths and types', () => {
-    const plan = (files: { path: string; content: string }[]) =>
+    const plan = (files: { path: string; content: string }[]): ReturnType<typeof planFiles> =>
       planFiles({ html: PAGE(), files, references: [], inherited: [] })
     expect(plan([{ path: './css/site.css', content: 'a{}' }]).map((f) => f.path)).toEqual([
       'index.html',
@@ -333,7 +338,7 @@ describe('preview serving', () => {
     const t = { chat: CHAT, artifactId: a.id, versionId: a.versions[0].id }
     const missed: string[] = []
     const serve = serveVersion(s.artifacts, t, 'abc.preview.invalid', (p) => missed.push(p))
-    const get = (url: string, method = 'GET') => serve({ url, method })
+    const get = (url: string, method = 'GET'): Response => serve({ url, method })
     const index = get('https://abc.preview.invalid/')
     expect(index.status).toBe(200)
     expect(index.headers.get('content-security-policy')).toBe(PREVIEW_CSP)
@@ -393,13 +398,15 @@ describe('preview serving', () => {
 })
 
 describe('export', () => {
-  async function made(files: { path: string; content: string }[] = []) {
+  async function made(
+    files: { path: string; content: string }[] = []
+  ): Promise<{ s: DesignService; a: Artifact; v: Version }> {
     const s = service()
     await htmlHandler(deps())(s, { name: 'My Page!', html: PAGE(), files }, ctx())
     const a = s.artifacts.list(CHAT).at(-1)!
     return { s, a, v: a.versions[0] }
   }
-  const out = () => {
+  const out = (): string => {
     const d = join(root, 'out')
     mkdirSync(d, { recursive: true })
     return d
