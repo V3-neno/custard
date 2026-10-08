@@ -14,7 +14,7 @@ import { discoverCapabilities } from '../capabilities'
 import { JobTracker } from '../jobs'
 import { validateCapabilities } from '../media'
 import { ArtifactStore, JobStore } from '../store'
-import { runDesignTool, type DesignService } from '../tools'
+import { jobAction, runDesignTool, type DesignService } from '../tools'
 import { DEFAULT_IMAGE_MODEL, OPENAI_IMAGE_MODELS, OPENAI_IMAGES_ID } from './models'
 import { mapError, OpenAIImages, remoteIdFor, sniffImage, type OpenAIImagesDeps } from './openai'
 import { ResultStore } from './results'
@@ -479,7 +479,18 @@ describe('OpenAI Images: through design_media', () => {
     expect(fake.calls).toHaveLength(1)
     const job = s.jobs.list()[0]
     expect(job.state).toBe('completed')
-    expect(await p.result(job.remoteId!)).toHaveLength(1)
+    // Saved on its version in the same call (B1), without another request.
+    expect(r.content).toMatch(/^Made by OpenAI Images/)
+    const a = s.artifacts.list('11111111-2222-3333-4444-555555555555')[0]
+    expect(a.kind).toBe('image')
+    const v = a.versions[0]
+    expect(v).toMatchObject({
+      status: 'succeeded',
+      source: { kind: 'image-provider', provider: 'openai', model: DEFAULT_IMAGE_MODEL }
+    })
+    expect(v.files).toMatchObject([{ path: 'image.png', mime: 'image/png', size: PNG.length }])
+    expect(a.selected).toBe(v.id)
+    expect(fake.calls).toHaveLength(1)
   })
 
   it('declined: nothing is sent', async () => {
@@ -510,5 +521,54 @@ describe('OpenAI Images: through design_media', () => {
     )
     expect(r.outcome).toBe('not-run')
     expect(fake.calls).toHaveLength(0)
+  })
+})
+
+describe('OpenAI Images: restart', () => {
+  it('an image made before a restart is saved on its version without sending again', async () => {
+    const CHAT = '11111111-2222-3333-4444-555555555555'
+    const { p, fake } = provider()
+    const store = new JobStore(join(root, 'jobs.json'))
+    const artifacts = new ArtifactStore(join(root, 'design'))
+    const before: DesignService = {
+      artifacts,
+      jobs: new JobTracker({ provider: () => p, save: (j) => store.save(j) }),
+      providers: () => [p],
+      settings: () => ({
+        ...defaultDesignSettings,
+        image: { provider: OPENAI_IMAGES_ID, model: null }
+      }),
+      failures: [],
+      emit: () => {}
+    }
+    // Simulate Custard stopping after OpenAI answered but before the image
+    // reached its version: the job is completed, the version still pending.
+    const { artifact, version } = await import('../versions').then((v) =>
+      v.createArtifact({
+        conversationId: CHAT,
+        name: 'Kettle',
+        kind: 'image',
+        source: p.info().source,
+        skills: []
+      })
+    )
+    artifacts.save(artifact)
+    const job = before.jobs.create({
+      providerId: OPENAI_IMAGES_ID,
+      request: gen(),
+      requestedBy: { conversationId: CHAT, messageIndex: 0 },
+      target: { artifactId: artifact.id, versionId: version.id }
+    })
+    await before.jobs.submit(job.id)
+    expect(fake.calls).toHaveLength(1)
+
+    const after: DesignService = {
+      ...before,
+      jobs: new JobTracker({ provider: () => p, save: (j) => store.save(j) }, store.load())
+    }
+    const r = await jobAction(after, CHAT, 'check', job.id)
+    expect(r.job.state).toBe('completed')
+    expect(artifacts.get(CHAT, artifact.id)?.versions[0].status).toBe('succeeded')
+    expect(fake.calls).toHaveLength(1)
   })
 })
