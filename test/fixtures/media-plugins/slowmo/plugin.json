@@ -1,0 +1,131 @@
+{
+  "manifestVersion": 1,
+  "id": "slowmo",
+  "name": "Slowmo (test fixture)",
+  "description": "Development-only video provider for tests. Makes no real video; returns a fixed test pattern.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "src/index.ts",
+  "permissions": { "network": ["media.example.com"], "openExternal": [], "storage": true },
+  "config": {},
+  "tools": [
+    {
+      "name": "submit",
+      "description": "Starts a test video job.",
+      "effect": "write",
+      "label": "Start a test video",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": ["video.text-to-video", "video.image-to-video"]
+          },
+          "prompt": { "type": "string", "maxLength": 4000 },
+          "idempotencyKey": { "type": "string", "maxLength": 100 },
+          "durationSeconds": { "type": "number", "minimum": 1, "maximum": 8 },
+          "references": {
+            "type": "array",
+            "maxItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "mime": { "type": "string" },
+                "base64": { "type": "string" }
+              },
+              "required": ["name", "mime", "base64"]
+            }
+          }
+        },
+        "required": ["operation", "prompt", "idempotencyKey"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "status",
+      "description": "Reads a test video job's status.",
+      "effect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "remoteId": { "type": "string", "maxLength": 200 } },
+        "required": ["remoteId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "result",
+      "description": "Gets a finished test video.",
+      "effect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "remoteId": { "type": "string", "maxLength": 200 } },
+        "required": ["remoteId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cancel",
+      "description": "Cancels a test video job.",
+      "effect": "write",
+      "label": "Cancel a test video",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "remoteId": { "type": "string", "maxLength": 200 } },
+        "required": ["remoteId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "jobs",
+      "description": "Lists this fixture's test jobs (for tests).",
+      "effect": "read",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    }
+  ],
+  "media": [
+    {
+      "id": "video",
+      "name": "Slowmo test video",
+      "capabilities": [
+        {
+          "operation": "video.text-to-video",
+          "formats": ["video/webm"],
+          "durations": { "min": 1, "max": 8 },
+          "progress": true,
+          "cancel": true,
+          "idempotency": false,
+          "minPollSeconds": 1,
+          "constraints": ["Test fixture: always returns the same 2-second pattern."],
+          "tools": {
+            "submit": "submit",
+            "status": "status",
+            "result": "result",
+            "cancel": "cancel"
+          }
+        },
+        {
+          "operation": "video.image-to-video",
+          "references": {
+            "kinds": ["image"],
+            "maxCount": 1,
+            "maxBytes": 1048576,
+            "formats": ["image/png", "image/jpeg"]
+          },
+          "formats": ["video/webm"],
+          "durations": { "min": 1, "max": 8 },
+          "progress": true,
+          "cancel": true,
+          "idempotency": false,
+          "minPollSeconds": 1,
+          "tools": {
+            "submit": "submit",
+            "status": "status",
+            "result": "result",
+            "cancel": "cancel"
+          }
+        }
+      ]
+    }
+  ]
+}

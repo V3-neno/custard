@@ -9,6 +9,7 @@ import {
   type PluginStatus,
   type TestReport
 } from '../../shared/plugins'
+import type { PluginMediaSpec } from '../../shared/design'
 import { formatLabel } from '../../shared/vault'
 import { WIDGET_LIMITS, type WidgetSpec } from '../../shared/widgets'
 import { resolveInside } from '../workspace/paths'
@@ -114,9 +115,36 @@ const fail = (content: string): ToolOutcome => ({ content, isError: true })
 const notRun = (content: string): ToolOutcome => ({ content, isError: true, outcome: 'not-run' })
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
+// Media tools' `data` (job references, status, results with inline files) is
+// bigger than a widget's. It goes only to Design's media adapter, which
+// checks it again; never to the model or a widget.
+export const MEDIA_DATA_BYTES = 48 * 1024 * 1024
+
+// Tools a plugin's `media` declaration names: Design's job flow is the only
+// way to call them, so they aren't offered to the model as plain tools.
+export const mediaTools = (m: PluginManifest): Set<string> =>
+  new Set(
+    (m.media ?? []).flatMap((p) =>
+      p.capabilities.flatMap((c) => Object.values(c.tools).filter(Boolean) as string[])
+    )
+  )
+
+export type MediaRole = 'submit' | 'status' | 'result' | 'cancel'
+
+export type MediaEntry = {
+  pluginId: string
+  pluginName: string
+  buildId: string
+  spec: PluginMediaSpec
+  // ready only when enabled, every permission granted, required settings
+  // set and, with an account, signed in.
+  ready: boolean
+  needs?: string
+}
+
 // A tool's `data` for widgets: plain JSON, bounded, and dropped if it holds a
 // secret value (redaction would garble it, so it isn't attempted).
-function widgetData(data: unknown, secrets: string[]): unknown {
+function widgetData(data: unknown, secrets: string[], limit = WIDGET_LIMITS.dataBytes): unknown {
   if (data === undefined) return undefined
   let json: string | undefined
   try {
@@ -124,7 +152,7 @@ function widgetData(data: unknown, secrets: string[]): unknown {
   } catch {
     return undefined
   }
-  if (json === undefined || json.length > WIDGET_LIMITS.dataBytes) return undefined
+  if (json === undefined || json.length > limit) return undefined
   if (redact(json, secrets) !== json) return undefined
   return JSON.parse(json)
 }
@@ -752,7 +780,9 @@ export class PluginHost {
       const st = this.d.store.state(id)
       if (!st.enabled || !st.active) continue
       const { manifest, instructions: text } = this.build(id, st.active.buildId)
+      const media = mediaTools(manifest)
       for (const t of manifest.tools) {
+        if (media.has(t.name)) continue
         const name = fullToolName(id, t.name)
         tools.push({
           name,
@@ -793,6 +823,98 @@ export class PluginHost {
           })
     }
     return out
+  }
+
+  // Media providers declared by active builds, enabled or not, so Design can
+  // say why one isn't ready. Not-activated plugins aren't listed: nothing of
+  // theirs has been reviewed.
+  mediaCatalog(): MediaEntry[] {
+    const out: MediaEntry[] = []
+    for (const id of this.d.store.ids()) {
+      const st = this.d.store.state(id)
+      if (!st.active) continue
+      let manifest: PluginManifest
+      try {
+        manifest = this.build(id, st.active.buildId).manifest
+      } catch {
+        continue
+      }
+      for (const spec of manifest.media ?? []) {
+        const missingPerm = permissionsOf(manifest).some((p) => !st.granted.includes(p))
+        const config = this.d.store.config(id)
+        const unset = Object.entries(manifest.config).filter(
+          ([k, f]) =>
+            f.required &&
+            (f.secret
+              ? !this.d.store.secretsLocked(id) && !this.d.store.secrets(id)[k]
+              : config[k] === undefined && f.default === undefined)
+        )
+        const needs = !st.enabled
+          ? `the ${manifest.name} plugin is turned off.`
+          : missingPerm
+            ? `the ${manifest.name} plugin is missing approved permissions.`
+            : this.d.store.secretsLocked(id)
+              ? `the ${manifest.name} plugin's saved secrets can't be read.`
+              : unset.length
+                ? `set ${unset.map(([, f]) => f.title).join(', ')} in the ${manifest.name} plugin's settings.`
+                : manifest.auth && !this.d.store.secrets(id)[OAUTH_KEY]
+                  ? `connect your account in the ${manifest.name} plugin's settings.`
+                  : undefined
+        out.push({
+          pluginId: id,
+          pluginName: manifest.name,
+          buildId: st.active.buildId,
+          spec,
+          ready: !needs,
+          ...(needs ? { needs } : {})
+        })
+      }
+    }
+    return out
+  }
+
+  // The hosts a plugin's approved network permission reaches now: the only
+  // places a media result URL may be fetched from.
+  mediaHosts(id: string): string[] {
+    const { manifest, granted } = this.activeManifest(id)
+    return this.allowedHosts(manifest, granted)
+  }
+
+  // Runs one of a media provider's declared tools for Design, through the
+  // same checks as any tool call (invoke). The tool must be the one the
+  // active build declares for this provider, operation and role, so Design
+  // can't reach any other tool this way. `preApproved` is Design's own
+  // approval of this exact call (see docs/design/MEDIA-PLUGINS.md).
+  async invokeMedia(
+    a: {
+      pluginId: string
+      providerId: string
+      operation: string
+      role: MediaRole
+      input: unknown
+    },
+    o: {
+      signal: AbortSignal
+      approve: (r: ApprovalRequest) => Promise<boolean>
+      preApproved?: boolean
+    }
+  ): Promise<ToolOutcome> {
+    const st = this.d.store.state(a.pluginId)
+    if (!st.enabled || !st.active)
+      return notRun(`The ${a.pluginId} plugin is not enabled, so nothing was done.`)
+    const { manifest } = this.build(a.pluginId, st.active.buildId)
+    const spec = manifest.media?.find((p) => p.id === a.providerId)
+    const cap = spec?.capabilities.find((c) => c.operation === a.operation)
+    const tool = cap?.tools[a.role]
+    if (!spec || !cap || !tool)
+      return notRun(`${manifest.name} no longer offers this, so nothing was done.`)
+    if (!st.granted.includes(`media:${spec.id}`))
+      return notRun(`${spec.name} isn't approved for Design, so nothing was done.`)
+    const name = fullToolName(a.pluginId, tool)
+    const snapshot: ToolSnapshot = new Map([
+      [name, { pluginId: a.pluginId, buildId: st.active.buildId }]
+    ])
+    return this.invoke(name, a.input, { ...o, snapshot, dataLimit: MEDIA_DATA_BYTES })
   }
 
   widgetCode(id: string, buildId: string, widgetId: string): string | null {
@@ -869,6 +991,8 @@ export class PluginHost {
       // The user already approved this exact call (a repeat of an action
       // whose outcome was unknown), so don't ask again.
       preApproved?: boolean
+      // Media calls only (invokeMedia): a larger bound on `data`.
+      dataLimit?: number
     }
   ): Promise<ToolOutcome> {
     const offered = o.snapshot.get(name)
@@ -949,7 +1073,7 @@ export class PluginHost {
         controller.signal
       )
       const content = redact(String(r.content).slice(0, MAX_RESULT_CHARS), secrets)
-      const data = widgetData(r.data, secrets)
+      const data = widgetData(r.data, secrets, o.dataLimit)
       if (r.isError) this.log(id, `${tool.name}: ${content.slice(0, 200)}`)
       const outcome = r.notSent
         ? 'not-run'
