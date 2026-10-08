@@ -64,6 +64,15 @@ const live = new Map<string, Conversation>()
 export const holdConversation = (c: Conversation): void => void live.set(c.id, c)
 export const releaseConversation = (id: string): void => void live.delete(id)
 
+// How many messages a conversation has now, counting a turn in progress.
+export function messageCount(id: string): number {
+  try {
+    return (live.get(id) ?? getConversation(id))?.messages.length ?? 0
+  } catch {
+    return 0
+  }
+}
+
 // Applies a change to the current copy of a conversation and saves it.
 export function updateConversation(
   id: string,

@@ -29,6 +29,10 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
       return `Deleted ${str(i.path)}`
     case 'fs_rename':
       return `Renamed ${str(i.from)} to ${str(i.to)}`
+    case 'widget_show':
+      return `Showed the ${str(i.widget) || 'plugin'} widget`
+    case 'widget_hide':
+      return 'Hid the widget'
     case 'web_search':
       return `Searched the web for "${str(i.query).slice(0, 80)}"`
     case 'web_read': {

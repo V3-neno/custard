@@ -10,6 +10,7 @@ import { memory, registerMemoryHandlers } from './memory'
 import { handle } from './ipc'
 import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
 import { isPluginContents } from './plugins/runtime'
+import { registerWidgetHandlers, widgets } from './widgets'
 import {
   deleteConversation,
   getChatSettings,
@@ -102,6 +103,7 @@ app.whenReady().then(() => {
         'This chat is still answering. Stop it or wait for it to finish, then delete it.'
       )
     deleteConversation(id)
+    widgets().conversationDeleted(id)
     // The chat's attached files go with it.
     await attachments().deleteChat(id)
   })
@@ -146,6 +148,7 @@ app.whenReady().then(() => {
   registerAttachmentHandlers()
   registerPluginHandlers()
   registerMemoryHandlers()
+  registerWidgetHandlers()
 
   createWindow()
   // Plugins start after the window so a slow plugin can't delay the app.

@@ -21,6 +21,7 @@ import { SentFiles } from './Attachments'
 import { ATTACHMENT_LIMITS, type DraftAttachment } from '../../../../shared/attachments'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
+import WidgetSlot from './WidgetSlot'
 import { cleanError } from '../settings/ui'
 import {
   CompactionLine,
@@ -531,6 +532,11 @@ function ChatView(props: Props): React.JSX.Element {
         {error && !(overflow && showLength) && (
           <div className="mb-2 px-2 text-sm text-ember-600">{error}</div>
         )}
+        <WidgetSlot
+          conversationId={current?.id ?? null}
+          requestId={live?.requestId ?? null}
+          provider={providerOf(settings.model)}
+        />
         {mode === 'code' && (
           <WorkspaceBar
             fixed={current ? current.workspace : null}

@@ -92,6 +92,10 @@ Unknown fields are errors, so a typo can't silently drop a restriction.
 - `apiHosts` lists the exact hosts that receive the token, and each must also be in `permissions.network`.
 - The redirect URI to register with the provider is `http://127.0.0.1:<redirectPort><redirectPath>`.
 
+## Widgets
+
+`widgets` (optional) declares UI the plugin draws next to the message box. Each widget needs its own permission, `widget:<id>`. The fields, the widget API and its rules are in [WIDGETS.md](WIDGETS.md).
+
 ## Permissions as the user sees them
 
 Activation shows each requested permission in plain words, and the user ticks every new one:
@@ -103,5 +107,6 @@ Activation shows each requested permission in plain words, and the user ticks ev
 | `storage`                                    | Store its own data                                |
 | `account:<host>` and `account-scope:<scope>` | Sign in to an account, and each scope it asks for |
 | `action:<tool>`                              | Run a write tool                                  |
+| `widget:<id>`                                | Show that widget in chats                         |
 
 Grants are stored per plugin and shrink to what the active version asks for. An update that asks for anything new must be approved again. Rolling back to a version that needs a permission since dropped also asks again.

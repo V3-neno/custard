@@ -14,6 +14,7 @@ import type {
   SendChatRequest
 } from '../shared/chat'
 import type { VaultInfo } from '../shared/vault'
+import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision } from '../shared/chat'
 import type {
@@ -82,6 +83,22 @@ const custard = {
         cb(u)
       ipcRenderer.on('memory:update', listener)
       return () => ipcRenderer.removeListener('memory:update', listener)
+    }
+  },
+  // Plugin widgets next to the message box (see main/widgets).
+  widgets: {
+    display: (d: WidgetDisplay): void => ipcRenderer.send('widgets:display', d),
+    bounds: (b: WidgetBounds): void => ipcRenderer.send('widgets:bounds', b),
+    dismiss: (instanceId: string): Promise<void> =>
+      ipcRenderer.invoke('widgets:dismiss', instanceId),
+    presentation: (instanceId: string, p: WidgetPresentation): Promise<void> =>
+      ipcRenderer.invoke('widgets:presentation', instanceId, p),
+    decide: (approvalId: string, allow: boolean): Promise<void> =>
+      ipcRenderer.invoke('widgets:decide', approvalId, allow),
+    onState: (cb: (view: WidgetView | null) => void): (() => void) => {
+      const listener = (_: unknown, v: WidgetView | null): void => cb(v)
+      ipcRenderer.on('widgets:state', listener)
+      return () => ipcRenderer.removeListener('widgets:state', listener)
     }
   },
   security: {

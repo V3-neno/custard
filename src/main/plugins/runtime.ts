@@ -32,7 +32,7 @@ const seconds = (ms: number): string => {
 
 const locked = new WeakSet<Session>()
 
-async function lockedSession(partition: string): Promise<Session> {
+export async function lockedSession(partition: string): Promise<Session> {
   const ses = session.fromPartition(partition, { cache: false })
   if (locked.has(ses)) return ses
   ses.webRequest.onBeforeRequest((d, cb) => cb({ cancel: !d.url.startsWith('data:') }))
@@ -46,36 +46,46 @@ async function lockedSession(partition: string): Promise<Session> {
   return ses
 }
 
-function sandboxWindow(partition: string, preload?: string): BrowserWindow {
-  const win = new BrowserWindow({
-    show: false,
-    width: 200,
-    height: 200,
-    webPreferences: {
-      partition,
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      nodeIntegrationInSubFrames: false,
-      webSecurity: true,
-      webviewTag: false,
-      spellcheck: false,
-      javascript: true,
-      webgl: false,
-      images: false,
-      navigateOnDragDrop: false,
-      backgroundThrottling: false,
-      devTools: false,
-      ...(preload ? { preload } : {})
-    }
-  })
-  const wc = win.webContents
+// The web preferences every plugin sandbox uses (plugin code and widgets).
+export const sandboxPreferences = (
+  partition: string,
+  preload?: string
+): Electron.WebPreferences => ({
+  partition,
+  sandbox: true,
+  contextIsolation: true,
+  nodeIntegration: false,
+  nodeIntegrationInSubFrames: false,
+  webSecurity: true,
+  webviewTag: false,
+  spellcheck: false,
+  javascript: true,
+  webgl: false,
+  images: false,
+  navigateOnDragDrop: false,
+  backgroundThrottling: false,
+  devTools: false,
+  ...(preload ? { preload } : {})
+})
+
+// No new windows, navigation, redirects, webviews or UDP; no sound.
+export function lockContents(wc: WebContents): void {
   wc.setWindowOpenHandler(() => ({ action: 'deny' }))
   wc.on('will-navigate', (e) => e.preventDefault())
   wc.on('will-redirect', (e) => e.preventDefault())
   wc.on('will-attach-webview', (e) => e.preventDefault())
   wc.setWebRTCIPHandlingPolicy('disable_non_proxied_udp')
   wc.setAudioMuted(true)
+}
+
+function sandboxWindow(partition: string, preload?: string): BrowserWindow {
+  const win = new BrowserWindow({
+    show: false,
+    width: 200,
+    height: 200,
+    webPreferences: sandboxPreferences(partition, preload)
+  })
+  lockContents(win.webContents)
   return win
 }
 
@@ -102,10 +112,12 @@ function wireIpc(): void {
     const inst = instances.get(e.sender.id)
     const done = inst?.results.get(String(callId))
     if (!done) return
-    const res = (r ?? {}) as { content?: unknown; isError?: unknown }
+    const res = (r ?? {}) as { content?: unknown; isError?: unknown; data?: unknown }
     done({
       content: typeof res.content === 'string' ? res.content : 'The plugin returned no result.',
-      isError: res.isError !== false
+      isError: res.isError !== false,
+      // For the plugin's widgets only; checked by the host (see invoke).
+      ...(res.data !== undefined ? { data: res.data } : {})
     })
   })
   ipcMain.handle(

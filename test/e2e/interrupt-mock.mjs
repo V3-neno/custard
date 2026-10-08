@@ -194,6 +194,8 @@ http
       anth.push({
         tools: (b.tools ?? []).map((t) => t.name),
         toolTypes: (b.tools ?? []).map((t) => t.type ?? 'custom'),
+        widgets: (b.tools ?? []).find((t) => t.name === 'widget_show')?.input_schema.properties
+          .widget.enum,
         system: b.system,
         messages: b.messages
       })
@@ -265,8 +267,18 @@ http
         [/note test/, 'note'],
         [/append test/, 'append']
       ].find(([r]) => r.test(ask))?.[1]
+      // Plugin widget checks (test/e2e/widgets.mjs).
+      const widget = [
+        [/widget tally test/, 'wtally'],
+        [/widget gauge test/, 'wgauge'],
+        [/widget update test/, 'wupdate'],
+        [/widget hide test/, 'whide'],
+        [/widget crash test/, 'wcrash'],
+        [/widget hang test/, 'whang']
+      ].find(([r]) => r.test(ask))?.[1]
       const key =
         hardening ??
+        widget ??
         (/stop test/.test(ask)
           ? 'stop'
           : /try again/.test(ask)
@@ -511,6 +523,24 @@ http
             tool('vault_append', { path: 'Areas/Music Preferences.md', content: 'APPENDED-9001' }),
           'Tried to append.'
         ],
+        // Plugin widgets: each shows (or hides) one, then answers.
+        wtally: [
+          () => tool('widget_show', { widget: 'tally/counter', input: { label: 'Cups' } }),
+          'Here is the tally.'
+        ],
+        wgauge: [
+          () =>
+            tool('widget_show', { widget: 'gauge/meter', input: { value: 42, caption: 'Load' } }),
+          'Here is the meter.'
+        ],
+        wupdate: [
+          () =>
+            tool('widget_show', { widget: 'gauge/meter', input: { value: 80, caption: 'Load' } }),
+          'Updated the meter.'
+        ],
+        whide: [() => tool('widget_hide', {}), 'Hid it.'],
+        wcrash: [() => tool('widget_show', { widget: 'broken/crash' }), 'Showed it.'],
+        whang: [() => tool('widget_show', { widget: 'broken/hang' }), 'Showed it.'],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]

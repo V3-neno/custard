@@ -6,6 +6,12 @@ import {
   type ToolSpec
 } from '../../shared/plugins'
 import { checkSchema } from './schema'
+import {
+  SUPPORTED_WIDGET_API_VERSIONS,
+  WIDGET_LIMITS,
+  type WidgetPresentation,
+  type WidgetSpec
+} from '../../shared/widgets'
 
 // Mechanical checks on plugin.json. Passing them means the manifest is well
 // formed and internally consistent, not that the plugin's code is safe or
@@ -249,6 +255,109 @@ function checkAuth(
   return a as OAuthSpec
 }
 
+export const WIDGET_ID = /^[a-z][a-z0-9-]{0,30}$/
+
+function checkWidgets(widgets: unknown, tools: ToolSpec[], errors: string[]): WidgetSpec[] {
+  if (widgets === undefined) return []
+  if (!Array.isArray(widgets) || widgets.length > 8) {
+    errors.push('widgets must be a list of at most 8 widgets')
+    return []
+  }
+  const ids = new Set<string>()
+  const toolNames = new Set(tools.map((t) => t?.name))
+  const allowed = new Set([
+    'id',
+    'title',
+    'description',
+    'widgetApi',
+    'entry',
+    'inputSchema',
+    'tools',
+    'height',
+    'presentations',
+    'refreshSeconds'
+  ])
+  const int = (v: unknown, lo: number, hi: number): boolean =>
+    Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi
+  for (const [i, raw] of (widgets as Partial<WidgetSpec>[]).entries()) {
+    const at = `widgets[${i}]${raw?.id ? ` (${raw.id})` : ''}`
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      errors.push(`${at}: must be an object`)
+      continue
+    }
+    const w = raw as WidgetSpec & Record<string, unknown>
+    for (const k of Object.keys(w))
+      if (!allowed.has(k)) errors.push(`${at}: "${k}" is not supported`)
+    if (typeof w.id !== 'string' || !WIDGET_ID.test(w.id))
+      errors.push(`${at}: id must be lowercase letters, digits or hyphens, starting with a letter`)
+    else if (ids.has(w.id)) errors.push(`${at}: duplicate widget id`)
+    else ids.add(w.id)
+    if (typeof w.title !== 'string' || !w.title.trim() || w.title.length > 60)
+      errors.push(`${at}: title must be 1 to 60 characters`)
+    if (typeof w.description !== 'string' || !w.description.trim() || w.description.length > 500)
+      errors.push(`${at}: description must be 1 to 500 characters`)
+    if (!Number.isInteger(w.widgetApi)) errors.push(`${at}: widgetApi must be an integer`)
+    else if (!SUPPORTED_WIDGET_API_VERSIONS.includes(w.widgetApi))
+      errors.push(
+        `${at}: widgetApi ${w.widgetApi} is not supported by this Custard (supports ${SUPPORTED_WIDGET_API_VERSIONS.join(', ')})`
+      )
+    if (!isRelativePath(w.entry) || !/\.(ts|js)$/.test(w.entry))
+      errors.push(`${at}: entry must be a relative .ts or .js path inside the plugin folder`)
+    if (w.inputSchema !== undefined) {
+      const schemaErrors = checkSchema(w.inputSchema, `${at}.inputSchema`)
+      errors.push(...schemaErrors)
+      if (!schemaErrors.length && w.inputSchema.type !== 'object')
+        errors.push(`${at}.inputSchema: type must be "object"`)
+    }
+    if (!Array.isArray(w.tools) || w.tools.length > 32)
+      errors.push(`${at}: tools must be a list of this plugin's tool names (it may be empty)`)
+    else
+      for (const t of w.tools)
+        if (typeof t !== 'string' || !toolNames.has(t))
+          errors.push(`${at}: tools: "${String(t)}" is not one of this plugin's tools`)
+    if (w.height !== undefined) {
+      const h = w.height as Record<string, unknown>
+      const { minHeight: lo, maxHeight: hi } = WIDGET_LIMITS
+      if (!h || typeof h !== 'object' || Array.isArray(h))
+        errors.push(`${at}: height must be an object`)
+      else {
+        for (const k of Object.keys(h))
+          if (!['initial', 'min', 'max'].includes(k))
+            errors.push(`${at}: height.${k} is not supported`)
+        for (const k of ['initial', 'min', 'max'])
+          if (h[k] !== undefined && !int(h[k], lo, hi))
+            errors.push(`${at}: height.${k} must be a whole number from ${lo} to ${hi}`)
+        const min = (h.min as number) ?? lo
+        const max = (h.max as number) ?? hi
+        if (min > max) errors.push(`${at}: height.min must not be more than height.max`)
+        if (h.initial !== undefined && ((h.initial as number) < min || (h.initial as number) > max))
+          errors.push(`${at}: height.initial must be between height.min and height.max`)
+      }
+    }
+    if (w.presentations !== undefined) {
+      const p = w.presentations as unknown[]
+      if (
+        !Array.isArray(p) ||
+        !p.length ||
+        p.some((x) => x !== 'compact' && x !== 'expanded') ||
+        new Set(p).size !== p.length
+      )
+        errors.push(`${at}: presentations must list "compact" and/or "expanded" once each`)
+    }
+    if (
+      w.refreshSeconds !== undefined &&
+      !int(w.refreshSeconds, WIDGET_LIMITS.minRefreshSeconds, WIDGET_LIMITS.maxRefreshSeconds)
+    )
+      errors.push(
+        `${at}: refreshSeconds must be a whole number from ${WIDGET_LIMITS.minRefreshSeconds} to ${WIDGET_LIMITS.maxRefreshSeconds}`
+      )
+  }
+  return (widgets as WidgetSpec[]).map((w) => ({
+    ...w,
+    ...(w.presentations ? { presentations: w.presentations as WidgetPresentation[] } : {})
+  }))
+}
+
 export type ManifestResult =
   | { ok: true; manifest: PluginManifest; errors: [] }
   | { ok: false; manifest: null; errors: string[] }
@@ -271,7 +380,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
     'tools',
     'config',
     'auth',
-    'instructions'
+    'instructions',
+    'widgets'
   ])
   for (const k of Object.keys(m)) if (!allowed.has(k)) errors.push(`"${k}" is not a manifest field`)
   if (m.manifestVersion !== 1) errors.push('manifestVersion must be 1')
@@ -326,6 +436,7 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
   const config = checkConfig(m.config, errors)
   const tools = checkTools(typeof id === 'string' ? id : 'x', m.tools, errors)
   const auth = checkAuth(m.auth, network as string[], config, errors)
+  const widgets = checkWidgets(m.widgets, tools, errors)
 
   if (errors.length) return { ok: false, manifest: null, errors }
   return {
@@ -347,7 +458,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
       tools,
       config,
       ...(auth ? { auth } : {}),
-      ...(m.instructions ? { instructions: m.instructions as string } : {})
+      ...(m.instructions ? { instructions: m.instructions as string } : {}),
+      ...(widgets.length ? { widgets } : {})
     }
   }
 }
@@ -385,6 +497,8 @@ export function permissionsOf(m: PluginManifest): string[] {
           ...m.auth.scopes.map((s) => `account-scope:${s}`)
         ]
       : []),
-    ...m.tools.filter((t) => t.effect === 'write').map((t) => `action:${t.name}`)
+    ...m.tools.filter((t) => t.effect === 'write').map((t) => `action:${t.name}`),
+    // Each widget is approved on its own; a new or renamed one asks again.
+    ...(m.widgets ?? []).map((w) => `widget:${w.id}`)
   ]
 }

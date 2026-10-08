@@ -1,6 +1,8 @@
 // Types shared by the plugin host (main process) and the Settings UI.
 // The manifest format itself is documented in docs/plugins/MANIFEST.md.
 
+import type { WidgetSpec } from './widgets'
+
 export const PLUGIN_API_VERSION = 1
 export const SUPPORTED_API_VERSIONS = [1]
 
@@ -75,6 +77,8 @@ export type PluginManifest = {
   config: Record<string, ConfigField>
   auth?: OAuthSpec
   instructions?: string
+  // UI the assistant can show next to the message box (see shared/widgets).
+  widgets?: WidgetSpec[]
 }
 
 export type BuildInfo = { buildId: string; version: string; builtAt: number }
@@ -106,6 +110,7 @@ export type PluginStatus = {
   // changing them waits until they can be read or the user resets them.
   secretsLocked?: boolean
   tools: { name: string; fullName: string; effect: 'read' | 'write'; askEveryTime: boolean }[]
+  widgets?: { id: string; title: string }[]
   errors: { at: number; message: string }[]
   log: string[]
 }
@@ -157,6 +162,8 @@ export function describePermission(p: string): string {
       return `Send your account's access token to ${v}`
     case 'account-scope':
       return `Account access: ${v}`
+    case 'widget':
+      return `Show its "${v}" panel in chats when the assistant or you open it`
     case 'action':
       return `Run the "${v}" action (asks you first unless you turn that off)`
     default:

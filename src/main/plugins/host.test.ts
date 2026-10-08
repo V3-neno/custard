@@ -1093,3 +1093,68 @@ describe('the Spotify reference plugin through the host', () => {
     expect(opened).toEqual(['spotify:'])
   })
 })
+
+describe('widgets', () => {
+  const WIDGET = {
+    id: 'board',
+    title: 'Board',
+    description: 'A test board.',
+    widgetApi: 1,
+    entry: 'widget/board.ts',
+    tools: ['echo', 'act']
+  }
+  const BOARD = `import { defineWidget } from 'custard-plugin-sdk/widget'
+export default defineWidget({ mount(root) { root.textContent = 'board-7712' } })
+`
+  const DATA_INDEX = INDEX.replace(
+    'echo: ({ text }) => greet(text),',
+    "echo: ({ text }) => ({ content: greet(text), data: text === 'big' ? 'x'.repeat(70000) : { text } }),"
+  )
+
+  it('needs the widget permission, then lists and bundles it', async () => {
+    writePlugin({ 'widget/board.ts': BOARD }, manifest({ widgets: [WIDGET] }))
+    const review = await host.review('demo')
+    expect(review.errors).toEqual([])
+    await expect(host.activate('demo', review.buildId!, ALL)).rejects.toThrow(
+      /Approve these permissions/
+    )
+    expect(host.widgetCatalog()).toEqual([])
+    await host.activate('demo', review.buildId!, [...ALL, 'widget:board'])
+    const [entry] = host.widgetCatalog()
+    expect(entry).toMatchObject({ pluginId: 'demo', buildId: review.buildId, widget: WIDGET })
+    const code = host.widgetCode('demo', review.buildId!, 'board')!
+    expect(code).toContain('board-7712')
+    expect(code).toContain('custardWidgetHost')
+    expect(host.widgetCode('demo', review.buildId!, 'other')).toBeNull()
+    expect(host.toolWrites('demo', review.buildId!, 'act')).toBe(true)
+    expect(host.toolWrites('demo', review.buildId!, 'echo')).toBe(false)
+    expect(host.toolWrites('demo', review.buildId!, 'nope')).toBeNull()
+  })
+
+  it('tells listeners when a plugin changes, and a disabled plugin has no widgets', async () => {
+    writePlugin({ 'widget/board.ts': BOARD }, manifest({ widgets: [WIDGET] }))
+    const changed: string[] = []
+    host.onChange((id) => changed.push(id))
+    await activate([...ALL, 'widget:board'])
+    host.disable('demo')
+    expect(host.widgetCatalog()).toEqual([])
+    expect(changed).toEqual(['demo', 'demo'])
+  })
+
+  it('refuses a widget entry that is missing', async () => {
+    writePlugin({}, manifest({ widgets: [WIDGET] }))
+    const review = await host.review('demo')
+    expect(review.errors.join(' ')).toMatch(/widget\/board\.ts/)
+  })
+
+  it("passes a tool's data on, but not when it is too large or holds a secret", async () => {
+    writePlugin({ 'src/index.ts': DATA_INDEX })
+    await activate()
+    store.setSecret('demo', 'apiKey', 'sekret-99881')
+    expect((await invoke('demo__echo', { text: 'you' })).data).toEqual({ text: 'you' })
+    expect((await invoke('demo__echo', { text: 'big' })).data).toBeUndefined()
+    const leaked = await invoke('demo__echo', { text: 'sekret-99881' })
+    expect(leaked.data).toBeUndefined()
+    expect(leaked.content).not.toContain('sekret-99881')
+  })
+})

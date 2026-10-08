@@ -10,6 +10,7 @@ import {
   type TestReport
 } from '../../shared/plugins'
 import { formatLabel } from '../../shared/vault'
+import { WIDGET_LIMITS, type WidgetSpec } from '../../shared/widgets'
 import { resolveInside } from '../workspace/paths'
 import { bundle, hashSources, readSources, type SourceFile } from './build'
 import { diffSources } from './diff'
@@ -43,6 +44,8 @@ export type ToolOutcome = {
   interrupted?: boolean
   notSent?: boolean
   outcome?: 'completed' | 'failed' | 'not-run' | 'unknown'
+  // Structured data for the plugin's widgets. Never sent to the model.
+  data?: unknown
 }
 
 export type RuntimeHandle = {
@@ -111,6 +114,21 @@ const fail = (content: string): ToolOutcome => ({ content, isError: true })
 const notRun = (content: string): ToolOutcome => ({ content, isError: true, outcome: 'not-run' })
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
+// A tool's `data` for widgets: plain JSON, bounded, and dropped if it holds a
+// secret value (redaction would garble it, so it isn't attempted).
+function widgetData(data: unknown, secrets: string[]): unknown {
+  if (data === undefined) return undefined
+  let json: string | undefined
+  try {
+    json = JSON.stringify(data)
+  } catch {
+    return undefined
+  }
+  if (json === undefined || json.length > WIDGET_LIMITS.dataBytes) return undefined
+  if (redact(json, secrets) !== json) return undefined
+  return JSON.parse(json)
+}
+
 export class PluginHost {
   private runtimes = new Map<string, { handle: RuntimeHandle; buildId: string }>()
   private starting = new Map<string, Promise<RuntimeHandle>>()
@@ -131,6 +149,22 @@ export class PluginHost {
     return this.signInGeneration.get(id) ?? 0
   }
   private buildCache = new Map<string, ReturnType<PluginStore['build']>>()
+
+  // Told when a plugin is activated, enabled, disabled or removed, so its
+  // widgets can be taken down (see main/widgets).
+  private changeListeners = new Set<(id: string) => void>()
+  onChange(cb: (id: string) => void): () => void {
+    this.changeListeners.add(cb)
+    return () => this.changeListeners.delete(cb)
+  }
+  private changed(id: string): void {
+    for (const cb of this.changeListeners)
+      try {
+        cb(id)
+      } catch (err) {
+        console.error('Plugin change listener:', err)
+      }
+  }
 
   constructor(private d: HostDeps) {}
 
@@ -194,6 +228,13 @@ export class PluginHost {
       } catch (err) {
         errors.push(`entry ${r.manifest.entry}: ${message(err)}`)
       }
+      for (const w of r.manifest.widgets ?? [])
+        try {
+          const entry = resolveInside(b, w.entry, { mustExist: true })
+          if (!statSync(entry).isFile()) errors.push(`widget ${w.id}: entry is not a file`)
+        } catch (err) {
+          errors.push(`widget ${w.id}: entry ${w.entry}: ${message(err)}`)
+        }
       if (r.manifest.instructions)
         try {
           instructions = readFileSync(
@@ -211,8 +252,22 @@ export class PluginHost {
   }
 
   // Source plus the SDK it builds against, so an SDK change makes a new build.
+  // The widget SDK counts only for plugins with widgets, so adding it didn't
+  // change every existing plugin's build.
   private sourceHash(files: SourceFile[]): string {
-    const sdk = ['index.ts', 'runtime.ts'].map((f) => ({
+    let widgets = false
+    try {
+      const m = JSON.parse(files.find((f) => f.path === 'plugin.json')?.content ?? '{}')
+      widgets = Array.isArray(m?.widgets) && m.widgets.length > 0
+    } catch {
+      // An invalid manifest fails validation anyway.
+    }
+    const sdkFiles = [
+      'index.ts',
+      'runtime.ts',
+      ...(widgets ? ['widget.ts', 'widget-runtime.ts'] : [])
+    ]
+    const sdk = sdkFiles.map((f) => ({
       path: `sdk:${f}`,
       content: readFileSync(join(this.d.sdkDir, f), 'utf8')
     }))
@@ -269,6 +324,9 @@ export class PluginHost {
         effect: t.effect,
         askEveryTime: t.effect === 'write' && (st.askEveryTime[t.name] ?? this.d.askByDefault())
       })),
+      ...(m?.widgets?.length
+        ? { widgets: m.widgets.map((w) => ({ id: w.id, title: w.title })) }
+        : {}),
       errors: st.errors,
       log: this.logs.get(id) ?? []
     }
@@ -294,6 +352,22 @@ export class PluginHost {
     if (!this.d.store.hasBuild(id, buildId)) {
       const r = await bundle(this.sourceDir(id), this.d.sdkDir, { kind: 'plugin', entry: m.entry })
       if (!r.ok) return { ok: false, errors: r.errors, warnings: [], manifest: m, buildId: null }
+      const widgets: Record<string, string> = {}
+      for (const w of m.widgets ?? []) {
+        const wb = await bundle(this.sourceDir(id), this.d.sdkDir, {
+          kind: 'widget',
+          entry: w.entry
+        })
+        if (!wb.ok)
+          return {
+            ok: false,
+            errors: wb.errors.map((e) => `widget ${w.id}: ${e}`),
+            warnings: [],
+            manifest: m,
+            buildId: null
+          }
+        widgets[w.id] = wb.code
+      }
       // The bundler reads the files again, so the code is what was hashed
       // (and is reviewed) only if nothing changed in between (L19).
       let after: string | null = null
@@ -314,7 +388,8 @@ export class PluginHost {
         manifest: m,
         code: r.code,
         sources: files,
-        instructions: src.instructions
+        instructions: src.instructions,
+        widgets
       })
     }
     const warnings: string[] = []
@@ -522,6 +597,7 @@ export class PluginHost {
       this.d.store.setSecret(id, OAUTH_KEY, null)
     }
     this.d.store.pruneBuilds(id, [buildId, ...(previous ? [previous.buildId] : [])])
+    this.changed(id)
     return this.status(id)
   }
 
@@ -534,6 +610,7 @@ export class PluginHost {
   disable(id: string): PluginStatus {
     this.d.store.setState(id, { enabled: false })
     this.stop(id, 'disabled')
+    this.changed(id)
     return this.status(id)
   }
 
@@ -547,6 +624,7 @@ export class PluginHost {
     this.stop(id, 'restarting')
     await this.start(id, st.active.buildId)
     this.d.store.setState(id, { enabled: true })
+    this.changed(id)
     return this.status(id)
   }
 
@@ -557,6 +635,7 @@ export class PluginHost {
     this.d.store.remove(id)
     for (const k of this.buildCache.keys()) if (k.startsWith(`${id}/`)) this.buildCache.delete(k)
     this.logs.delete(id)
+    this.changed(id)
   }
 
   shutdown(): void {
@@ -688,6 +767,51 @@ export class PluginHost {
         )
     }
     return { tools, snapshot, instructions }
+  }
+
+  // Widgets the assistant may show now: declared by an enabled plugin's
+  // active build and approved by the user.
+  widgetCatalog(): {
+    pluginId: string
+    pluginName: string
+    buildId: string
+    widget: WidgetSpec
+  }[] {
+    const out: ReturnType<PluginHost['widgetCatalog']> = []
+    for (const id of this.d.store.ids()) {
+      const st = this.d.store.state(id)
+      if (!st.enabled || !st.active) continue
+      const { manifest } = this.build(id, st.active.buildId)
+      if (permissionsOf(manifest).some((p) => !st.granted.includes(p))) continue
+      for (const w of manifest.widgets ?? [])
+        if (st.granted.includes(`widget:${w.id}`))
+          out.push({
+            pluginId: id,
+            pluginName: manifest.name,
+            buildId: st.active.buildId,
+            widget: w
+          })
+    }
+    return out
+  }
+
+  widgetCode(id: string, buildId: string, widgetId: string): string | null {
+    return this.d.store.widgetCode(id, buildId, widgetId)
+  }
+
+  // Whether a tool of a build changes something; null if there's no such tool.
+  toolWrites(id: string, buildId: string, tool: string): boolean | null {
+    try {
+      const t = this.build(id, buildId).manifest.tools.find((x) => x.name === tool)
+      return t ? t.effect === 'write' : null
+    } catch {
+      return null
+    }
+  }
+
+  // A line from a widget in the plugin's log, redacted like the plugin's own.
+  widgetLog(id: string, line: string): void {
+    this.log(id, redact(line.slice(0, 300), this.secretValues(id)))
   }
 
   // The chat label for a plugin tool, from its manifest.
@@ -825,6 +949,7 @@ export class PluginHost {
         controller.signal
       )
       const content = redact(String(r.content).slice(0, MAX_RESULT_CHARS), secrets)
+      const data = widgetData(r.data, secrets)
       if (r.isError) this.log(id, `${tool.name}: ${content.slice(0, 200)}`)
       const outcome = r.notSent
         ? 'not-run'
@@ -835,7 +960,7 @@ export class PluginHost {
           : r.isError
             ? 'failed'
             : 'completed'
-      return { content, isError: !!r.isError, outcome }
+      return { content, isError: !!r.isError, outcome, ...(data !== undefined ? { data } : {}) }
     } catch (err) {
       const msg = redact(message(err), secrets)
       this.d.store.addError(id, `${tool.name}: ${msg}`)

@@ -130,13 +130,25 @@ export class PluginStore {
   saveBuild(
     id: string,
     buildId: string,
-    b: { manifest: PluginManifest; code: string; sources: SourceFile[]; instructions: string }
+    b: {
+      manifest: PluginManifest
+      code: string
+      sources: SourceFile[]
+      instructions: string
+      // Each widget's bundled UI, by widget id.
+      widgets?: Record<string, string>
+    }
   ): void {
     const d = this.buildDir(id, buildId)
     mkdirSync(d, { recursive: true })
     writeFileSync(join(d, 'manifest.json'), JSON.stringify(b.manifest, null, 2))
     writeFileSync(join(d, 'sources.json'), JSON.stringify(b.sources))
     writeFileSync(join(d, 'instructions.md'), b.instructions)
+    if (b.widgets && Object.keys(b.widgets).length) {
+      mkdirSync(join(d, 'widgets'), { recursive: true })
+      for (const [w, code] of Object.entries(b.widgets))
+        writeFileSync(join(d, 'widgets', `${w}.js`), code)
+    }
     // Written last: its presence marks a complete build.
     writeAtomic(join(d, 'bundle.js'), b.code)
   }
@@ -153,6 +165,13 @@ export class PluginStore {
         ? readFileSync(join(d, 'instructions.md'), 'utf8')
         : ''
     }
+  }
+
+  // A widget's bundled UI from a saved build, or null if it has none.
+  widgetCode(id: string, buildId: string, widgetId: string): string | null {
+    if (!/^[a-z][a-z0-9-]{0,30}$/.test(widgetId)) return null
+    const f = join(this.buildDir(id, buildId), 'widgets', `${widgetId}.js`)
+    return existsSync(f) ? readFileSync(f, 'utf8') : null
   }
 
   buildSources(id: string, buildId: string): SourceFile[] {

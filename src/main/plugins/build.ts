@@ -53,25 +53,32 @@ const EXTENSIONS = ['', '.ts', '.js', '.json', '/index.ts', '/index.js']
 
 export type BuildResult = { ok: true; code: string } | { ok: false; errors: string[] }
 
-// kind "plugin": the entry plus the sandbox runtime. kind "tests": every test
-// file plus the test runner.
+// kind "plugin": the entry plus the sandbox runtime. kind "widget": a
+// widget's UI module plus the widget runtime. kind "tests": every test file
+// plus the test runner.
 export async function bundle(
   dir: string,
   sdkDir: string,
-  o: { kind: 'plugin'; entry: string } | { kind: 'tests'; files: string[] }
+  o:
+    | { kind: 'plugin'; entry: string }
+    | { kind: 'widget'; entry: string }
+    | { kind: 'tests'; files: string[] }
 ): Promise<BuildResult> {
   const { build } = await load()
   const root = realpathSync.native(dir)
   const sdkRoot = realpathSync.native(sdkDir)
   const sdk: Record<string, string> = {
     'custard-plugin-sdk': join(sdkRoot, 'index.ts'),
-    'custard-plugin-sdk/testing': join(sdkRoot, 'testing.ts')
+    'custard-plugin-sdk/testing': join(sdkRoot, 'testing.ts'),
+    'custard-plugin-sdk/widget': join(sdkRoot, 'widget.ts')
   }
   const lit = (p: string): string => JSON.stringify(`./${p}`)
   const contents =
     o.kind === 'plugin'
       ? `import plugin from ${lit(o.entry)}\nimport { start } from 'custard:runtime'\nstart(plugin)\n`
-      : `${o.files.map((f) => `import ${lit(f)}`).join('\n')}\nimport { runRegisteredTests } from 'custard-plugin-sdk/testing'\n;(globalThis as any).__custardRunTests = runRegisteredTests\n`
+      : o.kind === 'widget'
+        ? `import widget from ${lit(o.entry)}\nimport { startWidget } from 'custard:widget-runtime'\nstartWidget(widget)\n`
+        : `${o.files.map((f) => `import ${lit(f)}`).join('\n')}\nimport { runRegisteredTests } from 'custard-plugin-sdk/testing'\n;(globalThis as any).__custardRunTests = runRegisteredTests\n`
 
   const guard: import('esbuild').Plugin = {
     name: 'custard-plugin-guard',
@@ -79,6 +86,8 @@ export async function bundle(
       b.onResolve({ filter: /.*/ }, (args) => {
         // The bridge glue; it grants nothing, so any file may import it.
         if (args.path === 'custard:runtime') return { path: join(sdkRoot, 'runtime.ts') }
+        if (args.path === 'custard:widget-runtime')
+          return { path: join(sdkRoot, 'widget-runtime.ts') }
         if (sdk[args.path]) return { path: sdk[args.path] }
         const fromSdk = args.importer && isInside(args.importer, sdkRoot)
         if (!args.path.startsWith('.'))

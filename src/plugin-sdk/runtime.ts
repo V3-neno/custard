@@ -18,7 +18,7 @@ type Bridge = {
       tool: string,
       input: unknown,
       config: Record<string, ConfigValue>
-    ): Promise<{ content: string; isError: boolean }>
+    ): Promise<{ content: string; isError: boolean; data?: unknown }>
     cancel(callId: string): void
     tools(): string[]
   }): void
@@ -46,9 +46,14 @@ function toResponse(r: WireResponse): PluginResponse {
   }
 }
 
-function normalize(r: ToolResult): { content: string; isError: boolean } {
+function normalize(r: ToolResult): { content: string; isError: boolean; data?: unknown } {
   if (typeof r === 'string') return { content: r, isError: false }
-  if (r && typeof r.content === 'string') return { content: r.content, isError: !!r.isError }
+  if (r && typeof r.content === 'string')
+    return {
+      content: r.content,
+      isError: !!r.isError,
+      ...(r.data !== undefined ? { data: r.data } : {})
+    }
   return { content: 'The tool returned no result.', isError: true }
 }
 
