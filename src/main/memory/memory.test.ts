@@ -452,7 +452,7 @@ describe('capture files', () => {
     mkdirSync(outside)
     mkdirSync(join(vault, 'Custard'))
     symlinkSync(join(outside, 'not-yet'), join(vault, 'Custard/Captures'))
-    expect(() => writeCapture(vault, 'Custard/Captures', 'n', text(), 'k-broken')).toThrow(/link/)
+    expect(() => writeCapture(vault, 'Custard/Captures', 'n', text(), key)).toThrow(/link/)
     expect(readdirSync(outside)).toEqual([])
   })
 
