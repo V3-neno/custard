@@ -172,8 +172,25 @@ export type RemoteStatus =
 
 // The common interface Design talks to. Built-in image providers and plugin
 // providers implement the same one, so Design has no provider-specific code.
+// A model a provider offers, for Design settings. `note` is the provider's
+// own short description; never a guessed quality or price.
+export type MediaModel = { id: string; name: string; note?: string }
+
+// One registered provider as the Design settings tab lists it.
+export type ProviderListing = {
+  id: string
+  name: string
+  source: Source
+  state: MediaProviderState
+  needs?: string
+  operations: MediaOperation[]
+  models?: MediaModel[]
+}
+
 export interface MediaProvider {
   info(): MediaProviderInfo
+  // Models to choose from in Design settings, when the provider has several.
+  models?(): MediaModel[]
   submit(
     request: MediaRequest,
     options: {
@@ -211,6 +228,8 @@ export type Job = {
   remoteId?: string
   progress?: number
   error?: string
+  // What kind of error the provider reported, when it said so.
+  errorKind?: MediaErrorKind
   // Custard is watching it now. Stopping that never cancels the job.
   tracking: boolean
   checks: number
@@ -291,6 +310,23 @@ export type PluginMediaSpec = {
 
 // What those tools return in their result `data` (validated by the host;
 // anything else is an error). Plugin output is untrusted.
+// What those tools receive (docs/design/MEDIA-PLUGINS.md). References come
+// inline; the plugin never gets a path.
+export type PluginMediaSubmitInput = {
+  operation: MediaOperation
+  prompt: string
+  idempotencyKey: string
+  references?: { name: string; mime: string; base64: string }[]
+  size?: { width: number; height: number }
+  durationSeconds?: number
+  format?: string
+}
+// status, result and cancel.
+export type PluginMediaJobInput = { remoteId: string }
+// A submit error's data may say `sent: false` when the plugin's service never
+// got the request; otherwise the outcome is unknown. Cancel returns
+// { state: 'cancelled' } only when the service confirms it.
+
 export type PluginMediaSubmitData = { remoteId: string; status: RemoteStatus }
 export type PluginMediaStatusData = RemoteStatus
 // Files come back inline (base64) or as an https URL on a host the plugin's
@@ -336,3 +372,6 @@ export type ExportResult =
 // serves only files recorded on a version. Never used by the HTML preview,
 // which has its own scheme and session (docs/design/SANDBOX.md).
 export const MEDIA_SCHEME = 'custard-media'
+
+// Whether a skill behind a version is as it was (main/design/skills.ts).
+export type SkillChange = { path: string; name: string; state: 'same' | 'changed' | 'missing' }
