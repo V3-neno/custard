@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import type { CaptureJob, ChatMemory, Conversation, Provider } from '../../shared/chat'
 import type { MemorySettings } from '../../shared/memory'
-import { buildEvidence, eligible, evidenceText, type Evidence } from './evidence'
+import { buildEvidence, eligible, evidenceText, titleWithoutFiles, type Evidence } from './evidence'
 import { noteText, render, type Item, type Provenance, type Section } from './render'
 import type { Summarizer } from './summarize'
 import { CAPTURES, captureName, chatCaptures, deleteNotes, vaultId, writeCapture } from './write'
@@ -411,8 +411,11 @@ export class Capture {
   // free and is never written again; a note already holding this job (a
   // crash after writing, before the job was recorded) counts as written.
   private write(vault: string, c: Conversation, jobId: string, at: number, plan: Item[]): string[] {
+    // The chat's title can hold a file's name (it comes from the first
+    // message, or is the name itself); notes and their names never do.
+    const title = titleWithoutFiles(c)
     const from: Provenance = {
-      title: c.title,
+      title,
       date: localDate(at),
       time: localTime(at),
       chatId: c.id
@@ -428,7 +431,7 @@ export class Capture {
       part.items.push({ ...i, section: i.section as Section })
       parts.set(key, part)
     }
-    const name = captureName(from.date, from.time, c.title, jobId)
+    const name = captureName(from.date, from.time, title, jobId)
     return [...parts].map(([plugin, part]) =>
       writeCapture(
         vault,

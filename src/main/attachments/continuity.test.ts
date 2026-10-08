@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { filesNote, type Attachment } from '../../shared/attachments'
 import type { Conversation } from '../../shared/chat'
-import { buildEvidence, evidenceText } from '../memory/evidence'
+import { buildEvidence, eligible, evidenceText, titleWithoutFiles } from '../memory/evidence'
 import { SUMMARY_SYSTEM } from '../memory/summarize'
 import {
   carriedFiles,
@@ -75,6 +75,97 @@ describe('what memory capture sees of files', () => {
   })
 })
 
+describe('memory evidence never carries file names or quoted contents', () => {
+  it("scrubs names from the user's words, action labels, results and notices, and leaves out the answer", () => {
+    const c = chat()
+    c.messages = [
+      { role: 'user', content: 'Read Divorce settlement draft and tell me the total' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Searching.' },
+          { type: 'tool_use', id: 't1', name: 'spotify__search', input: {} }
+        ]
+      },
+      {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }]
+      },
+      { role: 'assistant', content: `${SECRET_NAME} says the total is 4,812,337 zorkmids.` }
+    ]
+    c.actions = {
+      t1: {
+        name: 'spotify__search',
+        label: `Search Spotify for "${SECRET_NAME}"`,
+        write: false,
+        status: 'failed',
+        key: 'k',
+        result: `Nothing found for divorce settlement draft.PDF`
+      }
+    }
+    c.attachments = [file(0, SECRET_NAME, 'pdf')]
+    c.notices = [
+      { after: 4, kind: 'files', text: `${SECRET_NAME} is no longer available.` },
+      { after: 4, kind: 'error', text: `Couldn't finish with ${SECRET_NAME}.` }
+    ]
+    const e = buildEvidence(c, 0, 4)
+    const text = evidenceText(e)
+    expect(text).not.toMatch(/divorce|settlement|zorkmids|4,812,337/i)
+    expect(e.requests[0]).toBe(
+      'Read [attached file] and tell me the total [1 file attached (1 PDF); names and contents not shown]'
+    )
+    expect(e.actions[0].label).toBe('Search Spotify for "[attached file]"')
+    expect(e.notices).toEqual(["Couldn't finish with [attached file]."])
+    expect(e.answer).toBe('')
+    expect(text).toMatch(/left out, because the chat has attached files/)
+  })
+
+  it('scrubs names from a chat title for notes, including one cut off at the end', () => {
+    const c = chat()
+    c.title = 'Please read "Divorce settlement dr'
+    expect(titleWithoutFiles(c)).toBe('Please read "[attached file]')
+    c.title = 'shot.png'
+    expect(titleWithoutFiles(c)).toBe('[attached file]')
+    c.title = 'Plain chat'
+    expect(titleWithoutFiles(c)).toBe('Plain chat')
+    // Names listed from the chat it continues count too.
+    c.attachments = []
+    c.continuedFrom = {
+      from: { id: 'c0', title: 't' },
+      summary: null,
+      ledger: '',
+      counts: {},
+      unknown: [],
+      at: 0,
+      files: [{ name: 'Harbor-Ledger.md', kind: 'text' }]
+    }
+    c.title = 'About Harbor-Ledger.md (continued)'
+    expect(titleWithoutFiles(c)).toBe('About [attached file] (continued)')
+    expect(buildEvidence(c, 0, 4).requests[0]).not.toContain('Harbor')
+  })
+
+  it('keeps the answer in chats without files', () => {
+    const c = chat()
+    c.attachments = []
+    expect(buildEvidence(c, 0, 4).answer).toBe('Got the screenshot.')
+  })
+
+  it('never starts a capture because of files alone', () => {
+    const c = chat()
+    c.messages = []
+    c.attachments = []
+    for (let i = 0; i < 12; i++) {
+      c.messages.push({ role: 'user', content: '' }, { role: 'assistant', content: 'ok' })
+      c.attachments.push(file(i * 2, `f${i}.png`, 'image'))
+    }
+    c.notices = [{ after: 2, kind: 'files', text: 'f0.png is no longer available.' }]
+    const e = buildEvidence(c, 0, c.messages.length)
+    expect(e.requests).toHaveLength(12)
+    expect(e.notices).toEqual([])
+    expect(eligible(e)).toBe(false)
+  })
+})
+
 describe('continuing a chat with files', () => {
   it("gives the handoff summarizer counts and types only, and says the files don't carry", () => {
     const ev = handoffEvidence(chat(), 'No actions ran in the earlier chat.')
@@ -104,7 +195,9 @@ describe('continuing a chat with files', () => {
     expect(prompt).toContain(
       `not carried over, and you cannot see them: ${JSON.stringify(SECRET_NAME)}, "notes.md", "other.md", "shot.png".`
     )
-    expect(prompt).toMatch(/ask the user to attach it again/)
+    expect(prompt).toMatch(
+      /say you can.t see it and ask them to attach it again here; never answer as if you had looked at it/
+    )
   })
 
   it('passes on names from the chat before, within a cap', () => {

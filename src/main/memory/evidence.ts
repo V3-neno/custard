@@ -34,6 +34,12 @@ export type Evidence = {
   dontRemember: string | null
   // Those words asked to forget the whole chat, not just this part.
   forgetChat: boolean
+  // Requests with the user's own words (a message with only files doesn't
+  // count): what eligibility counts, so files alone never start a capture.
+  typed?: number
+  // The assistant's answer was left out because the chat has attached files
+  // it may quote or describe.
+  answerLeftOut?: boolean
 }
 
 // A backstop, not a guarantee: obvious credentials and long opaque strings.
@@ -77,6 +83,45 @@ const textOf = (m: Conversation['messages'][number]): string =>
     ? m.content
     : m.content.map((b) => (b.type === 'text' ? b.text : '')).join('\n')
 
+// Replaces attached files' names (and their names without the extension,
+// when distinctive) with a placeholder, ignoring case.
+// Every file name a chat knows: its own attachments' and those listed from
+// the chat it continues.
+export const fileNames = (c: Conversation): string[] => [
+  ...(c.attachments ?? []).map((a) => a.name),
+  ...(c.continuedFrom?.files ?? []).map((f) => f.name)
+]
+
+// A chat title for a note: file names scrubbed, including one cut off at the
+// end (titles are the first 60 characters of the first message).
+export function titleWithoutFiles(c: Conversation): string {
+  const names = fileNames(c)
+  let t = scrubber(names)(c.title)
+  for (const n of names)
+    for (let k = n.length - 1; k >= 3; k--)
+      if (t.toLowerCase().endsWith(n.slice(0, k).toLowerCase())) {
+        t = `${t.slice(0, t.length - k)}[attached file]`
+        break
+      }
+  return t
+}
+
+export function scrubber(names: string[]): (s: string) => string {
+  const forms = [
+    ...new Set(
+      names.flatMap((n) => {
+        const stem = n.replace(/\.[^.]+$/, '')
+        return stem.length >= 4 && stem !== n ? [n, stem] : [n]
+      })
+    )
+  ]
+    .filter((f) => f.trim().length >= 2)
+    .sort((a, b) => b.length - a.length)
+  if (!forms.length) return (s) => s
+  const re = new RegExp(forms.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi')
+  return (s) => s.replace(re, '[attached file]')
+}
+
 // `skipPlugins`: plugins the user asked not to remember; their actions are
 // left out entirely.
 export function buildEvidence(
@@ -94,6 +139,14 @@ export function buildEvidence(
     m.role === 'user' && !isResults(m) ? [{ text: textOf(m).trim(), files: files(i) }] : []
   )
   const requests = asked.map((r) => r.text).filter(Boolean)
+  // Attached files' names never reach the summarizer, wherever they appear
+  // (the user's words, action labels and results); and once a file is in the
+  // conversation, the assistant's answer is left out, since it may quote or
+  // describe the file. Contents a model copied into an action label can't
+  // all be recognized; see docs/attachments.md.
+  const attached = c.attachments ?? []
+  const unnamed = scrubber(fileNames(c))
+  const filesSeen = attached.some((a) => a.message < to)
   const actions: EvidenceAction[] = []
   for (const m of msgs)
     if (m.role === 'assistant' && typeof m.content !== 'string')
@@ -104,13 +157,15 @@ export function buildEvidence(
           if (plugin && skipPlugins.includes(plugin)) continue
           actions.push({
             id: `A${actions.length + 1}`,
-            label: a?.label || b.name,
+            label: unnamed(a?.label || b.name),
             tool: b.name,
             plugin,
             write: a?.write ?? false,
             status: a?.status ?? 'unknown',
             content: CONTENT_TOOLS.test(b.name),
-            result: CONTENT_TOOLS.test(b.name) ? '' : redact(cut(a?.result ?? '', LIMITS.result))
+            result: CONTENT_TOOLS.test(b.name)
+              ? ''
+              : unnamed(redact(cut(a?.result ?? '', LIMITS.result)))
           })
         }
   const answerMsg = [...msgs].reverse().find((m) => m.role === 'assistant' && textOf(m).trim())
@@ -122,18 +177,24 @@ export function buildEvidence(
           .trim()
       )
       .find(Boolean) ?? null
+  // Notices about files are about files only: left out, so they neither
+  // name them nor make the range look eventful.
   const notices = (c.notices ?? [])
-    .filter((n) => n.after > from && n.after <= to)
-    .map((n) => n.text)
+    .filter((n) => n.after > from && n.after <= to && n.kind !== 'files')
+    .map((n) => unnamed(n.text))
   return {
     requests: asked
       .filter((r) => r.text || r.files)
-      .map((r) => [redact(cut(r.text, LIMITS.request)), r.files].filter(Boolean).join(' ')),
+      .map((r) =>
+        [unnamed(redact(cut(r.text, LIMITS.request))), r.files].filter(Boolean).join(' ')
+      ),
     actions,
     notices,
-    answer: answerMsg ? redact(cut(textOf(answerMsg).trim(), LIMITS.answer)) : '',
+    answer: answerMsg && !filesSeen ? redact(cut(textOf(answerMsg).trim(), LIMITS.answer)) : '',
     dontRemember,
-    forgetChat: !!dontRemember && /^(?:please\s+)?forget\b/i.test(dontRemember)
+    forgetChat: !!dontRemember && /^(?:please\s+)?forget\b/i.test(dontRemember),
+    typed: requests.length,
+    ...(answerMsg && filesSeen ? { answerLeftOut: true } : {})
   }
 }
 
@@ -153,7 +214,9 @@ export function evidenceText(e: Evidence): string {
       ev.notices.length ? `\nHow turns ended: ${ev.notices.join(' | ')}` : '',
       ev.answer
         ? `\nAssistant's last answer (its own words; not evidence of what happened):\n${ev.answer}`
-        : ''
+        : ev.answerLeftOut
+          ? "\nAssistant's last answer: left out, because the chat has attached files it may quote."
+          : ''
     ].join('\n')
   const e2 = { ...e, requests: [...e.requests], actions: [...e.actions] }
   let text = lines(e2)
@@ -193,5 +256,5 @@ export function eligible(e: Evidence): boolean {
   if (e.actions.some((a) => a.plugin || a.write || a.status !== 'completed')) return true
   if (e.notices.length) return true
   if (e.requests.some((r) => DURABLE.test(r))) return true
-  return e.requests.length >= 10
+  return (e.typed ?? e.requests.length) >= 10
 }

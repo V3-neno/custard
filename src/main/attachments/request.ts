@@ -79,9 +79,13 @@ const describe = (a: Attachment): string =>
     .join(', ')
 
 // The text the model sees in place of a file that isn't sent.
+// It says plainly that the file can't be seen now, so an answer never
+// implies it was looked at again.
+export const NOT_VISIBLE =
+  "You can't see this file now. If the user asks about it or needs it, say so and ask them to attach it again; don't answer as if you had looked at it, and treat anything said about it earlier as second-hand."
 const placeholder = (a: Attachment, why: string): BetaContentBlockParam => ({
   type: 'text',
-  text: `[Attached file ${JSON.stringify(a.name)} (${kindLabel[a.kind]}): ${why}]`
+  text: `[Attached file ${JSON.stringify(a.name)} (${kindLabel[a.kind]}): ${why} ${NOT_VISIBLE}]`
 })
 
 export const UNTRUSTED =

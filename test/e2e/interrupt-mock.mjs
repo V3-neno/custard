@@ -282,7 +282,9 @@ http
                                     ? 'parts'
                                     : /reject test/.test(ask)
                                       ? 'reject'
-                                      : 'plain'
+                                      : /quote test/.test(ask)
+                                        ? 'quote'
+                                        : 'plain'
       // The provider says the request is too large.
       if (key === 'toolong')
         return j(400, {
@@ -357,6 +359,20 @@ http
       const scripts = {
         // Step 4: a long note read in two parts.
         reject: ['unused'],
+        // Step 5: an answer that quotes the attached files' names and text.
+        quote: [
+          () => {
+            const parts = (Array.isArray(b.messages[last].content) ? b.messages[last].content : [])
+              .filter((c) => c.type === 'document' || c.type === 'image')
+              .map((c) =>
+                c.type === 'document' && c.source.type === 'text'
+                  ? `${c.title} says "${c.source.data.trim()}"`
+                  : (c.title ?? 'an image')
+              )
+            const named = textOf(b.messages[last]).match(/"([^"]+\.(?:png|md|pdf))"/g) ?? []
+            text(`From ${named.join(' and ')}: ${parts.join('; ')}`)
+          }
+        ],
         parts: [
           () => tool('vault_read', { path: 'Projects/Long.md' }),
           () => tool('vault_read', { path: 'Projects/Long.md', ...nextPart() }),
@@ -429,7 +445,7 @@ http
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]
       let stop = 'tool_use'
-      if (key === 'compact') {
+      if (key === 'compact' || key === 'quote') {
         s()
         stop = 'end_turn'
       } else if (typeof s === 'function') s()

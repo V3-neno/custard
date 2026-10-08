@@ -345,7 +345,7 @@ export function continuationPrompt(k: Continuation): string {
           .join('\n')
       : 'There is no summary of the earlier chat (the user continued without one). Only the action record above is carried over.',
     files.length
-      ? `Files the user attached in the earlier chat are not carried over, and you cannot see them: ${files.map((f) => JSON.stringify(f.name)).join(', ')}${k.moreFiles ? `, and ${k.moreFiles} more` : ''}. Anything said about them above is second-hand. If you need one, ask the user to attach it again here.`
+      ? `Files the user attached in the earlier chat are not carried over, and you cannot see them: ${files.map((f) => JSON.stringify(f.name)).join(', ')}${k.moreFiles ? `, and ${k.moreFiles} more` : ''}. Anything said about them above is second-hand. If the user asks about one or the work needs it, say you can't see it and ask them to attach it again here; never answer as if you had looked at it.`
       : ''
   ]
     .filter(Boolean)

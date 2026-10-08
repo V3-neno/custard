@@ -266,6 +266,9 @@ describe('missing copies and compaction', () => {
     expect(r.files.missing.map((m) => m.id)).toEqual([a.id])
     expect((r.files.blocks.get(0)![0] as { text: string }).text).toMatch(/missing or changed/)
     expect(r.files.notes[0]).toMatch(/no longer available/)
+    expect((r.files.blocks.get(0)![0] as { text: string }).text).toMatch(
+      /"a\.png" \(Image\).*You can't see this file now.*ask them to attach it again/
+    )
     r.files.release()
   })
 
