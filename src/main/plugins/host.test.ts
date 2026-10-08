@@ -96,6 +96,7 @@ let netRoute: (r: NetRequest) => NetResponse
 let store: PluginStore
 let host: PluginHost
 let ask = true
+let browser: (url: string) => void = () => {}
 
 const crypto = {
   available: () => true,
@@ -242,6 +243,7 @@ beforeEach(() => {
   runtimeStarts = 0
   exits = []
   ask = true
+  browser = () => {}
   store = new PluginStore(join(base, 'data'), crypto)
   host = new PluginHost({
     sourceRoot: () => src,
@@ -254,7 +256,7 @@ beforeEach(() => {
       return vm.runInContext('globalThis.__custardRunTests()', ctx)
     },
     openExternal: async (u) => void opened.push(u),
-    openBrowser: async () => {},
+    openBrowser: async (u) => browser(u),
     askByDefault: () => ask,
     transport: () => async (r) => {
       net.push(r)
@@ -805,6 +807,121 @@ describe('where account credentials may go (M3)', () => {
     })
     expect(seen!.buildId).toBe(r.buildId)
     expect(seen!.buildId).not.toBe(first)
+  })
+})
+
+describe('sign-ins and refreshes outlived by a sign-out (L5)', () => {
+  const expired = (): void =>
+    store.setSecret(
+      'demo',
+      '__oauth',
+      JSON.stringify({
+        accessToken: 'old-123456',
+        refreshToken: 'ref-123456',
+        expiresAt: 0,
+        scope: ''
+      })
+    )
+  // The token endpoint answers only when the test lets it.
+  const heldToken = (): (() => void) => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    host = new PluginHost({
+      ...(host as unknown as { d: ConstructorParameters<typeof PluginHost>[0] }).d,
+      transport: () => async (r) => {
+        net.push(r)
+        if (r.url.pathname === '/token') {
+          await gate
+          return {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({
+              access_token: 'new-123456',
+              refresh_token: 'ref-2',
+              expires_in: 3600
+            })
+          }
+        }
+        return { status: 200, headers: {}, body: 'ok' }
+      }
+    })
+    return release
+  }
+
+  for (const [what, end] of [
+    ['Disconnect', () => host.disconnect('demo')],
+    ['clearing the Client ID', () => host.setConfig('demo', { clientId: '' })],
+    ['uninstall', () => host.uninstall('demo')]
+  ] as [string, () => void][])
+    it(`a refresh still running after ${what} saves nothing`, async () => {
+      writePlugin({})
+      const release = heldToken()
+      await activate()
+      host.setConfig('demo', { clientId: 'abc' })
+      expired()
+      const call = invoke('demo__call_api', { url: 'https://api.example.com/me', auth: true })
+      await new Promise((r) => setTimeout(r, 50))
+      end()
+      release()
+      await call
+      expect(store.secretsLocked('demo')).toBe(false)
+      expect(store.secrets('demo').__oauth).toBeUndefined()
+      if (what === 'uninstall') expect(existsSync(join(base, 'data', 'demo'))).toBe(false)
+    })
+
+  it('a sign-in that finishes after Disconnect saves nothing', async () => {
+    writePlugin({})
+    await activate()
+    host.setConfig('demo', { clientId: 'abc' })
+    netRoute = () => ({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        access_token: 'a-123456',
+        refresh_token: 'r-123456',
+        expires_in: 3600
+      })
+    })
+    let callback = ''
+    browser = (u) => {
+      const p = new URL(u).searchParams
+      callback = `${p.get('redirect_uri')}?code=CODE&state=${p.get('state')}`
+    }
+    const connecting = host.connect('demo').then(
+      () => 'connected',
+      (e: Error) => e.message
+    )
+    await new Promise((r) => setTimeout(r, 100))
+    host.disconnect('demo')
+    await fetch(callback)
+    expect(await connecting).toMatch(/cancelled/)
+    expect(host.status('demo').auth?.connected).toBe(false)
+  })
+
+  it("a request with another sign-in's state doesn't cancel this one (L18)", async () => {
+    writePlugin({})
+    await activate()
+    host.setConfig('demo', { clientId: 'abc' })
+    netRoute = () => ({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        access_token: 'a-123456',
+        refresh_token: 'r-123456',
+        expires_in: 3600
+      })
+    })
+    let callback = ''
+    browser = (u) => {
+      const p = new URL(u).searchParams
+      callback = `${p.get('redirect_uri')}?code=CODE&state=${p.get('state')}`
+    }
+    const connecting = host.connect('demo')
+    await new Promise((r) => setTimeout(r, 100))
+    await fetch(callback.replace(/state=[^&]+/, 'state=wrong'))
+    await fetch(callback)
+    await connecting
+    expect(host.status('demo').auth?.connected).toBe(true)
   })
 })
 

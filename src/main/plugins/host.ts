@@ -119,6 +119,16 @@ export class PluginHost {
   >()
   private logs = new Map<string, string[]>()
   private refreshing = new Map<string, Promise<string>>()
+  // Bumped whenever the account's sign-in is ended or invalidated (disconnect,
+  // a Client ID change, reset, uninstall, a credential change on update). A
+  // sign-in or refresh that started before then doesn't save its tokens.
+  private signInGeneration = new Map<string, number>()
+  private signedOut(id: string): void {
+    this.signInGeneration.set(id, (this.signInGeneration.get(id) ?? 0) + 1)
+  }
+  private generation(id: string): number {
+    return this.signInGeneration.get(id) ?? 0
+  }
   private buildCache = new Map<string, ReturnType<PluginStore['build']>>()
 
   constructor(private d: HostDeps) {}
@@ -481,7 +491,10 @@ export class PluginHost {
       granted: perms,
       askEveryTime
     })
-    if (signOut) this.d.store.setSecret(id, OAUTH_KEY, null)
+    if (signOut) {
+      this.signedOut(id)
+      this.d.store.setSecret(id, OAUTH_KEY, null)
+    }
     this.d.store.pruneBuilds(id, [buildId, ...(previous ? [previous.buildId] : [])])
     return this.status(id)
   }
@@ -513,6 +526,7 @@ export class PluginHost {
 
   // Deletes builds, settings, data and account tokens. The source stays.
   uninstall(id: string): void {
+    this.signedOut(id)
     this.stop(id, 'uninstalled')
     this.d.store.remove(id)
     for (const k of this.buildCache.keys()) if (k.startsWith(`${id}/`)) this.buildCache.delete(k)
@@ -552,7 +566,10 @@ export class PluginHost {
       if (f.secret) this.d.store.setSecret(id, k, clear ? null : String(v))
       else {
         // A different app or account invalidates the current sign-in.
-        if (k === authKey && config[k] !== v) this.d.store.setSecret(id, OAUTH_KEY, null)
+        if (k === authKey && config[k] !== v) {
+          this.signedOut(id)
+          this.d.store.setSecret(id, OAUTH_KEY, null)
+        }
         if (clear) delete config[k]
         else config[k] = v as string | number | boolean
       }
@@ -576,10 +593,15 @@ export class PluginHost {
     const clientId = this.d.store.config(id)[spec.clientIdConfigKey]
     if (typeof clientId !== 'string' || !clientId)
       throw new Error(`Set ${manifest.config[spec.clientIdConfigKey].title} first.`)
+    const started = this.generation(id)
     const tokens = await signIn(spec, clientId, this.d.openBrowser, {
       allowedHosts: this.allowedHosts(manifest, granted),
       transport: this.d.transport?.()
     })
+    if (this.generation(id) !== started || !this.d.store.state(id).active)
+      throw new Error(
+        'The sign-in was cancelled because the account was disconnected or changed meanwhile.'
+      )
     this.d.store.setSecret(id, OAUTH_KEY, JSON.stringify(tokens))
     return this.status(id)
   }
@@ -587,6 +609,7 @@ export class PluginHost {
   // Forgets the tokens on this computer. The provider may still list the app
   // as connected until the user removes it there.
   disconnect(id: string): PluginStatus {
+    this.signedOut(id)
     this.d.store.setSecret(id, OAUTH_KEY, null)
     return this.status(id)
   }
@@ -594,6 +617,7 @@ export class PluginHost {
   // The user's explicit choice when saved secrets can't be decrypted: delete
   // them (account sign-in and secret settings) so new ones can be saved.
   resetSecrets(id: string): PluginStatus {
+    this.signedOut(id)
     this.d.store.resetSecrets(id)
     return this.status(id)
   }
@@ -935,6 +959,7 @@ export class PluginHost {
     if (!force && tokens.expiresAt - Date.now() > 60_000) return tokens.accessToken
     let p = this.refreshing.get(id)
     if (!p) {
+      const started = this.generation(id)
       p = (async () => {
         const clientId = String(this.d.store.config(id)[m.auth!.clientIdConfigKey] ?? '')
         try {
@@ -942,10 +967,14 @@ export class PluginHost {
             allowedHosts: this.allowedHosts(m, granted),
             transport: this.d.transport?.()
           })
+          // Signed out while this was running: the new tokens are dropped.
+          if (this.generation(id) !== started)
+            throw new AuthError('Not signed in. Connect the account in Settings → Plugins.')
           this.d.store.setSecret(id, OAUTH_KEY, JSON.stringify(next))
           return next.accessToken
         } catch (err) {
-          if (err instanceof AuthError && err.revoked) this.d.store.setSecret(id, OAUTH_KEY, null)
+          if (err instanceof AuthError && err.revoked && this.generation(id) === started)
+            this.d.store.setSecret(id, OAUTH_KEY, null)
           throw err
         }
       })().finally(() => this.refreshing.delete(id))

@@ -173,6 +173,12 @@ export function signIn(
         res.writeHead(404).end()
         return
       }
+      // A request for a different sign-in (a stale tab, or a page or program
+      // poking the port) is answered but doesn't end this one (L18).
+      if (new URL(req.url, 'http://127.0.0.1').searchParams.get('state') !== state) {
+        page(res, "This link isn't for the sign-in Custard is waiting for.")
+        return
+      }
       try {
         const code = parseCallback(req.url, state)
         const tokens = await exchangeCode(spec, clientId, code, verifier, o)
