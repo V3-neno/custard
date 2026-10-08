@@ -42,15 +42,15 @@ type ToolResult = string | { content: string; isError?: boolean }
 
 ## `ctx`
 
-| Member                            | What it does                                                                            | Needs                                                  |
-| --------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `ctx.signal`                      | `AbortSignal`, aborted on timeout, Stop, or disable                                     | —                                                      |
-| `ctx.fetch(url, init?)`           | HTTPS request through the host. Returns `{ status, ok, headers.get(), text(), json() }` | `permissions.network` lists the host                   |
-| `ctx.fetch(url, { auth: true })`  | Same, and the host adds `Authorization: Bearer <token>` for the signed-in account       | `auth` in the manifest; only for `auth.apiHosts`       |
-| `ctx.storage.get/set/delete(key)` | Plugin-scoped JSON storage, 1 MB in total                                               | `permissions.storage: true`                            |
-| `ctx.config`                      | The user's non-secret configuration values, with defaults                               | —                                                      |
-| `ctx.openExternal(url)`           | Asks the OS to open a link                                                              | URL starts with a prefix in `permissions.openExternal` |
-| `ctx.log(message)`                | A line in the plugin's log in Settings (redacted, last 50 kept)                         | —                                                      |
+| Member                            | What it does                                                                            | Needs                                                                                                                                                  |
+| --------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ctx.signal`                      | `AbortSignal`, aborted on timeout, Stop, or disable                                     | —                                                                                                                                                      |
+| `ctx.fetch(url, init?)`           | HTTPS request through the host. Returns `{ status, ok, headers.get(), text(), json() }` | `permissions.network` lists the host                                                                                                                   |
+| `ctx.fetch(url, { auth: true })`  | Same, and the host adds `Authorization: Bearer <token>` for the signed-in account       | `auth` in the manifest; only for `auth.apiHosts`                                                                                                       |
+| `ctx.storage.get/set/delete(key)` | Plugin-scoped JSON storage, 1 MB in total                                               | `permissions.storage: true`                                                                                                                            |
+| `ctx.config`                      | The user's non-secret configuration values, with defaults                               | —                                                                                                                                                      |
+| `ctx.openExternal(url)`           | Asks the OS to open a link                                                              | URL starts with a prefix in `permissions.openExternal` and uses only plain URL characters (no spaces, quotes, backslashes or non-ASCII; use %-escapes) |
+| `ctx.log(message)`                | A line in the plugin's log in Settings (redacted, last 50 kept)                         | —                                                                                                                                                      |
 
 ### `ctx.fetch` rules (enforced by the host)
 

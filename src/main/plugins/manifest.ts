@@ -31,10 +31,36 @@ const BLOCKED_SCHEMES = new Set([
   'smb',
   'jar',
   'search-ms',
+  'search',
   'ms-msdt',
   'ms-settings',
-  'shell'
+  'shell',
+  // Windows help, archive and remote-content handlers.
+  'its',
+  'mk',
+  'hcp',
+  'res',
+  'mhtml',
+  'jnlp',
+  // Remote shares and logins.
+  'ldap',
+  'ssh',
+  'telnet',
+  'nfs',
+  'dav',
+  'webdav',
+  'cifs',
+  // Editors whose links can open terminals or install extensions.
+  'vscode',
+  'vscode-insiders',
+  'cursor'
 ])
+
+// What ctx.openExternal may pass on: unreserved and reserved URL characters
+// (RFC 3986) and %-escapes, without "'". No spaces, quotes, backslashes or
+// other characters an app's command line could read as more arguments.
+export const PLAIN_URL =
+  /^[A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=]*(%[0-9A-Fa-f]{2}[A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=]*)*$/
 
 // Tool names as the model sees them. Both Claude and OpenAI require
 // ^[a-zA-Z0-9_-]{1,64}$, so "spotify.search" becomes "spotify__search".

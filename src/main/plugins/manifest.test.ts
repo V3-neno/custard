@@ -95,6 +95,21 @@ describe('manifest', () => {
       /openExternal/
     ],
     [
+      'scheme that runs commands or remote files (L20)',
+      (m) => ((m.permissions as Record<string, unknown>).openExternal = ['search:']),
+      /openExternal/
+    ],
+    [
+      'remote help or archive scheme (L20)',
+      (m) => ((m.permissions as Record<string, unknown>).openExternal = ['its:']),
+      /openExternal/
+    ],
+    [
+      'editor scheme that can open a shell (L20)',
+      (m) => ((m.permissions as Record<string, unknown>).openExternal = ['vscode:']),
+      /openExternal/
+    ],
+    [
       'duplicate tools',
       (m) => (m.tools as unknown[]).push((m.tools as unknown[])[0]),
       /duplicate tool name/

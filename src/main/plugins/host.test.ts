@@ -659,6 +659,26 @@ describe('capabilities', () => {
     expect(opened).toEqual(['demo:item/1'])
   })
 
+  it('opens only links made of plain URL characters (L20)', async () => {
+    writePlugin({})
+    await activate()
+    for (const url of [
+      'demo:x" --inspect',
+      "demo:x'y",
+      'demo:x\\..\\y',
+      'demo:x<y>',
+      'demo:x`y`',
+      'demo:x|y',
+      'demo:caf\u00e9',
+      'demo:x^y'
+    ])
+      expect((await invoke('demo__open', { url })).content, url).toMatch(/may not open/)
+    expect(
+      (await invoke('demo__open', { url: 'demo:track/4uLU6hMC?si=a%20b&x=1#t' })).content
+    ).toBe('opened')
+    expect(opened).toEqual(['demo:track/4uLU6hMC?si=a%20b&x=1#t'])
+  })
+
   it('refuses capabilities outside an active call', async () => {
     writePlugin({})
     await activate()

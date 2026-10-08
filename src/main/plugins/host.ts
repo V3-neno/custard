@@ -18,6 +18,7 @@ import {
   fullToolName,
   parseManifest,
   permissionsOf,
+  PLAIN_URL,
   PLUGIN_ID,
   splitToolName
 } from './manifest'
@@ -879,11 +880,7 @@ export class PluginHost {
           const prefixes = manifest.permissions.openExternal.filter((p) =>
             granted.includes(`open:${p}`)
           )
-          if (
-            url.length > 2000 ||
-            [...url].some((ch) => ch.charCodeAt(0) < 33) ||
-            !prefixes.some((p) => url.startsWith(p))
-          )
+          if (url.length > 2000 || !PLAIN_URL.test(url) || !prefixes.some((p) => url.startsWith(p)))
             throw new Error('This plugin may not open that link.')
           if (url.startsWith('https://')) new URL(url)
           await this.d.openExternal(url)
