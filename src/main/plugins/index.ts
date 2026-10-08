@@ -151,6 +151,21 @@ export function registerPluginHandlers(): void {
   )
   handle('plugins:connect', (_, id: string) => h().connect(id))
   handle('plugins:disconnect', (_, id: string) => h().disconnect(id))
+  handle('plugins:resetSecrets', async (e, id: string) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const opts = {
+      type: 'warning' as const,
+      buttons: ['Cancel', 'Reset'],
+      defaultId: 0,
+      cancelId: 0,
+      message: `Reset ${h().status(id).name}'s saved secrets?`,
+      detail:
+        "Custard can't decrypt them right now. Resetting deletes them for good: the account sign-in and any secret settings. If your keyring or secure storage is only locked, cancel, unlock it and restart Custard instead."
+    }
+    const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
+    if (r.response !== 1) return h().status(id)
+    return h().resetSecrets(id)
+  })
   handle('plugins:create', (_, id: string, name: string) => {
     scaffoldPlugin(pluginsRoot(), String(id), String(name))
     return h().status(id)

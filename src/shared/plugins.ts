@@ -102,6 +102,9 @@ export type PluginStatus = {
     secretsSet: string[]
   }
   auth: { connected: boolean } | null
+  // Saved secrets exist but can't be decrypted now. They're kept untouched;
+  // changing them waits until they can be read or the user resets them.
+  secretsLocked?: boolean
   tools: { name: string; fullName: string; effect: 'read' | 'write'; askEveryTime: boolean }[]
   errors: { at: number; message: string }[]
   log: string[]

@@ -216,7 +216,8 @@ export class PluginHost {
       } catch {
         sourceChanged = true
       }
-    const secrets = this.d.store.secrets(id)
+    const secretsLocked = this.d.store.secretsLocked(id)
+    const secrets = secretsLocked ? {} : this.d.store.secrets(id)
     const fields = m?.config ?? {}
     const values: ConfigValues = {}
     for (const [k, f] of Object.entries(fields))
@@ -238,6 +239,7 @@ export class PluginHost {
       granted: st.granted,
       config: { fields, values, secretsSet: Object.keys(secrets).filter((k) => k !== OAUTH_KEY) },
       auth: m?.auth ? { connected: !!secrets[OAUTH_KEY] } : null,
+      ...(secretsLocked ? { secretsLocked: true } : {}),
       tools: (m?.tools ?? []).map((t) => ({
         name: t.name,
         fullName: fullToolName(id, t.name),
@@ -557,6 +559,13 @@ export class PluginHost {
     return this.status(id)
   }
 
+  // The user's explicit choice when saved secrets can't be decrypted: delete
+  // them (account sign-in and secret settings) so new ones can be saved.
+  resetSecrets(id: string): PluginStatus {
+    this.d.store.resetSecrets(id)
+    return this.status(id)
+  }
+
   // Chat integration
 
   private activeManifest(id: string): {
@@ -628,6 +637,8 @@ export class PluginHost {
   }
 
   private secretValues(id: string): string[] {
+    // Locked secrets can't reach the plugin either, so there is nothing to hide.
+    if (this.d.store.secretsLocked(id)) return []
     const all = this.d.store.secrets(id)
     const values = Object.entries(all)
       .filter(([k]) => k !== OAUTH_KEY)

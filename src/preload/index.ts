@@ -63,6 +63,8 @@ const custard = {
       ipcRenderer.invoke('plugins:setAskEveryTime', id, tool, ask),
     connect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:connect', id),
     disconnect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disconnect', id),
+    resetSecrets: (id: string): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:resetSecrets', id),
     create: (id: string, name: string): Promise<PluginStatus> =>
       ipcRenderer.invoke('plugins:create', id, name),
     labels: (): Promise<Record<string, string>> => ipcRenderer.invoke('plugins:labels'),

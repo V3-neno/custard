@@ -47,6 +47,14 @@ const emptyState = (): StateFile => ({
 
 const MAX_DATA_BYTES = 1024 * 1024
 
+export class SecretsLockedError extends Error {
+  constructor() {
+    super(
+      "Custard can't read this plugin's saved secrets right now: the system's secure storage refused. Nothing was changed. Unlock it (or sign in to your keyring) and restart Custard, or reset the plugin's saved secrets in Settings → Plugins."
+    )
+  }
+}
+
 function writeAtomic(path: string, data: string | Buffer): void {
   const tmp = `${path}.${process.pid}.tmp`
   writeFileSync(tmp, data)
@@ -169,16 +177,42 @@ export class PluginStore {
     writeAtomic(this.file(id, 'config.json'), JSON.stringify(values, null, 2))
   }
 
+  // A secrets file that can't be decrypted (secure storage locked, changed or
+  // refused) is not the same as no secrets: it throws SecretsLockedError and
+  // is left exactly as it is, so nothing in it is lost or overwritten.
   secrets(id: string): Record<string, string> {
     const path = join(this.dir(id), 'secrets.bin')
     if (!existsSync(path)) return {}
+    let parsed: unknown
     try {
-      return JSON.parse(this.crypto.decrypt(readFileSync(path)))
+      parsed = JSON.parse(this.crypto.decrypt(readFileSync(path)))
     } catch {
-      return {}
+      throw new SecretsLockedError()
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      throw new SecretsLockedError()
+    return parsed as Record<string, string>
+  }
+
+  // Whether the secrets can be read now; never throws.
+  secretsLocked(id: string): boolean {
+    try {
+      this.secrets(id)
+      return false
+    } catch (err) {
+      if (err instanceof SecretsLockedError) return true
+      throw err
     }
   }
 
+  // Deletes the secrets file, readable or not. Only for an explicit reset by
+  // the user (or uninstall, which removes everything).
+  resetSecrets(id: string): void {
+    rmSync(join(this.dir(id), 'secrets.bin'), { force: true })
+  }
+
+  // Refuses (SecretsLockedError) while the existing secrets can't be read,
+  // rather than replacing them.
   setSecret(id: string, key: string, value: string | null): void {
     const all = this.secrets(id)
     if (value === null) delete all[key]
