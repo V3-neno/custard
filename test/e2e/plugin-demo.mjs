@@ -11,6 +11,13 @@ import { createRequire } from 'module'
 import fs from 'fs'
 const [, , OUT, SHOTS] = process.argv
 const PLUGIN_DIR = OUT + '/plugin'
+// The demo bumps 1.0.0 to 1.0.1, so start the copy at 1.0.0 whatever the
+// plugin's current version is.
+const pluginJson = PLUGIN_DIR + '/spotify/plugin.json'
+fs.writeFileSync(
+  pluginJson,
+  fs.readFileSync(pluginJson, 'utf8').replace(/"version": "[^"]+"/, '"version": "1.0.0"')
+)
 const app = await electron.launch({
   executablePath: createRequire(import.meta.url)('electron'),
   // --no-sandbox only for running as root in a Linux container.
@@ -98,6 +105,19 @@ try {
   await send(
     'Bump the version to 1.0.1, check you cannot touch core files, then validate and test.'
   )
+  // Every file change is shown in full and approved on its own.
+  const card = w.locator('[role=alertdialog]')
+  await card.first().waitFor({ timeout: 60000 })
+  const cardText = await card.first().innerText()
+  check(
+    cardText.includes('Replace plugin.json') && cardText.includes('+   "version": "1.0.1"'),
+    'the version bump is shown as a diff before it is written'
+  )
+  check(
+    JSON.parse(fs.readFileSync(pluginJson, 'utf8')).version === '1.0.0',
+    'nothing is written before Allow'
+  )
+  await card.first().getByRole('button', { name: 'Allow', exact: true }).click()
   await w.waitForSelector('text=It is not active yet', { timeout: 60000 })
   await idle()
   await shot('02-edit-validate-test')

@@ -144,6 +144,8 @@ try {
   step('An action whose outcome is unknown')
   await send('stop test')
   await w.waitForSelector(card, { timeout: 30000 })
+  // The note the model creates first is approved on its own.
+  await w.click(`${card} button:text-is("Allow")`)
   await w.click(`${card} button:text-is("Allow for this chat")`)
   check(await until(() => queuePosts() === 1), 'the queue request reached Spotify (no answer)')
   await w.click('button[title=Stop]')

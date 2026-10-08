@@ -446,7 +446,7 @@ http
           'Logged it, and the other note'
         ],
         // Never gives a final answer, to reach the step limit.
-        loop: [() => tool('vault_read', { path: 'Log.md' })],
+        loop: [() => tool('vault_read', { path: 'Home.md' })],
         // Search, read a result, try a link with private data in it, try
         // another search, then answer citing the page it read.
         web: [
