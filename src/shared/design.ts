@@ -310,6 +310,23 @@ export type PluginMediaSpec = {
 
 // What those tools return in their result `data` (validated by the host;
 // anything else is an error). Plugin output is untrusted.
+// What those tools receive (docs/design/MEDIA-PLUGINS.md). References come
+// inline; the plugin never gets a path.
+export type PluginMediaSubmitInput = {
+  operation: MediaOperation
+  prompt: string
+  idempotencyKey: string
+  references?: { name: string; mime: string; base64: string }[]
+  size?: { width: number; height: number }
+  durationSeconds?: number
+  format?: string
+}
+// status, result and cancel.
+export type PluginMediaJobInput = { remoteId: string }
+// A submit error's data may say `sent: false` when the plugin's service never
+// got the request; otherwise the outcome is unknown. Cancel returns
+// { state: 'cancelled' } only when the service confirms it.
+
 export type PluginMediaSubmitData = { remoteId: string; status: RemoteStatus }
 export type PluginMediaStatusData = RemoteStatus
 // Files come back inline (base64) or as an https URL on a host the plugin's

@@ -166,6 +166,8 @@ export function describePermission(p: string): string {
       return `Send your account's access token to ${v}`
     case 'account-scope':
       return `Account access: ${v}`
+    case 'media':
+      return `Offer its "${v}" image or video generation to Design (each job asks first)`
     case 'widget':
       return `Show its "${v}" panel in chats when the assistant or you open it`
     case 'action':

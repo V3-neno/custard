@@ -42,6 +42,20 @@ export type JobDeps = {
 
 const TERMINAL = new Set<Job['state']>(['completed', 'failed', 'cancelled'])
 
+// A result the provider says can never be used (MediaError 'rejected' or
+// 'unsupported' from result(): a wrong type, a refused file). Anything else,
+// such as an expired link or a network error, may work on a later check.
+const permanent = (err: unknown): err is MediaError =>
+  err instanceof MediaError && (err.kind === 'rejected' || err.kind === 'unsupported')
+
+function failResult(job: Job, err: MediaError): Job {
+  job.state = 'failed'
+  job.errorKind = err.kind
+  job.error = `The result can't be used: ${err.message}`
+  job.tracking = false
+  return job
+}
+
 export class JobTracker {
   private jobs = new Map<string, Job>()
   private now: () => number
@@ -88,7 +102,12 @@ export class JobTracker {
     const job = this.jobs.get(id)
     if (!job) throw new JobError('There is no such job.')
     const provider = this.deps.provider(job.providerId)
-    if (!provider) throw new JobError("The provider for this job isn't available now.")
+    if (!provider)
+      throw new JobError(
+        job.providerId.startsWith('plugin:')
+          ? "The plugin behind this job was removed or turned off, so it can't be checked. Saved outputs stay."
+          : "The provider for this job isn't available now."
+      )
     const info = provider.info()
     if (info.state !== 'ready')
       throw new JobError(`${info.name} isn't ready${info.needs ? `: ${info.needs}` : '.'}`)
@@ -205,6 +224,7 @@ export class JobTracker {
     try {
       files = await provider.result(job.remoteId, signal)
     } catch (err) {
+      if (permanent(err)) return { job: this.put(failResult(job, err)) }
       // Done at the provider; fetching the result can be tried again.
       job.state = 'running'
       job.error = `The result couldn't be fetched yet: ${err instanceof Error ? err.message : String(err)}`
@@ -231,6 +251,7 @@ export class JobTracker {
     try {
       files = await provider.result(job.remoteId, signal)
     } catch (err) {
+      if (permanent(err)) return { job: this.put(failResult(job, err)) }
       job.error = `The result couldn't be fetched yet: ${err instanceof Error ? err.message : String(err)}`
       return { job: this.put(job) }
     }

@@ -270,6 +270,49 @@ describe('design tools', () => {
     expect(c.asked).toEqual([])
   })
 
+  it('a result that can never be used fails the job instead of being fetched again', async () => {
+    const base = slowVideo()
+    const p: MediaProvider = {
+      ...base,
+      info: base.info,
+      submit: async (r, o) => ({ ...(await base.submit(r, o)), status: { state: 'completed' } }),
+      result: async () => {
+        throw new MediaError('rejected', "Returned text/html, which it didn't declare.", true)
+      }
+    }
+    const s = service(p)
+    await runDesignTool(
+      s,
+      'design_media',
+      { operation: 'video.text-to-video', prompt: 'waves', durationSeconds: 5 },
+      ctx()
+    )
+    const [job] = s.jobs.list(CHAT)
+    expect(job.state).toBe('failed')
+    expect(job.error).toMatch(/can't be used: Returned text\/html/)
+    expect(s.artifacts.list(CHAT)[0].versions[0].status).toBe('failed')
+  })
+
+  it('a removed plugin says so', async () => {
+    const t = new JobTracker({ provider: () => null, save: () => {} }, [
+      {
+        id: 'j',
+        idempotencyKey: 'j',
+        providerId: 'plugin:x:y',
+        request: { operation: 'video.text-to-video', prompt: 'waves', references: [] },
+        requestedBy: { conversationId: CHAT, messageIndex: 0 },
+        target: { artifactId: 'a', versionId: 'v' },
+        state: 'running',
+        remoteId: 'r',
+        tracking: false,
+        checks: 0,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ])
+    await expect(t.check('j')).rejects.toThrow(/removed or turned off/)
+  })
+
   it('declined: nothing is sent or saved', async () => {
     const p = slowVideo()
     const s = service(p)
