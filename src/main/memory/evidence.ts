@@ -40,6 +40,30 @@ export type Evidence = {
   // The assistant's answer was left out because the chat has attached files
   // it may quote or describe.
   answerLeftOut?: boolean
+  // Files were in the conversation (see filesInContext): only the user's
+  // own words and structured action metadata are included.
+  fileSafe?: boolean
+}
+
+// Whether attached files were in the model's context by message `to`: this
+// chat's files, or a chat it continues that had files (its summary may
+// describe them). From then on everything a model wrote (answers, action
+// labels and inputs, and results of what it asked for) may carry file
+// content, so none of it goes to the memory summarizer.
+export const filesInContext = (c: Conversation, to: number): boolean =>
+  (c.attachments ?? []).some((a) => a.message < to) ||
+  !!c.continuedFrom?.files?.length ||
+  !!c.continuedFrom?.moreFiles
+
+// What notices say, in Custard's fixed words, for chats with files (a notice
+// can hold a provider's error text).
+const NOTICE_WORDS: Record<string, string> = {
+  stopped: 'A turn was stopped by the user.',
+  error: 'A turn ended with an error.',
+  interrupted: 'A turn was interrupted.',
+  'cut-off': 'A reply was cut off at the length limit.',
+  'step-limit': 'A turn stopped at the step limit.',
+  'too-long': 'The chat grew too long for the model.'
 }
 
 // A backstop, not a guarantee: obvious credentials and long opaque strings.
@@ -144,9 +168,8 @@ export function buildEvidence(
   // conversation, the assistant's answer is left out, since it may quote or
   // describe the file. Contents a model copied into an action label can't
   // all be recognized; see docs/attachments.md.
-  const attached = c.attachments ?? []
   const unnamed = scrubber(fileNames(c))
-  const filesSeen = attached.some((a) => a.message < to)
+  const filesSeen = filesInContext(c, to)
   const actions: EvidenceAction[] = []
   for (const m of msgs)
     if (m.role === 'assistant' && typeof m.content !== 'string')
@@ -157,15 +180,18 @@ export function buildEvidence(
           if (plugin && skipPlugins.includes(plugin)) continue
           actions.push({
             id: `A${actions.length + 1}`,
-            label: unnamed(a?.label || b.name),
+            // With files in context, the label (built from the model's input)
+            // becomes the tool's name: structured metadata only.
+            label: filesSeen ? b.name : unnamed(a?.label || b.name),
             tool: b.name,
             plugin,
             write: a?.write ?? false,
             status: a?.status ?? 'unknown',
             content: CONTENT_TOOLS.test(b.name),
-            result: CONTENT_TOOLS.test(b.name)
-              ? ''
-              : unnamed(redact(cut(a?.result ?? '', LIMITS.result)))
+            result:
+              CONTENT_TOOLS.test(b.name) || filesSeen
+                ? ''
+                : unnamed(redact(cut(a?.result ?? '', LIMITS.result)))
           })
         }
   const answerMsg = [...msgs].reverse().find((m) => m.role === 'assistant' && textOf(m).trim())
@@ -181,7 +207,7 @@ export function buildEvidence(
   // name them nor make the range look eventful.
   const notices = (c.notices ?? [])
     .filter((n) => n.after > from && n.after <= to && n.kind !== 'files')
-    .map((n) => unnamed(n.text))
+    .map((n) => (filesSeen ? (NOTICE_WORDS[n.kind] ?? 'A turn ended early.') : unnamed(n.text)))
   return {
     requests: asked
       .filter((r) => r.text || r.files)
@@ -194,7 +220,8 @@ export function buildEvidence(
     dontRemember,
     forgetChat: !!dontRemember && /^(?:please\s+)?forget\b/i.test(dontRemember),
     typed: requests.length,
-    ...(answerMsg && filesSeen ? { answerLeftOut: true } : {})
+    ...(answerMsg && filesSeen ? { answerLeftOut: true } : {}),
+    ...(filesSeen ? { fileSafe: true } : {})
   }
 }
 
@@ -205,6 +232,9 @@ export function evidenceText(e: Evidence): string {
     [
       'User requests (oldest first):',
       ...ev.requests.map((r, n) => `${n + 1}. ${r}`),
+      ev.fileSafe
+        ? "\nThis chat had attached files. To keep their names and contents out of memory, actions show only the tool's name and Custard's recorded status; their inputs, results and the assistant's words are withheld. Don't guess at them."
+        : '',
       '',
       "Actions, in order, with Custard's own record of each outcome:",
       ...ev.actions.map(

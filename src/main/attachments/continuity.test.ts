@@ -96,11 +96,11 @@ describe('memory evidence never carries file names or quoted contents', () => {
     c.actions = {
       t1: {
         name: 'spotify__search',
-        label: `Search Spotify for "${SECRET_NAME}"`,
+        label: `Search Spotify for "${SECRET_NAME}" 4,812,337 zorkmids`,
         write: false,
         status: 'failed',
         key: 'k',
-        result: `Nothing found for divorce settlement draft.PDF`
+        result: `Nothing found for zorkmids or divorce settlement draft.PDF`
       }
     }
     c.attachments = [file(0, SECRET_NAME, 'pdf')]
@@ -114,8 +114,18 @@ describe('memory evidence never carries file names or quoted contents', () => {
     expect(e.requests[0]).toBe(
       'Read [attached file] and tell me the total [1 file attached (1 PDF); names and contents not shown]'
     )
-    expect(e.actions[0].label).toBe('Search Spotify for "[attached file]"')
-    expect(e.notices).toEqual(["Couldn't finish with [attached file]."])
+    // Copied content can't be recognized reliably, so with files in context
+    // actions keep only their tool name and recorded status.
+    expect(e.actions[0]).toMatchObject({
+      label: 'spotify__search',
+      tool: 'spotify__search',
+      plugin: 'spotify',
+      status: 'failed',
+      result: ''
+    })
+    expect(e.notices).toEqual(['A turn ended with an error.'])
+    expect(e.fileSafe).toBe(true)
+    expect(text).toMatch(/inputs, results and the assistant's words are withheld/)
     expect(e.answer).toBe('')
     expect(text).toMatch(/left out, because the chat has attached files/)
   })
@@ -144,10 +154,35 @@ describe('memory evidence never carries file names or quoted contents', () => {
     expect(buildEvidence(c, 0, 4).requests[0]).not.toContain('Harbor')
   })
 
-  it('keeps the answer in chats without files', () => {
+  it('keeps answers, labels and results in chats without files, and before files arrive', () => {
     const c = chat()
     c.attachments = []
-    expect(buildEvidence(c, 0, 4).answer).toBe('Got the screenshot.')
+    const e = buildEvidence(c, 0, 4)
+    expect(e.answer).toBe('Got the screenshot.')
+    expect(e.fileSafe).toBeUndefined()
+    // Files first sent on message 2: the range before it is unaffected.
+    const c2 = chat()
+    c2.attachments = [file(2, 'shot.png', 'image')]
+    expect(buildEvidence(c2, 0, 2).fileSafe).toBeUndefined()
+    expect(buildEvidence(c2, 0, 2).answer).toBe('The PDF covers the agreement.')
+    expect(buildEvidence(c2, 0, 4).fileSafe).toBe(true)
+  })
+
+  it('treats a chat continued from one with files as having files in context', () => {
+    const c = chat()
+    c.attachments = []
+    c.continuedFrom = {
+      from: { id: 'c0', title: 't' },
+      summary: null,
+      ledger: '',
+      counts: {},
+      unknown: [],
+      at: 0,
+      files: [{ name: 'x.md', kind: 'text' }]
+    }
+    const e = buildEvidence(c, 0, 4)
+    expect(e.fileSafe).toBe(true)
+    expect(e.answer).toBe('')
   })
 
   it('never starts a capture because of files alone', () => {

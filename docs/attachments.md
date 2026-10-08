@@ -169,21 +169,35 @@ longer sent.
 - **Memory: type and count only** (Neno's choice, 2026-10-08). Each request
   in the evidence notes how many files of which types came with it, e.g.
   `[2 files attached (1 image, 1 PDF); names and contents not shown]`.
-  The summarizer is told not to guess what the files held. To keep names
-  and contents out even when they are quoted:
-  - file names (this chat's, and those listed from a chat it continues) are
-    replaced by `[attached file]` in the user's words, action labels and
-    results, notices, and in capture note titles and file names, including a
-    name cut off at the end of a chat title;
-  - the assistant's answer is left out once the chat has files, since it may
-    quote or describe them;
-  - notices about files are left out, and messages with only files don't
-    count toward starting a capture, so files alone never start one.
+  The summarizer is told not to guess what the files held.
 
-  **Known gap:** text a model copied from a file into an action label or a
-  plugin result (for example a search query) can't always be recognized and
-  is not removed, unless it is the file's name. The user's own words are kept
-  apart from the file names.
+  **The boundary.** Copied or paraphrased file text can't be detected
+  reliably, so Custard doesn't try. From the first message whose files were
+  sent (or from the start of a chat continued from one with files, whose
+  summary may describe them), memory evidence holds only:
+  - the user's own words, with file names (this chat's and those carried
+    from a chat it continues) replaced by `[attached file]`;
+  - each file message's count and types;
+  - for each action: the tool's name, its plugin, whether it changes
+    something, and Custard's recorded status.
+
+  Everything a model wrote is withheld: action labels (built from the
+  model's input, such as a search query), action results, notices' wording
+  (replaced by fixed words) and the assistant's answers. Notices about files
+  are left out, and messages with only files don't count toward starting a
+  capture, so files alone never start one. Capture note titles and file
+  names have file names scrubbed, including one cut off at the end of a chat
+  title. Messages before the first file message are unaffected.
+
+  **Trade-off.** In chats with files, capture notes keep the user's stated
+  preferences and decisions and which actions ran with what outcome, but
+  not what an action was for in detail or what a check saw. Such notes say
+  so in a line under their heading. A summarizer could still invent text,
+  but it has nothing from the files to repeat.
+
+  **What this doesn't cover:** the user's own words are kept (with file
+  names replaced). If the user types or pastes a file's text themselves, it
+  is treated as their words.
 
 - **Opt-outs.** Memory off, Forget and temporary chats work as before.
 
@@ -260,5 +274,7 @@ need a Windows build.
 - **Preserved thinking** after Claude compaction with replaced file notes is
   unverified.
 - **Memory capture with files** is checked end to end
-  (`test/e2e/attachments-memory.mjs`) against the mock summarizer; a live
-  summarizer's output hasn't been checked.
+  (`test/e2e/attachments-memory.mjs` and `test/e2e/attachments-leak.mjs`,
+  where file text reaches a search query, its label, its result and a
+  continuation summary) against the mock summarizer; a live summarizer's
+  output hasn't been checked.

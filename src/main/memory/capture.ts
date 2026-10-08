@@ -1,7 +1,14 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import type { CaptureJob, ChatMemory, Conversation, Provider } from '../../shared/chat'
 import type { MemorySettings } from '../../shared/memory'
-import { buildEvidence, eligible, evidenceText, titleWithoutFiles, type Evidence } from './evidence'
+import {
+  buildEvidence,
+  eligible,
+  evidenceText,
+  filesInContext,
+  titleWithoutFiles,
+  type Evidence
+} from './evidence'
 import { noteText, render, type Item, type Provenance, type Section } from './render'
 import type { Summarizer } from './summarize'
 import { CAPTURES, captureName, chatCaptures, deleteNotes, vaultId, writeCapture } from './write'
@@ -387,7 +394,7 @@ export class Capture {
     if (!still()) return false
     let written: string[]
     try {
-      written = this.write(vault, c, job.id, job.at, plan as Item[])
+      written = this.write(vault, c, job.id, job.at, plan as Item[], job.to)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       const attempt = job.attempts + (job.plan ? 1 : 0)
@@ -410,7 +417,14 @@ export class Capture {
   // plugin that has its own folder. Each is created only if its name is
   // free and is never written again; a note already holding this job (a
   // crash after writing, before the job was recorded) counts as written.
-  private write(vault: string, c: Conversation, jobId: string, at: number, plan: Item[]): string[] {
+  private write(
+    vault: string,
+    c: Conversation,
+    jobId: string,
+    at: number,
+    plan: Item[],
+    to: number
+  ): string[] {
     // The chat's title can hold a file's name (it comes from the first
     // message, or is the name itself); notes and their names never do.
     const title = titleWithoutFiles(c)
@@ -418,7 +432,8 @@ export class Capture {
       title,
       date: localDate(at),
       time: localTime(at),
-      chatId: c.id
+      chatId: c.id,
+      ...(filesInContext(c, to) ? { fileSafe: true } : {})
     }
     const parts = new Map<string, { folder: string; items: Item[] }>()
     const off = this.deps.settings().offPlugins

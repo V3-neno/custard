@@ -76,7 +76,14 @@ http
             expires_in: 3600,
             scope: 'user-read-playback-state user-read-currently-playing user-modify-playback-state'
           })
-        if (url.pathname === '/v1/search') return j(200, { tracks: { items: [track] } })
+        // Step 5: a query carrying a file's text comes back in a track name,
+        // so the tool result holds it too.
+        if (url.pathname === '/v1/search') {
+          const q = url.searchParams.get('q') ?? ''
+          return j(200, {
+            tracks: { items: [/LEAK-/.test(q) ? { ...track, name: `Echo of ${q}` } : track] }
+          })
+        }
         if (url.pathname === '/v1/me/player/devices')
           return j(200, {
             devices: [
@@ -122,7 +129,8 @@ http
                 constraints: ['Ask before queueing anything'],
                 decisions: ['Keep the playlist calm'],
                 open: ['Whether the queued track went through'],
-                state: 'The queue request got no answer.'
+                // A summary that repeats a file's text from the turns it read.
+                state: `The queue request got no answer.${(evidence.match(/LEAK-[A-Z]+-\d+[^."]*/) ?? []).map((m) => ` The file said ${m}.`).join('')}`
               })
             }
           ]
@@ -284,7 +292,11 @@ http
                                       ? 'reject'
                                       : /quote test/.test(ask)
                                         ? 'quote'
-                                        : 'plain'
+                                        : /leak test/.test(ask)
+                                          ? 'leak'
+                                          : /carry test/.test(ask)
+                                            ? 'carry'
+                                            : 'plain'
       // The provider says the request is too large.
       if (key === 'toolong')
         return j(400, {
@@ -359,6 +371,24 @@ http
       const scripts = {
         // Step 4: a long note read in two parts.
         reject: ['unused'],
+        // Step 5: searches with text copied from an attached file, or from a
+        // continued chat's summary.
+        leak: [
+          () => {
+            const doc = b.messages
+              .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
+              .find((c) => c.type === 'document' && c.source.type === 'text')
+            tool('spotify__search', { query: doc.source.data.split('\n')[0].trim() })
+          },
+          'Searched.'
+        ],
+        carry: [
+          () => {
+            const sys = (Array.isArray(b.system) ? b.system : []).map((x) => x.text).join('\n')
+            tool('spotify__search', { query: (sys.match(/LEAK-[A-Z]+-\d+[^."]*/) ?? ['none'])[0] })
+          },
+          'Searched again.'
+        ],
         // Step 5: an answer that quotes the attached files' names and text.
         quote: [
           () => {
