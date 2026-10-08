@@ -1,54 +1,79 @@
 # Spotify plugin
 
-Uses only the public Custard plugin API (`custard-plugin-sdk`). All changes are inside `plugin/spotify/`; no Custard core changes.
+Uses only the public Custard plugin API. Development changes stay inside `plugin/spotify/`; no core changes.
 
-## History-based Back investigation (1.2.1)
+## 1.3.1 — quieter player, direct seeking and volume
 
-**History-based Back is not implemented.** This is a safety/documentation revision, not a completed Back feature. It updates assistant instructions and the native Previous description/label so “Back to the song I just heard” is not silently routed to Spotify's native Previous.
+The `spotify/player` widget now has:
 
-The exact contract is blocked by incomplete/non-immediate history plus gaps between foreground observations. Playing a selected URI also has no established queue/context preservation guarantee. A useful observed-history or user-confirmed replay could be a separate explicitly approved design, but is not presented here as exact actual-listening-history Back.
+- No visible diagnostic paragraphs or routine tool-success output. Short actionable error/unknown/pending notices remain.
+- Hidden scrollbar/thumb, retaining wheel/keyboard overflow access on narrow layouts.
+- Timeline drag preview; release requests one seek through the normal approval flow. Native keyboard changes also request seek. **No separate Seek button.**
+- **Volume −/+**, changing Spotify volume by five percentage points, with observed percentage. Unsupported/unknown volume is disabled; no optimistic update or Windows-volume control.
+- Pause/resume, Next, and expanded Restart unchanged.
+- **Back still disabled**, with tooltip rather than an explanation paragraph. No native Previous substitution.
 
-See [History Back blockers, research, proposed occurrence/cursor semantics, widget handoff, scope requirements, and TV manual plan](HISTORY-BACK-BLOCKERS.md). No collector, cursor, Back tool, listening-data retention, additional scope or storage permission was added. `tests/back-intent.test.ts` tests only the new manifest safety contract, not history navigation.
+Seek remains subject to track changes during approval. Its warning is in hover/accessible help, not visible boilerplate. Existing service rechecks device, duration and restrictions, but cannot atomically bind to the displayed track.
 
-## Available tools and permissions
+See [widget architecture, compatibility, outcomes, verification boundaries and manual checklist](WIDGET.md).
 
-- **Read tools:** search, now_playing, devices, wait_for_device.
-- **Write tools:** add_to_queue, open, transfer_playback, next_track, previous_track, pause_playback, resume_playback, seek, adjust_volume. Each retains Custard's normal action approval.
-- **Network:** `api.spotify.com`, `accounts.spotify.com`.
-- **Open links:** `spotify:`.
-- **OAuth scopes:** `user-read-playback-state`, `user-read-currently-playing`, `user-modify-playback-state`.
-- **No storage**, filesystem, vault, Bluetooth, background work or UI capability.
-- **Sign-in:** host-managed OAuth PKCE; tokens never enter plugin code. Version 1.2.1 needs no new scope or scope-driven reauthorization. A future recently played integration would need `user-read-recently-played` and reconnection/reauthorization; that scope is not requested now.
+### Review and activate
 
-## Playback controls (1.2.0 implementation, preserved)
+1. Use a widget-v1-capable Custard build. `apiVersion: 1` alone does not imply widget support; older hosts reject `widgets`.
+2. Open **Settings → Plugins → Spotify**, review **1.3.1**, changed files and widget allowlist.
+3. Activate the update yourself. Editing, validation and mocked tests do not update the currently enabled player.
+4. Ask to reopen the player if needed. Enabling alone never shows it; closing is respected until requested again.
+
+The assistant cannot activate plugins. No live playback calls were made during this refinement. The user reported the prior player followed playback; this revision's layout/drag/volume behavior still needs live manual checking.
+
+### Permissions
+
+No new permission or OAuth scope. Widget allowlist expands to the already declared, approval-gated `adjust_volume` action.
+
+- Widget: `widget:player`.
+- Network: `api.spotify.com`, `accounts.spotify.com`.
+- Open: `spotify:` (not available to widget).
+- OAuth: `user-read-playback-state`, `user-read-currently-playing`, `user-modify-playback-state`. Tokens remain host-managed; no new reauthorization requirement.
+- Existing writes: add_to_queue, open, transfer_playback, next_track, previous_track, pause_playback, resume_playback, seek, adjust_volume.
+- Widget allowlist: now_playing (read); pause_playback, resume_playback, next_track, seek, adjust_volume (write).
+- No storage, filesystem, vault, OS Bluetooth, background worker, remote image/CDN or additional secret.
+
+## Widget contract
+
+Compact 240 px / expanded 330 px, bounds 200–360. Custard owns placement/header/close/presentation/approval/lifecycle/bridge; plugin owns internal UI. Empty object input only. Safe text nodes and bounded validated metadata; no provider URLs/credentials/configuration in widget data. Local artwork fallback remains because the SDK lacks a safe binary-response reader.
+
+Synchronous hidden mount, visibility/restoration reads, host-driven 15-second foreground refresh. No independent polling. Stale/device/capability checks, one pending action, bounded calls, late-response guards and cleanup remain. At most one immediate visible/in-budget read after completed/unknown actions; no automatic write retry. Command acceptance is not verified playback.
+
+Windows native view layout, focus entry/exit, real gesture enforcement and screen readers require manual testing. Mock DOM/bridge tests only verify plugin logic. No core Git/PR merge status is asserted.
+
+## Existing playback controls
 
 | Tool | Use |
 | --- | --- |
-| `spotify__next_track` | Requested skip to next track |
-| `spotify__previous_track` | Explicit Spotify native Previous request only; not listening-history Back or restart |
+| `spotify__next_track` | Explicit requested next/skip |
+| `spotify__previous_track` | Explicit Spotify native Previous only, not history Back or restart |
 | `spotify__pause_playback` | Requested pause |
-| `spotify__resume_playback` | Resume existing item; no context, URI list, offset or position supplied |
-| `spotify__seek` | Absolute `position_ms` inside a music track; zero requests restart; refuses unknown duration and at/beyond-end positions |
-| `spotify__adjust_volume` | `direction: "raise"` or `"lower"`, optional `amount_percent` in percentage points (default 5); clamps to 0–100 |
+| `spotify__resume_playback` | Resume existing item, no context/URI/offset/position supplied |
+| `spotify__seek` | Absolute milliseconds within current music; zero restarts without resume |
+| `spotify__adjust_volume` | Relative Spotify percentage-point change, default five, clamped 0–100 |
 
-These controls require the current active controllable device; optional `device_id` must match. Each preflights playback and sends at most one write. There is no implicit open, transfer, queue replacement, post-command polling or automatic control retry. Cancellation before dispatch prevents a write; after dispatch it cannot revoke one.
+Tools preflight active controllable device; optional device_id must match. No implicit open, transfer, queue replacement or write retry. A rejected 401 may be refreshed/retried by the host; uncertain writes are not replayed. Cancellation before dispatch prevents a write; after dispatch it cannot revoke one.
 
-Success means **API accepted, not playback verified**. One separately requested `now_playing` observation can check what Spotify reports later. Server/network failure after dispatch is **Outcome unknown** and must not be blindly repeated. The host can refresh and retry a rejected 401. Device restrictions, missing scopes, account limitations and rate limits are reported.
+`now_playing` preserves summary and final `playback_metadata` JSON v1, adding bounded `ToolResult.data` for the widget. Unknown values remain null. Data is a snapshot, not a listening-occurrence log.
 
-`now_playing` preserves its summary and session URI registration, appending a final `playback_metadata` JSON line (schema version 1). It reports track/artists/album/artwork/link, duration/position, state, device/volume support, observation time, Spotify timestamp and action restrictions. Unknown values remain null; episodes/ads do not masquerade as music tracks. This is not a listening-occurrence log.
+## History-based Back remains unavailable
 
-**Bluetooth:** Spotify Connect devices are not Bluetooth connections; SDK v1 cannot enumerate OS Bluetooth state. No sandbox workaround was added.
+Incomplete/delayed recent history and gaps between foreground observations prevent reliable actual-predecessor selection. Historical URI replay has no established queue/context preservation guarantee. No collector/cursor/history scope/storage/approximation was added.
 
-- [Existing playback schema, outcome semantics and integration handoff](PLAYBACK-HANDOFF.md) — describes the 1.2.0 implementation; the Back distinction above supersedes any broader Previous wording.
-- [Existing manual checklist](MANUAL-TESTS.md).
-- Existing mocked control, metadata, readiness and queue tests remain unchanged. No new live verification is claimed.
+- [History Back blockers](HISTORY-BACK-BLOCKERS.md) — historical investigation; current widget docs supersede its no-widget statement.
+- [Playback handoff](PLAYBACK-HANDOFF.md) — historical 1.2.0 implementation; current Back/widget guidance supersedes older wording.
+- [Existing control manual checklist](MANUAL-TESTS.md).
+- [Current widget manual checklist](WIDGET.md#manual-checklist--revised-behavior-not-live-verified).
 
-## Existing startup readiness (1.1.0, preserved)
+## Startup readiness, preserved
 
-For “open Spotify and queue songs”, use `open({ wait_for_device: true })`, await readiness, then queue searched tracks on the intended returned ID. Searches may run independently; dependent writes must wait. Plain `open({})` remains launch-only.
+For open-and-queue/play, await `open({ wait_for_device: true })` before dependent writes. Independent searches may run in parallel. Plain open is launch-only. Readiness defaults to 30 seconds (1–50 configurable), checks immediately then one second after responses; never starts/transfers/queues. Auth/permission/rate-limit failures stop promptly. An available Computer is not proof of the local computer; ask when ambiguous. Inactive devices can be explicitly queued to, not implicitly activated.
 
-The readiness timeout defaults to 30 seconds, configurable from 1–50. Checks happen immediately then one second after each response, exiting as soon as a controllable device matches. Open waits for a Computer device; standalone readiness can filter by ID or require active. Neither starts/transfers playback or queues tracks. The 60-second tool deadline remains unchanged.
+## Development
 
-Cancellation stops waits promptly; an already-started host read may finish. Empty lists, transient network/server failures can recover within the budget. Auth, permission and rate-limit failures stop immediately. Readiness never proves which Computer is this local app; ambiguous targets require asking. Explicit inactive queue targets do not implicitly activate them. Uncertain queue writes are never automatically retried.
-
-Development references inspected: `docs/API.md`, `docs/MANIFEST.md`, SDK source. The referenced `examples/spotify` folder was unavailable; the installed plugin and tests were the baseline.
+Inspected current API/manifest/widget references and existing implementation/tests. `examples/spotify` was requested but unavailable. Run `plugin_validate`, then `plugin_test`; review actual results rather than treating a code change as a passed check. Tests include existing service regressions, widget lifecycle/rendering tests and refinement tests for seek commits/cancellation, volume validation/mapping/guarding and concise output.
