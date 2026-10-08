@@ -46,7 +46,13 @@ import {
   recordClaudeCompaction,
   usesCompaction
 } from './compaction'
-import { runVaultTool, unreachableVaultPrompt, vaultSystemPrompt, vaultTools } from './vault'
+import {
+  previewNote,
+  runVaultTool,
+  unreachableVaultPrompt,
+  vaultSystemPrompt,
+  vaultTools
+} from './vault'
 import { withoutUnavailableTools } from './history'
 import { attachments } from './attachments'
 import { claudeFilesFrom, prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
@@ -452,10 +458,46 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
             warning
           )
       })
-    if (isVaultTool(c.name))
-      return vaultReady
-        ? runVaultTool(vault, c.name, c.input)
-        : { content: 'The vault is not connected right now.', isError: true, outcome: 'not-run' }
+    if (isVaultTool(c.name)) {
+      if (!vaultReady)
+        return {
+          content: 'The vault is not connected right now.',
+          isError: true,
+          outcome: 'not-run'
+        }
+      // A note the model wants to create is shown in full and approved on
+      // its own. Approval doesn't make what's in notes trustworthy.
+      if (c.name === 'vault_create_note' && !preApproved) {
+        let preview: ReturnType<typeof previewNote>
+        try {
+          preview = previewNote(vault, c.input)
+        } catch (err) {
+          return {
+            content: err instanceof Error ? err.message : String(err),
+            isError: true,
+            outcome: 'not-run'
+          }
+        }
+        const allowed = await approve({
+          pluginId: 'custard',
+          pluginName: 'Custard',
+          tool: c.name,
+          label: preview.label,
+          input: c.input,
+          detail: preview.detail,
+          individual: true
+        })
+        if (!allowed)
+          return {
+            content: controller.signal.aborted
+              ? 'Stopped before it ran, so nothing was done.'
+              : 'The user declined creating this note, so nothing was done.',
+            isError: true,
+            outcome: 'not-run'
+          }
+      }
+      return runVaultTool(vault, c.name, c.input)
+    }
     if (isPlugin)
       return pluginHost().invoke(c.name, c.input, {
         snapshot: plugins.snapshot,

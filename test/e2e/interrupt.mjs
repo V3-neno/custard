@@ -115,7 +115,10 @@ try {
 
   step('Stop during an action, in a round with a later write')
   await send('stop test')
-  await w.waitForSelector(card, { timeout: 30000 })
+  // The note the model creates first needs its own approval.
+  await w.waitForSelector(`${card}:has-text("Create note Log-before.md")`, { timeout: 30000 })
+  await w.click(`${card} button:text-is("Allow")`)
+  await w.waitForSelector(`${card}:has-text("Spotify queue")`, { timeout: 30000 })
   await w.click(`${card} button:text-is("Allow for this chat")`)
   check(
     await until(() => queuePosts() === 1),
@@ -124,10 +127,9 @@ try {
   await w.click('button[title=Stop]')
   await idle()
   await shot('step1-01-stopped')
-  const log = fs.readFileSync(OUT + '/vault/Log.md', 'utf8')
   check(
-    log.includes('before') && !log.includes('after'),
-    `the write before ran, the write after the stop never did (Log.md: ${JSON.stringify(log)})`
+    fs.existsSync(OUT + '/vault/Log-before.md') && !fs.existsSync(OUT + '/vault/Log-after.md'),
+    'the write before ran, the write after the stop never did'
   )
   check(
     (await w.locator('text=· outcome unknown').count()) === 1,
@@ -190,6 +192,8 @@ try {
   await w.click('button[title="Chat history"]')
   await w.click('button:has-text("New chat")')
   await send('mixed test')
+  await w.waitForSelector(`${card}:has-text("Create note Log-mixed.md")`, { timeout: 30000 })
+  await w.click(`${card} button:text-is("Allow")`)
   await w.waitForSelector('[role=status]:has-text("cut off")', { timeout: 30000 })
   await idle()
   const c3 = conversations().find((c) => c.title === 'mixed test')
@@ -201,10 +205,10 @@ try {
   await w.click('[role=status] button:text-is("Continue")')
   await w.waitForSelector('text=and here is the rest.', { timeout: 30000 })
   await idle()
-  const logAfter = fs.readFileSync(OUT + '/vault/Log.md', 'utf8')
+  const logAfter = fs.readFileSync(OUT + '/vault/Log-mixed.md', 'utf8')
   check(
-    logAfter.split('mixed').length === 2,
-    `the write ran once, not again on Continue (Log.md: ${JSON.stringify(logAfter)})`
+    logAfter.split('mixed').length === 2 && (await w.locator(card).count()) === 0,
+    `the write ran once, not again on Continue (Log-mixed.md: ${JSON.stringify(logAfter)})`
   )
   const lastReq = JSON.parse(fs.readFileSync(OUT + '/anthropic.json', 'utf8')).at(-1)
   check(

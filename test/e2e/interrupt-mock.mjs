@@ -422,11 +422,11 @@ http
           'Found it.'
         ],
         stop: [
-          () => tool('vault_append', { path: 'Log.md', content: 'before' }),
+          () => tool('vault_create_note', { path: 'Log-before.md', content: 'before' }),
           () => tool('spotify__search', { query: 'Nils Frahm Says' }),
           () => {
             tool('spotify__add_to_queue', { uris: [T1] })
-            tool('vault_append', { path: 'Log.md', content: 'after' })
+            tool('vault_create_note', { path: 'Log-after.md', content: 'after' })
           }
         ],
         again: [() => tool('spotify__add_to_queue', { uris: [T1] }), 'I did not queue it again.'],
@@ -440,7 +440,7 @@ http
         // One write that works and one read that fails, then a cut-off reply.
         mixed: [
           () => {
-            tool('vault_append', { path: 'Log.md', content: 'mixed' })
+            tool('vault_create_note', { path: 'Log-mixed.md', content: 'mixed' })
             tool('vault_read', { path: 'Missing.md' })
           },
           'Logged it, and the other note'

@@ -91,8 +91,8 @@ try {
   check(
     requests()[0]
       .tools.filter((t) => t.startsWith('vault_'))
-      .join() === 'vault_search,vault_list,vault_read,vault_create_note,vault_append',
-    'no note-editing tool is offered'
+      .join() === 'vault_search,vault_list,vault_read,vault_create_note',
+    'no note-editing or append tool is offered'
   )
   await shot('01-search')
 

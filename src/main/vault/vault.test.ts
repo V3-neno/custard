@@ -13,7 +13,14 @@ import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import type { Conversation } from '../../shared/chat'
 import { TurnLog, type Call } from '../turn'
-import { boundMemory, MEMORY_LIMITS, runVaultTool, vaultSystemPrompt, vaultTools } from '../vault'
+import {
+  boundMemory,
+  MEMORY_LIMITS,
+  previewNote,
+  runVaultTool,
+  vaultSystemPrompt,
+  vaultTools
+} from '../vault'
 import { fold, matchNote, parseQuery, search, searchVault, SEARCH_LIMITS, tagsOf } from './search'
 import { READ_LIMITS, readPart, versionOf } from './read'
 
@@ -325,14 +332,15 @@ describe('vault safeguards', () => {
     )
   })
 
-  it('reports create and append failures with the right outcome', async () => {
+  it('reports create failures with the right outcome, and refuses appends', async () => {
     note('exists.md', 'x')
     mkdirSync(join(vault, 'dir.md'))
     expect(await run('vault_create_note', { path: 'exists.md', content: 'y' })).toMatchObject({
       outcome: 'not-run'
     })
-    expect(await run('vault_append', { path: 'dir.md', content: 'y' })).toMatchObject({
-      outcome: 'failed'
+    // Appending is off: nothing is done, whatever the path.
+    expect(await run('vault_append', { path: 'exists.md', content: 'y' })).toMatchObject({
+      outcome: 'not-run'
     })
     writeFileSync(join(vault, 'blocker'), '')
     expect(await run('vault_create_note', { path: 'blocker/new.md', content: 'y' })).toMatchObject({
@@ -383,14 +391,28 @@ describe('vault safeguards', () => {
     )
   })
 
-  it('offers no edit tool: notes can only be created or appended to', () => {
+  it('offers no edit or append tool: notes can only be created', () => {
     expect(vaultTools.map((t) => t.name)).toEqual([
       'vault_search',
       'vault_list',
       'vault_read',
-      'vault_create_note',
-      'vault_append'
+      'vault_create_note'
     ])
+  })
+
+  it('previews a new note in full, warns for folders read into chats, and refuses existing ones', () => {
+    const long = `${'z'.repeat(5000)}\nEND-OF-NOTE`
+    const p = previewNote(vault, { path: 'Inbox/New.md', content: long })
+    expect(p.label).toBe('Create note Inbox/New.md')
+    expect(p.detail.endsWith(long)).toBe(true)
+    expect(p.detail).not.toMatch(/instructions/)
+    expect(previewNote(vault, { path: 'Custard/Captures/x.md', content: 'x' }).detail).toMatch(
+      /reads notes in this folder into every chat's instructions/
+    )
+    note('exists.md', 'x')
+    expect(() => previewNote(vault, { path: 'exists.md', content: 'y' })).toThrow(/already exists/)
+    symlinkSync(join(root, 'nowhere.md'), join(vault, 'dangling.md'))
+    expect(() => previewNote(vault, { path: 'dangling.md', content: 'y' })).toThrow()
   })
 
   it('automatic memory capture never goes through the vault tools', () => {
@@ -438,12 +460,12 @@ describe('vault safeguards', () => {
     )
     expect(results.map((r) => String(r.content).split(':')[0])).toEqual([
       'Not run',
-      "Couldn't open the note",
+      'Not run',
       '[exists.md · version ' + versionOf('x') + ' · the whole note, 1 characters]\nx'
     ])
     expect(Object.values(conv.actions ?? {}).map((a) => a.status)).toEqual([
       'not-run',
-      'failed',
+      'not-run',
       'completed'
     ])
   })

@@ -5,9 +5,28 @@ the notes. Nothing here has been tested live, on Windows, or with Obsidian
 running at the same time. Everything is covered by unit tests on a real
 temporary folder and by an end-to-end test against a mock provider.
 
-**Targeted editing is deferred, not built.** Custard's tools still only create
-new notes and append to notes. Nothing is ever replaced in place, overwritten,
-renamed or deleted. See "Deferred: targeted editing" below for why.
+**Targeted editing is deferred, not built.** The model can only create new
+notes, and each one needs the user's approval first. Nothing is ever replaced
+in place, overwritten, renamed or deleted. See "Deferred: targeted editing"
+below for why.
+
+**Approval and appends (hardening pass, 2026-10-08).**
+- **Creating a note asks every time.** The approval card shows the note's path
+  and its whole content, and "Allow for this chat" isn't offered. Notes in
+  folders Custard reads into every chat (`Custard/Memory.md`,
+  `Custard/Captures`, `Custard/Skills`, `Custard/Plugins`) get an extra
+  warning line.
+- **`vault_append` is off.** It is no longer offered, and a call to it does
+  nothing. This includes `Memory.md`. Shared-note changes stay deferred, so
+  the model offers a new note instead, or asks the user to edit the note.
+  Turning it off also removes the model's side of the race with Obsidian and
+  sync clients writing the same note. Approval would not have closed that
+  race.
+- **Retrieved notes stay untrusted.** Approving a note doesn't change how it
+  is read later: it is still data, not instructions.
+- **Automatic memory is unchanged.** It still writes one new note per capture
+  with exclusive create, under its own settings and privacy rules, without
+  asking.
 
 ## Search (`vault_search`, `src/main/vault/search.ts`)
 
@@ -99,11 +118,11 @@ changing afterwards, and nothing is written based on it.
   - **Capture items and older capture notes** left out for length are counted,
     with how to find them (`vault_search folder:Custard/Captures`).
   - **Skills** beyond 60 are counted, with how to list them.
-- **Write outcomes** (create and append) follow Step 1:
+- **Write outcomes** (note creation) follow Step 1:
   - a check that fails before anything is written is **not run**;
   - an error before the note was touched is **failed**;
   - an error after a write may have started is **outcome unknown**. That covers
-    an append failing part way, or a new note left behind by a failed create.
+    a new note left behind by a failed create.
 - **Continuity is unchanged.** Automatic memory writes one new note per capture
   with exclusive create, and never writes `Memory.md`. It doesn't go through
   the model's vault tools (a test checks this).
@@ -162,7 +181,7 @@ materially different integration. It is not being started.
 - safeguards:
   - a disconnected vault, for every tool;
   - list link handling;
-  - create and append outcomes, recorded through the Step 1 turn log;
+  - create outcomes, recorded through the Step 1 turn log;
   - the `Memory.md` bound and its offset;
   - the counts of what was left out;
   - no edit tool offered;
