@@ -1,33 +1,54 @@
 # Spotify plugin
 
-Uses only the public Custard plugin API (`custard-plugin-sdk`). Custard's core has no Spotify code.
+Uses only the public Custard plugin API (`custard-plugin-sdk`). All changes are inside `plugin/spotify/`; no Custard core changes.
+
+## History-based Back investigation (1.2.1)
+
+**History-based Back is not implemented.** This is a safety/documentation revision, not a completed Back feature. It updates assistant instructions and the native Previous description/label so “Back to the song I just heard” is not silently routed to Spotify's native Previous.
+
+The exact contract is blocked by incomplete/non-immediate history plus gaps between foreground observations. Playing a selected URI also has no established queue/context preservation guarantee. A useful observed-history or user-confirmed replay could be a separate explicitly approved design, but is not presented here as exact actual-listening-history Back.
+
+See [History Back blockers, research, proposed occurrence/cursor semantics, widget handoff, scope requirements, and TV manual plan](HISTORY-BACK-BLOCKERS.md). No collector, cursor, Back tool, listening-data retention, additional scope or storage permission was added. `tests/back-intent.test.ts` tests only the new manifest safety contract, not history navigation.
+
+## Available tools and permissions
 
 - **Read tools:** search, now_playing, devices, wait_for_device.
-- **Write tools:** add_to_queue, open, transfer_playback. Each retains Custard's action approval.
-- **Permissions (unchanged):** network access to `api.spotify.com` and `accounts.spotify.com`; open `spotify:` links; Spotify OAuth scopes `user-read-playback-state`, `user-read-currently-playing`, `user-modify-playback-state`. No storage, vault, filesystem or additional network permission.
-- **Sign-in:** host-managed OAuth PKCE. The plugin never receives tokens.
+- **Write tools:** add_to_queue, open, transfer_playback, next_track, previous_track, pause_playback, resume_playback, seek, adjust_volume. Each retains Custard's normal action approval.
+- **Network:** `api.spotify.com`, `accounts.spotify.com`.
+- **Open links:** `spotify:`.
+- **OAuth scopes:** `user-read-playback-state`, `user-read-currently-playing`, `user-modify-playback-state`.
+- **No storage**, filesystem, vault, Bluetooth, background work or UI capability.
+- **Sign-in:** host-managed OAuth PKCE; tokens never enter plugin code. Version 1.2.1 needs no new scope or scope-driven reauthorization. A future recently played integration would need `user-read-recently-played` and reconnection/reauthorization; that scope is not requested now.
 
-## Startup readiness (1.1.0)
+## Playback controls (1.2.0 implementation, preserved)
 
-For "open Spotify and queue songs", the assistant uses `open({ wait_for_device: true })`, awaits readiness, then queues the searched tracks on the intended returned device ID. Independent searches may happen in parallel; dependent actions must wait. A plain `open({})` remains launch-only and needs no API read.
+| Tool | Use |
+| --- | --- |
+| `spotify__next_track` | Requested skip to next track |
+| `spotify__previous_track` | Explicit Spotify native Previous request only; not listening-history Back or restart |
+| `spotify__pause_playback` | Requested pause |
+| `spotify__resume_playback` | Resume existing item; no context, URI list, offset or position supplied |
+| `spotify__seek` | Absolute `position_ms` inside a music track; zero requests restart; refuses unknown duration and at/beyond-end positions |
+| `spotify__adjust_volume` | `direction: "raise"` or `"lower"`, optional `amount_percent` in percentage points (default 5); clamps to 0–100 |
 
-The **Device readiness timeout (seconds)** setting defaults to **30**, configurable from **1–50**. Readiness checks immediately, then one second after each response, exiting as soon as a matching controllable device appears. Restricted and null-ID devices are excluded. Open waits for a Computer device; standalone `wait_for_device` can filter by device ID or require an active device. Polling never starts/transfers playback or queues tracks.
+These controls require the current active controllable device; optional `device_id` must match. Each preflights playback and sends at most one write. There is no implicit open, transfer, queue replacement, post-command polling or automatic control retry. Cancellation before dispatch prevents a write; after dispatch it cannot revoke one.
 
-Cancellation stops polling promptly, including while waiting on an HTTP response. Empty lists, transient network failures and server errors can recover within the budget. Authentication, permission and rate-limit errors stop promptly instead of wasting the startup wait or hammering Spotify. Slow reads are bounded by the overall readiness deadline. The SDK has no per-request cancellation: an already-started read may finish in the host, but the plugin will not issue more polls after the wait exits.
+Success means **API accepted, not playback verified**. One separately requested `now_playing` observation can check what Spotify reports later. Server/network failure after dispatch is **Outcome unknown** and must not be blindly repeated. The host can refresh and retry a rejected 401. Device restrictions, missing scopes, account limitations and rate limits are reported.
 
-### Limits and safety
+`now_playing` preserves its summary and session URI registration, appending a final `playback_metadata` JSON line (schema version 1). It reports track/artists/album/artwork/link, duration/position, state, device/volume support, observation time, Spotify timestamp and action restrictions. Unknown values remain null; episodes/ads do not masquerade as music tracks. This is not a listening-occurrence log.
 
-- Spotify Connect availability is a readiness signal, not proof of the local app's identity or a guarantee a later command succeeds. Existing computers can already be listed; the assistant must not guess between ambiguous devices.
-- An explicit inactive device can be passed to queueing. This does not automatically activate it; Spotify may still reject the command. No implicit playback transfer is performed.
-- Queue writes remain non-retrying to avoid duplicates; readiness waits occur before dependent actions, not as automatic action replays.
-- The tool timeout is 60 seconds, the host maximum. Readiness is capped at 50 seconds to leave reporting overhead. Open's launch time counts toward its readiness budget.
-- Multi-minute waits and generic orchestration across all plugins need a separate core/SDK proposal: longer cancellable tool deadlines (including provider/client lifecycle handling), progress reporting, and ideally request-level cancellation. This plugin does not bypass sandbox limits.
+**Bluetooth:** Spotify Connect devices are not Bluetooth connections; SDK v1 cannot enumerate OS Bluetooth state. No sandbox workaround was added.
 
-### Manual checks after activation
+- [Existing playback schema, outcome semantics and integration handoff](PLAYBACK-HANDOFF.md) — describes the 1.2.0 implementation; the Back distinction above supersedes any broader Previous wording.
+- [Existing manual checklist](MANUAL-TESTS.md).
+- Existing mocked control, metadata, readiness and queue tests remain unchanged. No new live verification is claimed.
 
-1. Close Spotify; request "open Spotify and queue two songs". Verify the open call stays pending until a Computer device appears, then the queue approval occurs.
-2. Repeat with Spotify ready: there should be no fixed 30-second delay.
-3. Keep Spotify signed out/offline or use a missing device ID: verify a bounded timeout with no playback or queue writes by the wait.
-4. Cancel a pending wait: verify no dependent action follows.
-5. Test multiple Computer devices: verify ambiguous target selection asks rather than guessing.
-6. Check queue failures are still reported accurately and never blindly replayed.
+## Existing startup readiness (1.1.0, preserved)
+
+For “open Spotify and queue songs”, use `open({ wait_for_device: true })`, await readiness, then queue searched tracks on the intended returned ID. Searches may run independently; dependent writes must wait. Plain `open({})` remains launch-only.
+
+The readiness timeout defaults to 30 seconds, configurable from 1–50. Checks happen immediately then one second after each response, exiting as soon as a controllable device matches. Open waits for a Computer device; standalone readiness can filter by ID or require active. Neither starts/transfers playback or queues tracks. The 60-second tool deadline remains unchanged.
+
+Cancellation stops waits promptly; an already-started host read may finish. Empty lists, transient network/server failures can recover within the budget. Auth, permission and rate-limit failures stop immediately. Readiness never proves which Computer is this local app; ambiguous targets require asking. Explicit inactive queue targets do not implicitly activate them. Uncertain queue writes are never automatically retried.
+
+Development references inspected: `docs/API.md`, `docs/MANIFEST.md`, SDK source. The referenced `examples/spotify` folder was unavailable; the installed plugin and tests were the baseline.
