@@ -1,6 +1,7 @@
 // Types shared by the plugin host (main process) and the Settings UI.
 // The manifest format itself is documented in docs/plugins/MANIFEST.md.
 
+import type { PluginMediaSpec } from './design'
 import type { WidgetSpec } from './widgets'
 
 export const PLUGIN_API_VERSION = 1
@@ -79,6 +80,9 @@ export type PluginManifest = {
   instructions?: string
   // UI the assistant can show next to the message box (see shared/widgets).
   widgets?: WidgetSpec[]
+  // Image or video generation the plugin offers to Design (see
+  // shared/design PluginMediaSpec). Optional; older manifests are unchanged.
+  media?: PluginMediaSpec[]
 }
 
 export type BuildInfo = { buildId: string; version: string; builtAt: number }

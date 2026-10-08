@@ -18,6 +18,15 @@ import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision } from '../shared/chat'
 import type {
+  Artifact,
+  ArtifactSummary,
+  CapabilityReport,
+  DesignEvent,
+  DesignSettings,
+  ExportResult,
+  Job
+} from '../shared/design'
+import type {
   PluginReview,
   PluginStatus,
   SecurityDefaults,
@@ -99,6 +108,52 @@ const custard = {
       const listener = (_: unknown, v: WidgetView | null): void => cb(v)
       ipcRenderer.on('widgets:state', listener)
       return () => ipcRenderer.removeListener('widgets:state', listener)
+    }
+  },
+  // Design mode's outputs, jobs and settings (see main/design). Export is
+  // added by Workstream A as design.export.
+  design: {
+    subscribe: (): Promise<void> => ipcRenderer.invoke('design:subscribe'),
+    list: (chat: string): Promise<ArtifactSummary[]> => ipcRenderer.invoke('design:list', chat),
+    get: (chat: string, artifactId: string): Promise<Artifact | null> =>
+      ipcRenderer.invoke('design:get', chat, artifactId),
+    select: (chat: string, artifactId: string, versionId: string): Promise<Artifact> =>
+      ipcRenderer.invoke('design:select', chat, artifactId, versionId),
+    jobs: (chat: string): Promise<Job[]> => ipcRenderer.invoke('design:jobs', chat),
+    job: (
+      chat: string,
+      action: 'check' | 'cancel' | 'stop',
+      id: string
+    ): Promise<{ job: Job; text: string } | { error: string }> =>
+      ipcRenderer.invoke('design:job', chat, action, id),
+    settings: {
+      get: (): Promise<DesignSettings> => ipcRenderer.invoke('design:settings:get'),
+      set: (s: DesignSettings): Promise<void> => ipcRenderer.invoke('design:settings:set', s)
+    },
+    capabilities: (): Promise<CapabilityReport> => ipcRenderer.invoke('design:capabilities'),
+    // Workstream A registers these in main/design/html.
+    export: (chat: string, artifactId: string, versionId: string): Promise<ExportResult> =>
+      ipcRenderer.invoke('design:export', chat, artifactId, versionId),
+    preview: {
+      show: (p: {
+        chat: string
+        artifactId: string
+        versionId: string
+        width: number
+      }): Promise<void> => ipcRenderer.invoke('design:preview:show', p),
+      bounds: (r: { x: number; y: number; width: number; height: number }): void =>
+        ipcRenderer.send('design:preview:bounds', r),
+      hide: (): Promise<void> => ipcRenderer.invoke('design:preview:hide'),
+      onState: (cb: (s: unknown) => void): (() => void) => {
+        const listener = (_: unknown, s: unknown): void => cb(s)
+        ipcRenderer.on('design:preview:state', listener)
+        return () => ipcRenderer.removeListener('design:preview:state', listener)
+      }
+    },
+    onEvent: (cb: (e: DesignEvent) => void): (() => void) => {
+      const listener = (_: unknown, e: DesignEvent): void => cb(e)
+      ipcRenderer.on('design:event', listener)
+      return () => ipcRenderer.removeListener('design:event', listener)
     }
   },
   security: {

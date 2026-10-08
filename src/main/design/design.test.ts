@@ -263,7 +263,9 @@ describe('media capability contract', () => {
         {
           ...req,
           operation: 'video.image-to-video',
-          references: [{ kind: 'image', name: 'a.jpg', mime: 'image/jpeg', bytes: 10, path: '/x' }]
+          references: [
+            { kind: 'image', name: 'a.jpg', mime: 'image/jpeg', bytes: 10, attachmentId: 'x' }
+          ]
         },
         i2v
       )

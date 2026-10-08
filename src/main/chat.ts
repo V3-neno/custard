@@ -56,7 +56,7 @@ import {
 import { withoutUnavailableTools } from './history'
 import { attachments } from './attachments'
 import { claudeFilesFrom, prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
-import type { Attachment } from '../shared/attachments'
+import { acceptsAttachments, type Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
 import { pluginHost, protectedRoots, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
@@ -82,6 +82,21 @@ import { anthropicEndpoint } from './endpoints'
 import { modeName, modePolicy, refuseKind, toolKind } from './modes/policy'
 import { extensionRefusal, extensionTarget } from './modes/extensions'
 import { resolveInVault } from './memory/paths'
+import { design } from './design'
+import { designTools, runDesignTool } from './design/tools'
+import type { MediaReference } from '../shared/design'
+
+// Files attached in this chat, as Design references. Only images, only from
+// this chat, and never one Custard found missing or changed.
+function designReferences(c: Conversation, ids: string[]): MediaReference[] {
+  return ids.map((id) => {
+    const a = c.attachments?.find((x) => x.id === id)
+    if (!a) throw new Error(`There is no attached file ${id} in this chat, so nothing was sent.`)
+    if (a.missing) throw new Error(`${a.name} is no longer available, so nothing was sent.`)
+    if (a.kind !== 'image') throw new Error(`${a.name} isn't an image, so it can't be a reference.`)
+    return { kind: 'image', name: a.name, mime: a.mime, bytes: a.bytes, attachmentId: a.id }
+  })
+}
 
 const isVaultTool = (name: string): boolean => name.startsWith('vault_')
 // The assistant's widget tools. Neither runs a plugin tool.
@@ -111,7 +126,8 @@ function widgetTools(keys: string[]): BetaTool[] {
   ]
 }
 
-const CORE_WRITES = /^(vault_create_note|vault_append|fs_write|fs_delete|fs_rename)$/
+// design_media can start paid work at a provider.
+const CORE_WRITES = /^(vault_create_note|vault_append|fs_write|fs_delete|fs_rename|design_media)$/
 
 const systemPrompt = (model: (typeof chatModels)[number]): string =>
   `${model.provider === 'claude' ? 'You are Claude' : `You are ${model.label}, an OpenAI model`}, ` +
@@ -237,8 +253,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   if (!existing && !isMode(req.mode)) return refuse('Unknown mode.')
   if (existing && active.has(existing.id))
     return refuse('This chat is still answering. Wait for it to finish or stop it first.')
-  if (fileIds.length && (existing?.mode ?? req.mode) !== 'chat')
-    return refuse('Files can be attached in Chat mode only.')
+  if (fileIds.length && !acceptsAttachments(existing?.mode ?? req.mode))
+    return refuse('Files can be attached in Chat and Design modes only.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
   // Off before anything is said, so no part of it is ever captured.
   if (!existing && req.temporary) conversation.memory = { off: true, temporary: true, watermark: 0 }
@@ -369,7 +385,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ...(workspace?.tools ?? []),
     ...web.tools,
     ...plugins.tools,
-    ...(widgetCatalog.length ? widgetTools(widgets().keys()) : [])
+    ...(widgetCatalog.length ? widgetTools(widgets().keys()) : []),
+    ...(policy.tools.has('design') ? designTools() : [])
   ].filter((t) => policy.tools.has(kindOf(t.name)))
   const available = new Set(tools.map((t) => t.name))
   // Attached files, read once the turn starts (see attachments/request).
@@ -594,6 +611,26 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       }
       return runVaultTool(vault, c.name, c.input)
     }
+    if (kindOf(c.name) === 'design')
+      return runDesignTool(design(), c.name, c.input, {
+        conversationId: conversation.id,
+        messageIndex: log.startLength,
+        chat: { provider: model.provider, model: model.id, hasKey: true },
+        approve: (label, detail) =>
+          preApproved
+            ? Promise.resolve(true)
+            : approve({
+                pluginId: 'custard',
+                pluginName: 'Custard',
+                tool: c.name,
+                label,
+                input: c.input,
+                detail,
+                individual: true
+              }),
+        references: async (ids) => designReferences(conversation, ids),
+        signal: controller.signal
+      })
     if (c.name === 'widget_show' || c.name === 'widget_hide') {
       const i = (c.input ?? {}) as { widget?: unknown; input?: unknown }
       const r =

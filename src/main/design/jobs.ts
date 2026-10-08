@@ -5,6 +5,7 @@ import {
   type MediaCapability,
   type MediaFile,
   type MediaProvider,
+  type MediaReference,
   type MediaRequest,
   type RemoteStatus
 } from '../../shared/design'
@@ -33,6 +34,8 @@ export type JobDeps = {
   provider: (id: string) => MediaProvider | null
   // Durable: called before every outside step and after every change.
   save: (job: Job) => void
+  // A reference's bytes, read by Custard for the job's own chat.
+  read?: (job: Job, ref: MediaReference) => Promise<Uint8Array>
   now?: () => number
   newId?: () => string
 }
@@ -133,7 +136,16 @@ export class JobTracker {
     job.attemptedAt = this.now()
     this.put(job)
     try {
-      const r = await provider.submit(job.request, { idempotencyKey: job.idempotencyKey, signal })
+      const read = this.deps.read
+      const r = await provider.submit(job.request, {
+        idempotencyKey: job.idempotencyKey,
+        signal,
+        read: (ref) => {
+          if (!read || !job.request.references.some((x) => x.attachmentId === ref.attachmentId))
+            return Promise.reject(new Error('That file is not part of this request.'))
+          return read(job, ref)
+        }
+      })
       job.remoteId = r.remoteId
       job.tracking = true
       this.apply(job, r.status)
@@ -216,6 +228,12 @@ export class JobTracker {
       job.tracking = false
     } else job.error = 'The provider did not confirm the cancellation.'
     return this.put(job)
+  }
+
+  // A deleted chat's jobs leave the list (they keep running at the provider).
+  forgetChat(conversationId: string): void {
+    for (const [id, j] of this.jobs)
+      if (j.requestedBy.conversationId === conversationId) this.jobs.delete(id)
   }
 
   // Stops watching locally. The job carries on at the provider.

@@ -127,12 +127,15 @@ export type MediaProviderInfo = {
   capabilities: MediaCapability[]
 }
 
+// A file the user attached in the same chat. Only its record travels;
+// the bytes are read (and hash-checked) by Custard at submission and handed
+// to the provider, which never gets a path.
 export type MediaReference = {
   kind: ReferenceKind
   name: string
   mime: string
   bytes: number
-  path: string
+  attachmentId: string
 }
 
 export type MediaRequest = {
@@ -173,7 +176,11 @@ export interface MediaProvider {
   info(): MediaProviderInfo
   submit(
     request: MediaRequest,
-    options: { idempotencyKey: string; signal?: AbortSignal }
+    options: {
+      idempotencyKey: string
+      signal?: AbortSignal
+      read: (ref: MediaReference) => Promise<Uint8Array>
+    }
   ): Promise<{ remoteId: string; status: RemoteStatus }>
   status(remoteId: string, signal?: AbortSignal): Promise<RemoteStatus>
   // Resolves 'cancelled' only when the provider confirms it.
@@ -259,3 +266,73 @@ export type Artifact = {
   selected: string
   createdAt: number
 }
+
+// ---------------------------------------------------------------- plugin media
+// (Batch contract. Validation lives in main/plugins/manifest.ts, Workstream C.)
+
+// One provider a plugin offers. Each capability names the plugin's own
+// declared tools that do the work; they run through the plugin host like any
+// other tool call (permissions, approvals, sandbox). No other route exists.
+export type PluginMediaSpec = {
+  // Unique within the plugin, like its tools: [a-z][a-z0-9-]{0,30}.
+  id: string
+  name: string
+  capabilities: (MediaCapability & {
+    tools: {
+      // A write tool: the only one that can start (and charge for) work.
+      submit: string
+      // Read tools: they must never submit anything.
+      status: string
+      result: string
+      cancel?: string
+    }
+  })[]
+}
+
+// What those tools return in their result `data` (validated by the host;
+// anything else is an error). Plugin output is untrusted.
+export type PluginMediaSubmitData = { remoteId: string; status: RemoteStatus }
+export type PluginMediaStatusData = RemoteStatus
+// Files come back inline (base64) or as an https URL on a host the plugin's
+// network permission already allows; sizes and types are capped by the host.
+export type PluginMediaResultData = {
+  files: (
+    { name: string; mime: string; base64: string } | { name: string; mime: string; url: string }
+  )[]
+}
+
+// ---------------------------------------------------------------- tools
+
+// Design-only tools the model is offered (see main/design/tools.ts). Only
+// Design mode allows the 'design' tool kind (main/modes/policy.ts).
+export const DESIGN_TOOLS = ['design_html', 'design_media', 'design_jobs'] as const
+export type DesignToolName = (typeof DESIGN_TOOLS)[number]
+
+// ---------------------------------------------------------------- workspace IPC
+
+export type ArtifactSummary = {
+  id: string
+  name: string
+  kind: ArtifactKind
+  selected: string
+  versions: number
+  // The newest version's status, for the tab badge.
+  latest: VersionStatus
+  updatedAt: number
+}
+
+// Pushed to the app window on 'design:event' as outputs and jobs change.
+export type DesignEvent =
+  | { type: 'artifact'; conversationId: string; artifact: Artifact }
+  | { type: 'job'; conversationId: string; job: Job }
+
+export type ExportResult =
+  | { ok: true; path: string; files: number }
+  | { ok: false; canceled: true }
+  | { ok: false; canceled?: false; error: string }
+
+// URL scheme the app window uses to show stored images and video
+// (custard-media://<conversation>/<artifact>/<version>/<file>). Read-only,
+// serves only files recorded on a version. Never used by the HTML preview,
+// which has its own scheme and session (docs/design/SANDBOX.md).
+export const MEDIA_SCHEME = 'custard-media'

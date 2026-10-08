@@ -18,7 +18,11 @@ import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
 import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
 import { SentFiles } from './Attachments'
-import { ATTACHMENT_LIMITS, type DraftAttachment } from '../../../../shared/attachments'
+import {
+  acceptsAttachments,
+  ATTACHMENT_LIMITS,
+  type DraftAttachment
+} from '../../../../shared/attachments'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
 import WidgetSlot from './WidgetSlot'
@@ -327,7 +331,7 @@ function ChatView(props: Props): React.JSX.Element {
 
   const send = (text: string): void => {
     const requestId = crypto.randomUUID()
-    const sending = mode === 'chat' ? files : []
+    const sending = acceptsAttachments(mode) ? files : []
     setError(null)
     setOverflow(false)
     setDraft('')
@@ -555,7 +559,7 @@ function ChatView(props: Props): React.JSX.Element {
           onStop={() => live && window.custard.chat.stop(live.requestId)}
           draft={draft}
           setDraft={setDraft}
-          {...(mode === 'chat'
+          {...(acceptsAttachments(mode)
             ? {
                 files: {
                   items: files,

@@ -1,4 +1,6 @@
 import { app } from 'electron'
+import { normalizeDesignSettings } from './design/settings'
+import type { DesignSettings } from '../shared/design'
 import { randomUUID } from 'crypto'
 import {
   existsSync,
@@ -131,6 +133,7 @@ export function deleteConversation(id: string): void {
 
 type Config = {
   chat: ChatSettings
+  design: DesignSettings
   vaultPath: string | null
   security: SecurityDefaults
   memory: MemorySettings
@@ -146,6 +149,7 @@ function readConfig(): Config {
   if (raw.effort) legacy.effort = raw.effort
   return {
     chat: { ...defaultChatSettings, ...legacy, ...raw.chat },
+    design: normalizeDesignSettings(raw.design),
     vaultPath: raw.vaultPath ?? null,
     security: { ...defaultSecurity, ...raw.security },
     memory: { ...defaultMemorySettings, ...raw.memory }
@@ -158,6 +162,9 @@ function writeConfig(patch: Partial<Config>): void {
   writeSettingsFile(settingsFile(), { ...raw, ...readConfig(), ...patch })
 }
 
+export const getDesignSettings = (): DesignSettings => readConfig().design
+export const setDesignSettings = (design: unknown): void =>
+  writeConfig({ design: normalizeDesignSettings(design) })
 export const getChatSettings = (): ChatSettings => readConfig().chat
 export const setChatSettings = (chat: ChatSettings): void => writeConfig({ chat })
 export const getVaultPath = (): string | null => readConfig().vaultPath

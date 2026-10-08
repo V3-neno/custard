@@ -11,6 +11,7 @@ import { handle } from './ipc'
 import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
 import { isPluginContents } from './plugins/runtime'
 import { registerWidgetHandlers, widgets } from './widgets'
+import { designChatDeleted, registerDesignHandlers } from './design'
 import {
   deleteConversation,
   getChatSettings,
@@ -104,8 +105,9 @@ app.whenReady().then(() => {
       )
     deleteConversation(id)
     widgets().conversationDeleted(id)
-    // The chat's attached files go with it.
+    // The chat's attached files and Design outputs go with it.
     await attachments().deleteChat(id)
+    designChatDeleted(id)
   })
   handle('vault:get', () => vaultInfo())
   handle('vault:pick', async (e) => {
@@ -149,6 +151,7 @@ app.whenReady().then(() => {
   registerPluginHandlers()
   registerMemoryHandlers()
   registerWidgetHandlers()
+  registerDesignHandlers()
 
   createWindow()
   // Plugins start after the window so a slow plugin can't delay the app.
