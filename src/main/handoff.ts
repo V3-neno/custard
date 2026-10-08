@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import type { ActionRecord, Continuation, Conversation, Provider } from '../shared/chat'
 import { redact } from './memory/evidence'
 import { filesNote } from '../shared/attachments'
+import { anthropicEndpoint, openaiEndpoint } from './endpoints'
 
 // "Continue in a new chat": a bounded handoff from a chat that is too long
 // to go on. It is built from the saved chat in code, so it works however
@@ -256,7 +257,7 @@ export type HandoffSummarizer = (evidence: string, signal?: AbortSignal) => Prom
 export function handoffSummarizer(provider: Provider, apiKey: string): HandoffSummarizer {
   const opts = { timeout: HANDOFF_LIMITS.timeoutMs, maxRetries: HANDOFF_LIMITS.retries }
   if (provider === 'openai') {
-    const client = new OpenAI({ apiKey, ...opts })
+    const client = new OpenAI({ apiKey, ...opts, ...openaiEndpoint() })
     return async (evidence, signal) => {
       const r = await client.responses.create(
         {
@@ -276,7 +277,7 @@ export function handoffSummarizer(provider: Provider, apiKey: string): HandoffSu
       return parseHandoff(r.output_text)
     }
   }
-  const client = new Anthropic({ apiKey, ...opts })
+  const client = new Anthropic({ apiKey, ...opts, ...anthropicEndpoint() })
   return async (evidence, signal) => {
     const m = await client.messages.create(
       {

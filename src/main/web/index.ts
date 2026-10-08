@@ -15,6 +15,7 @@ import {
   webSearchTool,
   type SearchOutcome
 } from './search'
+import { anthropicEndpoint, openaiEndpoint } from '../endpoints'
 
 export const isWebTool = (name: string): boolean => name === 'web_read' || name === 'web_search'
 
@@ -165,8 +166,18 @@ export async function runWebTool(
     deps.search ??
     ((q: string) =>
       ctx.model.provider === 'claude'
-        ? searchClaude(new Anthropic({ apiKey: ctx.apiKey }), ctx.model.id, q, ctx.signal)
-        : searchOpenAI(new OpenAI({ apiKey: ctx.apiKey }), ctx.model.id, q, ctx.signal))
+        ? searchClaude(
+            new Anthropic({ apiKey: ctx.apiKey, ...anthropicEndpoint() }),
+            ctx.model.id,
+            q,
+            ctx.signal
+          )
+        : searchOpenAI(
+            new OpenAI({ apiKey: ctx.apiKey, ...openaiEndpoint() }),
+            ctx.model.id,
+            q,
+            ctx.signal
+          ))
   const outcome = await search(query)
   addSources(
     c,

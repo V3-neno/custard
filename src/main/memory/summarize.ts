@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import type { Provider } from '../../shared/chat'
+import { anthropicEndpoint, openaiEndpoint } from '../endpoints'
 
 // The one model call a capture makes: the evidence in, a structured summary
 // out. It has no tools of any kind, so it can't act, read anything else or
@@ -151,7 +152,7 @@ export type Summarizer = (evidence: string, signal?: AbortSignal) => Promise<Sum
 export function summarizer(provider: Provider, apiKey: string): Summarizer {
   const opts = { timeout: SUMMARY_LIMITS.timeoutMs, maxRetries: SUMMARY_LIMITS.retries }
   if (provider === 'openai') {
-    const client = new OpenAI({ apiKey, ...opts })
+    const client = new OpenAI({ apiKey, ...opts, ...openaiEndpoint() })
     return async (evidence, signal) => {
       const r = await client.responses.create(
         {
@@ -171,7 +172,7 @@ export function summarizer(provider: Provider, apiKey: string): Summarizer {
       return parseSummary(r.output_text)
     }
   }
-  const client = new Anthropic({ apiKey, ...opts })
+  const client = new Anthropic({ apiKey, ...opts, ...anthropicEndpoint() })
   return async (evidence, signal) => {
     const m = await client.messages.create(
       {

@@ -23,6 +23,7 @@ import {
   usesCompaction
 } from './compaction'
 import { compactTrigger, estimateTokens, openaiCounter } from './context'
+import { openaiEndpoint } from './endpoints'
 
 type Emit = (e: ChatEvent) => void
 
@@ -157,7 +158,7 @@ function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
 
 export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
   const { emit, requestId, log } = turn
-  const client = new OpenAI({ apiKey: turn.apiKey })
+  const client = new OpenAI({ apiKey: turn.apiKey, ...openaiEndpoint() })
   // From the newest compaction this model made, if there is one.
   const start = openaiStart(turn.conversation, turn.model)
   let input: ResponseInputItem[] = [

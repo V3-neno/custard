@@ -76,6 +76,7 @@ import {
   type SendChatRequest
 } from '../shared/chat'
 import { toolLabel } from '../shared/vault'
+import { anthropicEndpoint } from './endpoints'
 
 const isVaultTool = (name: string): boolean => name.startsWith('vault_')
 const CORE_WRITES = /^(vault_create_note|vault_append|fs_write|fs_delete|fs_rename)$/
@@ -696,7 +697,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       if (end === 'step-limit') log.notice('step-limit', STEP_LIMIT)
       return finish()
     }
-    const client = new Anthropic({ apiKey })
+    const client = new Anthropic({ apiKey, ...anthropicEndpoint() })
     for (let step = 0; ; step++) {
       if (step === MAX_STEPS) {
         log.notice('step-limit', STEP_LIMIT)

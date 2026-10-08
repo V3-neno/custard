@@ -21,6 +21,7 @@ import {
 import type { VaultInfo } from '../shared/vault'
 import type { ChatSettings, Mode, Provider } from '../shared/chat'
 import { listSkills } from './vault'
+import { pinProviderEndpoints } from './endpoints'
 import { addMissingStarterSkills, createStarterVault } from './vaultTemplate'
 
 function vaultInfo(): VaultInfo {
@@ -73,6 +74,8 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // Packaged builds ignore ANTHROPIC_BASE_URL / OPENAI_BASE_URL (L13).
+  pinProviderEndpoints(app.isPackaged)
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.custard.app')
 
