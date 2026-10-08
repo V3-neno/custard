@@ -172,8 +172,25 @@ export type RemoteStatus =
 
 // The common interface Design talks to. Built-in image providers and plugin
 // providers implement the same one, so Design has no provider-specific code.
+// A model a provider offers, for Design settings. `note` is the provider's
+// own short description; never a guessed quality or price.
+export type MediaModel = { id: string; name: string; note?: string }
+
+// One registered provider as the Design settings tab lists it.
+export type ProviderListing = {
+  id: string
+  name: string
+  source: Source
+  state: MediaProviderState
+  needs?: string
+  operations: MediaOperation[]
+  models?: MediaModel[]
+}
+
 export interface MediaProvider {
   info(): MediaProviderInfo
+  // Models to choose from in Design settings, when the provider has several.
+  models?(): MediaModel[]
   submit(
     request: MediaRequest,
     options: {

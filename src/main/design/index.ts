@@ -7,7 +7,8 @@ import {
   type CapabilityReport,
   type DesignEvent,
   type Job,
-  type MediaReference
+  type MediaReference,
+  type ProviderListing
 } from '../../shared/design'
 import { attachments } from '../attachments'
 import { getApiKey } from '../apiKey'
@@ -135,6 +136,27 @@ export function registerDesignHandlers(): void {
   handle('design:settings:get', () => getDesignSettings())
   handle('design:settings:set', (_, s: unknown) => setDesignSettings(s))
   handle('design:capabilities', () => capabilityReport())
+  // Every registered provider, ready or not, for the Design settings tab.
+  handle('design:providers', (): ProviderListing[] =>
+    mediaProviders().map((p) => {
+      const i = p.info()
+      let models: ProviderListing['models']
+      try {
+        models = p.models?.()
+      } catch {
+        models = undefined
+      }
+      return {
+        id: i.id,
+        name: i.name,
+        source: i.source,
+        state: i.state,
+        ...(i.needs ? { needs: i.needs } : {}),
+        operations: i.capabilities.map((c) => c.operation),
+        ...(models ? { models } : {})
+      }
+    })
+  )
 
   // custard-media://<chat>/<artifact>/<version>/<file path>: only files
   // recorded on a version, only image and video types, checked against their
