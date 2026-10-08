@@ -336,3 +336,6 @@ export type ExportResult =
 // serves only files recorded on a version. Never used by the HTML preview,
 // which has its own scheme and session (docs/design/SANDBOX.md).
 export const MEDIA_SCHEME = 'custard-media'
+
+// Whether a skill behind a version is as it was (main/design/skills.ts).
+export type SkillChange = { path: string; name: string; state: 'same' | 'changed' | 'missing' }
