@@ -152,6 +152,7 @@ export class JobTracker {
     } catch (err) {
       const definitelyNotSent = err instanceof MediaError && err.sent === false
       job.state = definitelyNotSent ? 'failed' : 'unknown'
+      if (err instanceof MediaError) job.errorKind = err.kind
       job.error = definitelyNotSent
         ? (err as Error).message
         : `It's not known whether this reached the provider (${err instanceof Error ? err.message : String(err)}).`
