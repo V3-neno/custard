@@ -27,6 +27,7 @@ Plugins are executable code. In this version they are meant to be **locally deve
 - **CPU and memory** are limited only by timeouts and killing the window, not by quotas.
 - **Validation can't judge intent.** A plugin can misuse what it was granted: a plugin with `"*"` network can send whatever its tools receive to any public host. Review the code and the permissions.
 - **Model-level authorization.** Write tools ask you, but read tools don't. A read tool with network access can still send data (for example, a query) to its allowed hosts.
+- **Custom-scheme links.** `ctx.openExternal` hands an approved custom-scheme link (such as `spotify:`) to whatever app Windows has registered for that scheme. Custard allows only plain URL characters and refuses known risky schemes. It can't know how the handler parses the link, and %-escapes are decoded there. Approving a scheme means trusting that app's handler.
 - **File-check races.** Paths are checked right before each operation. Another program swapping a folder for a link between the check and the write isn't prevented.
 - **DNS prefetching** in the plugin window wasn't tested separately. Its requests carry no plugin-chosen data beyond host names.
 - **Packaged builds** haven't been built or tested. Development (`npm run dev`) is the supported setup.
