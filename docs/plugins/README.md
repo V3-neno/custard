@@ -36,11 +36,11 @@ Editing files never changes the running plugin. Only activation does, so develop
 
 ## Where things are stored
 
-| What                        | Where                                                                                                                            |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Source                      | `plugin/<id>/` in the repo (development). Packaged builds read `resources/plugin`, or `CUSTARD_PLUGIN_DIR`.                      |
-| State, builds, config, data | `<app data>/plugins/<id>/` (`state.json`, `builds/<buildId>/`, `config.json`, `data.json`)                                       |
-| Secrets and account tokens  | `<app data>/plugins/<id>/secrets.bin`, encrypted with Electron `safeStorage` (Windows DPAPI, macOS Keychain, libsecret on Linux) |
+| What                        | Where                                                                                                                                                                                                                   |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source                      | `plugin/<id>/` in the repo (development). Packaged builds read `resources/plugin`, or `CUSTARD_PLUGIN_DIR`.                                                                                                             |
+| State, builds, config, data | `<app data>/plugins/<id>/` (`state.json`, `builds/<buildId>/`, `config.json`, `data.json`)                                                                                                                              |
+| Secrets and account tokens  | `<app data>/plugins/<id>/secrets.bin`, encrypted with Electron `safeStorage` (Windows DPAPI). Only Windows is supported; see [Credential storage on other systems](../../README.md#credential-storage-on-other-systems) |
 
 - Tokens are never stored in manifests, Obsidian notes, model context or logs.
 - Updates and rollbacks never touch config, data or secrets.
