@@ -173,6 +173,39 @@ describe('design tools', () => {
     expect(s.events.some((e) => e.type === 'artifact')).toBe(true)
   })
 
+  it('a provider that finishes at submission has its files saved once, never resent', async () => {
+    const base = slowVideo()
+    let results = 0
+    const p: MediaProvider = {
+      ...base,
+      info: base.info,
+      submit: async (r, o) => ({ ...(await base.submit(r, o)), status: { state: 'completed' } }),
+      result: async (id) => {
+        results++
+        if (results === 1) throw new Error('reset')
+        return base.result(id)
+      }
+    }
+    const s = service(p)
+    const r = await runDesignTool(
+      s,
+      'design_media',
+      { operation: 'video.text-to-video', prompt: 'waves', durationSeconds: 5 },
+      ctx()
+    )
+    // The first fetch failed: the job is done, its version waits, nothing is resent.
+    expect(r.content).toMatch(/won't be sent again/)
+    const [job] = s.jobs.list(CHAT)
+    expect(job.state).toBe('completed')
+    expect(s.artifacts.list(CHAT)[0].versions[0].status).toBe('pending')
+    // As after a restart: a check fetches the result only.
+    await jobAction(s, CHAT, 'check', job.id)
+    expect(s.artifacts.list(CHAT)[0].versions[0].status).toBe('succeeded')
+    expect(base.calls.submit).toHaveLength(1)
+    expect(base.calls.status).toBe(0)
+    expect(results).toBe(2)
+  })
+
   it('declined: nothing is sent or saved', async () => {
     const p = slowVideo()
     const s = service(p)

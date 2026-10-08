@@ -25,6 +25,7 @@ import type {
   DesignSettings,
   ExportResult,
   Job,
+  ProviderListing,
   SkillChange
 } from '../shared/design'
 import type {
@@ -132,6 +133,7 @@ const custard = {
       set: (s: DesignSettings): Promise<void> => ipcRenderer.invoke('design:settings:set', s)
     },
     capabilities: (): Promise<CapabilityReport> => ipcRenderer.invoke('design:capabilities'),
+    providers: (): Promise<ProviderListing[]> => ipcRenderer.invoke('design:providers'),
     // Workstream A registers these in main/design/html.
     // The HTML of a version's index.html, for the Code view (text, ≤ 2 MB).
     source: (chat: string, artifactId: string, versionId: string): Promise<string | null> =>

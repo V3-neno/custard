@@ -294,6 +294,24 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
     s.emit({ type: 'artifact', conversationId: ctx.conversationId, artifact })
     return { content: `${info.name} refused it: ${job.error}`, isError: true, outcome: 'failed' }
   }
+  // Finished at submission (a synchronous provider): save the files now.
+  if (job.state === 'completed') {
+    const r = await jobAction(s, ctx.conversationId, 'check', job.id, ctx.signal)
+    const saved = s.artifacts
+      .get(ctx.conversationId, artifact.id)
+      ?.versions.find((v) => v.id === versionId)?.status
+    return saved === 'succeeded'
+      ? {
+          content: `Made by ${info.name}. Output ${artifact.id}, version ${versionId}.`,
+          isError: false,
+          outcome: 'completed'
+        }
+      : {
+          content: `${info.name} finished, but ${r.text} Check it again with design_jobs; it won't be sent again.`,
+          isError: true,
+          outcome: 'completed'
+        }
+  }
   if (job.state === 'unknown')
     return {
       content: `${describeJob(job)} Don't send it again without asking the user: it may run and be charged twice.`,
@@ -322,7 +340,17 @@ export async function jobAction(
   let files: Awaited<ReturnType<JobTracker['check']>>['files']
   if (action === 'stop') next = s.jobs.stopTracking(jobId)
   else if (action === 'cancel') next = await s.jobs.cancel(jobId)
-  else ({ job: next, files } = await s.jobs.check(jobId, signal))
+  else {
+    // A completed job whose version is still waiting for its files.
+    const waiting =
+      job.state === 'completed' &&
+      s.artifacts
+        .get(conversationId, job.target.artifactId)
+        ?.versions.find((v) => v.id === job.target.versionId)?.status === 'pending'
+    ;({ job: next, files } = waiting
+      ? await s.jobs.collect(jobId, signal)
+      : await s.jobs.check(jobId, signal))
+  }
   let artifact = s.artifacts.get(conversationId, next.target.artifactId)
   const version = artifact?.versions.find((v) => v.id === next.target.versionId)
   if (artifact && version?.status === 'pending') {
