@@ -283,15 +283,33 @@ export class PluginHost {
     manifest: PluginManifest | null
     buildId: string | null
   }> {
+    // Files first: a manifest changed after this read changes the hash
+    // checked below.
+    const files = readSources(this.sourceDir(id))
     const src = this.readSource(id)
     if (!src.manifest)
       return { ok: false, errors: src.errors, warnings: [], manifest: null, buildId: null }
     const m = src.manifest
-    const files = readSources(this.sourceDir(id))
     const buildId = this.sourceHash(files)
     if (!this.d.store.hasBuild(id, buildId)) {
       const r = await bundle(this.sourceDir(id), this.d.sdkDir, { kind: 'plugin', entry: m.entry })
       if (!r.ok) return { ok: false, errors: r.errors, warnings: [], manifest: m, buildId: null }
+      // The bundler reads the files again, so the code is what was hashed
+      // (and is reviewed) only if nothing changed in between (L19).
+      let after: string | null = null
+      try {
+        after = this.sourceHash(readSources(this.sourceDir(id)))
+      } catch {
+        // Treated as changed.
+      }
+      if (after !== buildId)
+        return {
+          ok: false,
+          errors: ["The plugin's files changed while it was being built. Check it again."],
+          warnings: [],
+          manifest: m,
+          buildId: null
+        }
       this.d.store.saveBuild(id, buildId, {
         manifest: m,
         code: r.code,
@@ -383,6 +401,13 @@ export class PluginHost {
     if (testFiles.length) {
       const b = await bundle(this.sourceDir(id), this.d.sdkDir, { kind: 'tests', files: testFiles })
       if (!b.ok) return { ok: false, results, error: b.errors.join('\n') }
+      // Results count for the checked build only if the tests ran its code.
+      if (this.sourceHash(readSources(this.sourceDir(id))) !== v.buildId)
+        return {
+          ok: false,
+          results,
+          error: "The plugin's files changed while the tests were being built. Run them again."
+        }
       try {
         results.push(...(await this.d.testRunner(b.code, { signal })))
       } catch (err) {

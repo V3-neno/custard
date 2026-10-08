@@ -296,6 +296,24 @@ const invoke = (
   host.invoke(name, input, { snapshot: snapshot ?? host.toolSet().snapshot, signal, approve })
 
 describe('validation and review', () => {
+  it('does not keep a build whose sources changed while bundling (L19)', async () => {
+    writePlugin({})
+    const pending = host.validate('demo')
+    // Changed after the sources were read and hashed, before the bundler reads them.
+    writeFileSync(
+      join(src, 'demo', 'src', 'greet.ts'),
+      "export const greet = (): string => 'CHANGED'\n"
+    )
+    const v = await pending
+    expect(v.ok).toBe(false)
+    expect(v.errors.join(' ')).toMatch(/changed while/)
+    expect(v.buildId).toBeNull()
+    // A fresh validation builds what is there now.
+    const again = await host.validate('demo')
+    expect(again.ok).toBe(true)
+    expect(store.build('demo', again.buildId!).code).toContain('CHANGED')
+  })
+
   it('reports manifest errors without building', async () => {
     writePlugin({}, manifest({ apiVersion: 99 }))
     const r = await host.review('demo')
