@@ -246,9 +246,12 @@ export type ChatEvent =
       id: string
       plugin: string
       label: string
+      // Everything the user approves, never shortened.
       detail: string
       // Set when this repeats an action whose outcome is unknown.
       warning?: string
+      // Only "Allow" and "Don't allow": this kind of action asks every time.
+      individual?: boolean
     }
   | { requestId: string; type: 'approval-done'; id: string }
   | { requestId: string; type: 'done'; conversation: Conversation }

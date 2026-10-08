@@ -20,6 +20,7 @@ import {
   toRelative,
   type Boundary
 } from './paths'
+import { lineDiff } from './diff'
 
 // File tools for Code mode. They only ever touch paths inside the
 // conversation's workspace, resolved by resolveInside. There is no shell:
@@ -216,6 +217,58 @@ function rename(b: Boundary, from: unknown, to: unknown): string {
   mkdirs(b, rel)
   renameSync(src, resolveInside(b, rel, { forWrite: true }))
   return `Renamed ${toRelative(b.root, src)} to ${rel}`
+}
+
+export const FILE_WRITES = new Set(['fs_write', 'fs_delete', 'fs_rename'])
+
+export type FilePreview = { label: string; detail: string }
+
+// What a file change will do, for the user to approve before it runs. It
+// resolves paths with the same checks as the change itself, so a path that
+// would be refused is refused here, without asking. `detail` holds the whole
+// change: for a write, every line of the new content.
+export function previewFileChange(b: Boundary, name: string, input: unknown): FilePreview {
+  const i = (input ?? {}) as Record<string, unknown>
+  if (name === 'fs_write') {
+    if (typeof i.content !== 'string') throw new PathError('Content is required.')
+    if (i.content.length > MAX_WRITE) throw new PathError('Files are limited to 500 KB.')
+    const rel = String(i.path ?? '')
+    if (!splitRelative(rel).length) throw new PathError('A file path is required.')
+    const full = resolveInside(b, rel, { forWrite: true })
+    const shown = splitRelative(rel).join('/')
+    if (!existsSync(full))
+      return {
+        label: `Create ${shown}`,
+        detail: `New file ${shown}, ${i.content.length} characters:\n\n${i.content}`
+      }
+    if (!lstatSync(full).isFile()) throw new PathError('Not a file.')
+    const before = readFileSync(full)
+    const old = before.subarray(0, 8000).includes(0) ? null : before.toString('utf8')
+    return {
+      label: `Replace ${shown}`,
+      detail:
+        old === null
+          ? `Replaces a binary file with ${i.content.length} characters of text:\n\n${i.content}`
+          : `Changes to ${shown} (+ added, - removed):\n\n${lineDiff(old, i.content)}`
+    }
+  }
+  if (name === 'fs_delete') {
+    const full = resolveInside(b, i.path, { forWrite: true, mustExist: true })
+    if (!lstatSync(full).isFile()) throw new PathError('Only files can be deleted.')
+    const shown = toRelative(b.root, full)
+    return { label: `Delete ${shown}`, detail: `Deletes ${shown} (${statSync(full).size} bytes).` }
+  }
+  if (name === 'fs_rename') {
+    const src = resolveInside(b, i.from, { forWrite: true, mustExist: true })
+    if (!lstatSync(src).isFile()) throw new PathError('Only files can be renamed.')
+    const rel = String(i.to ?? '')
+    if (!splitRelative(rel).length) throw new PathError('A new path is required.')
+    resolveInside(b, rel, { forWrite: true })
+    const from = toRelative(b.root, src)
+    const to = splitRelative(rel).join('/')
+    return { label: `Rename ${from} to ${to}`, detail: `Moves ${from} to ${to}.` }
+  }
+  throw new PathError(`${name} doesn't change files.`)
 }
 
 export function runFileTool(b: Boundary, name: string, input: unknown): Result {

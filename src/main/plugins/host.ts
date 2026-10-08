@@ -81,6 +81,11 @@ export type ApprovalRequest = {
   tool: string
   label: string
   input: unknown
+  // What the user reviews instead of the raw input, when the caller has a
+  // clearer, complete view of the change (a file diff, a note's content).
+  detail?: string
+  // Asks every time: "Allow for this chat" isn't offered.
+  individual?: boolean
 }
 
 const RESERVED_IDS = new Set(['vault', 'fs', 'reference', 'plugin', 'custard', 'core'])

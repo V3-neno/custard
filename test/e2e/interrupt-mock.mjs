@@ -258,45 +258,54 @@ http
         last--
       const ask = textOf(b.messages[last])
       const step = b.messages.slice(last + 1).filter((m) => m.role === 'user').length
-      const key = /stop test/.test(ask)
-        ? 'stop'
-        : /try again/.test(ask)
-          ? 'again'
-          : /error test/.test(ask)
-            ? 'error'
-            : /cut test/.test(ask)
-              ? 'cut'
-              : /Continue from where/.test(ask)
-                ? 'rest'
-                : /crash test/.test(ask)
-                  ? 'crash'
-                  : /mixed test/.test(ask)
-                    ? 'mixed'
-                    : /loop test/.test(ask)
-                      ? 'loop'
-                      : /web test/.test(ask)
-                        ? 'web'
-                        : /memory test/.test(ask)
-                          ? 'memory'
-                          : /compact test/.test(ask)
-                            ? 'compact'
-                            : /too long test/.test(ask)
-                              ? 'toolong'
-                              : /unsupported test/.test(ask)
-                                ? 'nocompact'
-                                : /search test/.test(ask)
-                                  ? 'search'
-                                  : /parts test/.test(ask)
-                                    ? 'parts'
-                                    : /reject test/.test(ask)
-                                      ? 'reject'
-                                      : /quote test/.test(ask)
-                                        ? 'quote'
-                                        : /leak test/.test(ask)
-                                          ? 'leak'
-                                          : /carry test/.test(ask)
-                                            ? 'carry'
-                                            : 'plain'
+      // Hardening checks (test/e2e/hardening.mjs).
+      const hardening = [
+        [/fs write test/, 'fswrite'],
+        [/forged test/, 'forged'],
+        [/note test/, 'note'],
+        [/append test/, 'append']
+      ].find(([r]) => r.test(ask))?.[1]
+      const key =
+        hardening ??
+        (/stop test/.test(ask)
+          ? 'stop'
+          : /try again/.test(ask)
+            ? 'again'
+            : /error test/.test(ask)
+              ? 'error'
+              : /cut test/.test(ask)
+                ? 'cut'
+                : /Continue from where/.test(ask)
+                  ? 'rest'
+                  : /crash test/.test(ask)
+                    ? 'crash'
+                    : /mixed test/.test(ask)
+                      ? 'mixed'
+                      : /loop test/.test(ask)
+                        ? 'loop'
+                        : /web test/.test(ask)
+                          ? 'web'
+                          : /memory test/.test(ask)
+                            ? 'memory'
+                            : /compact test/.test(ask)
+                              ? 'compact'
+                              : /too long test/.test(ask)
+                                ? 'toolong'
+                                : /unsupported test/.test(ask)
+                                  ? 'nocompact'
+                                  : /search test/.test(ask)
+                                    ? 'search'
+                                    : /parts test/.test(ask)
+                                      ? 'parts'
+                                      : /reject test/.test(ask)
+                                        ? 'reject'
+                                        : /quote test/.test(ask)
+                                          ? 'quote'
+                                          : /leak test/.test(ask)
+                                            ? 'leak'
+                                            : /carry test/.test(ask)
+                                              ? 'carry'
+                                              : 'plain')
       // The provider says the request is too large.
       if (key === 'toolong')
         return j(400, {
@@ -471,6 +480,37 @@ http
           }
         ],
         nocompact: ['Answered without compaction.'],
+        // Hardening: General Code file changes, each needing approval. The
+        // first is longer than the 800 characters an approval used to show.
+        fswrite: [
+          () =>
+            tool('fs_write', {
+              path: 'notes/big.txt',
+              content: 'x'.repeat(1000) + '\nTAIL-MARKER-7731\n'
+            }),
+          () => tool('fs_write', { path: 'keep.txt', content: 'line one\nline two changed\n' }),
+          () => tool('fs_delete', { path: 'gone.txt' }),
+          () => tool('fs_rename', { from: 'old.txt', to: 'moved/new.txt' }),
+          'Done with the files.'
+        ],
+        // A plugin tool called where it isn't offered (General Code).
+        forged: [() => tool('spotify__search', { query: 'forged-call-4410' }), 'Tried it.'],
+        // Model-requested notes: one approved, one declined.
+        note: [
+          () =>
+            tool('vault_create_note', {
+              path: 'Inbox/Approved.md',
+              content: 'y'.repeat(1000) + '\nNOTE-TAIL-5512\n'
+            }),
+          () => tool('vault_create_note', { path: 'Inbox/Declined.md', content: 'declined' }),
+          'Notes handled.'
+        ],
+        // Appending to an existing note, which is turned off.
+        append: [
+          () =>
+            tool('vault_append', { path: 'Areas/Music Preferences.md', content: 'APPENDED-9001' }),
+          'Tried to append.'
+        ],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]

@@ -54,7 +54,7 @@ import type { Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
 import { pluginHost, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
-import { workspaceTools } from './workspace'
+import { workspaceTools, type WorkspaceTools } from './workspace'
 import { isWebTool, runWebTool, webTools } from './web'
 import { repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
@@ -229,7 +229,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const workspace = conversation.mode === 'code' ? workspaceTools(conversation.workspace) : null
   // Enabled plugins' tools, and which build each came from. Every call is
   // checked against the plugin's state again when it runs.
-  const plugins = pluginHost().toolSet()
+  // General Code gets no plugin tools: only Chat, Design, Skills and the
+  // Plugins workspace do.
+  const pluginsAllowed = conversation.mode !== 'code' || conversation.workspace?.kind === 'internal'
+  const plugins = pluginsAllowed
+    ? pluginHost().toolSet()
+    : { tools: [], snapshot: new Map(), instructions: [] }
 
   const system: BetaTextBlockParam[] = [
     { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
@@ -323,15 +328,18 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   // repeat of an action whose outcome is unknown (`warning`) always asks.
   const approve = async (r: ApprovalRequest, warning?: string): Promise<boolean> => {
     const key = `${conversation.id}:${r.pluginId}:${r.tool}`
-    if (!warning && allowedInChat.has(key)) return true
+    const perChat = !warning && !r.individual
+    if (perChat && allowedInChat.has(key)) return true
     if (controller.signal.aborted) return false
     const id = randomUUID()
-    let detail = ''
-    try {
-      detail = JSON.stringify(r.input, null, 2).slice(0, 800)
-    } catch {
-      // Leave it empty.
-    }
+    // The whole input, never shortened: what isn't shown can't be approved.
+    let detail = r.detail ?? ''
+    if (r.detail === undefined)
+      try {
+        detail = JSON.stringify(r.input, null, 2) ?? ''
+      } catch {
+        return false
+      }
     emit({
       requestId,
       type: 'approval',
@@ -339,7 +347,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       plugin: r.pluginName,
       label: r.label,
       detail,
-      ...(warning ? { warning } : {})
+      ...(warning ? { warning } : {}),
+      ...(r.individual ? { individual: true } : {})
     })
     const decision = await new Promise<ApprovalDecision>((resolve) => {
       approvals.set(id, { requestId, resolve })
@@ -347,8 +356,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     })
     approvals.delete(id)
     emit({ requestId, type: 'approval-done', id })
-    if (decision === 'chat' && !warning) allowedInChat.add(key)
-    return decision === 'once' || decision === 'chat'
+    if (decision === 'chat' && perChat) allowedInChat.add(key)
+    return decision === 'once' || (decision === 'chat' && perChat)
   }
 
   const toCall = (id: string, name: string, input: unknown): Call => {
@@ -365,6 +374,14 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   // Runs one tool call. Its record is kept by the log.
   const runTool = async (c: Call): Promise<ToolRun> => {
     emit({ requestId, type: 'tool', id: c.id, label: c.label, status: 'running', write: c.write })
+    // Only tools offered in this turn run: a call to anything else (a
+    // plugin's tool in General Code, or one from an earlier turn) is refused.
+    if (!available.has(c.name))
+      return {
+        content: `${c.name} isn't available in this chat, so nothing was done.`,
+        isError: true,
+        outcome: 'not-run'
+      }
     const isPlugin = c.name.includes('__') && !workspace?.has(c.name)
     let preApproved = false
     if (c.write && log.unknownRepeat(c)) {
@@ -388,7 +405,39 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         }
       preApproved = true
     }
-    if (workspace?.has(c.name)) return workspace.run(c.name, c.input)
+    if (workspace?.has(c.name)) {
+      // Every file change is shown in full and approved on its own.
+      let preview: ReturnType<WorkspaceTools['preview']>
+      try {
+        preview = workspace.preview(c.name, c.input)
+      } catch (err) {
+        return {
+          content: err instanceof Error ? err.message : String(err),
+          isError: true,
+          outcome: 'not-run'
+        }
+      }
+      if (preview && !preApproved) {
+        const allowed = await approve({
+          pluginId: 'custard',
+          pluginName: 'Custard',
+          tool: c.name,
+          label: preview.label,
+          input: c.input,
+          detail: preview.detail,
+          individual: true
+        })
+        if (!allowed)
+          return {
+            content: controller.signal.aborted
+              ? 'Stopped before it ran, so nothing was done.'
+              : 'The user declined this file change, so nothing was done.',
+            isError: true,
+            outcome: 'not-run'
+          }
+      }
+      return workspace.run(c.name, c.input)
+    }
     if (isWebTool(c.name))
       return runWebTool(c.name, c.input, {
         conversation,

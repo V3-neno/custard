@@ -26,6 +26,7 @@ export type Approval = {
   label: string
   detail: string
   warning?: string
+  individual?: boolean
 }
 
 // The latest line of the thinking summary, as a hint of what it's on now.
@@ -104,7 +105,12 @@ function ApprovalCard({ a }: { a: Approval }): React.JSX.Element {
       </p>
       {a.warning && <p className="mt-2 text-sm text-ember-600">{a.warning}</p>}
       {a.detail && a.detail !== '{}' && (
-        <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-forge-950 p-2 text-[11px] text-ash-400">
+        // The whole of what is approved; it scrolls rather than being cut.
+        <pre
+          aria-label="Everything this action will do"
+          tabIndex={0}
+          className="mt-2 max-h-72 overflow-auto rounded-lg bg-forge-950 p-2 text-[11px] whitespace-pre-wrap break-words text-ash-400"
+        >
           {a.detail}
         </pre>
       )}
@@ -116,7 +122,7 @@ function ApprovalCard({ a }: { a: Approval }): React.JSX.Element {
         >
           Allow
         </button>
-        {!a.warning && (
+        {!a.warning && !a.individual && (
           <button
             disabled={busy}
             onClick={() => answer('chat')}

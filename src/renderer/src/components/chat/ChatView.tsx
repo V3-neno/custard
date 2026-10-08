@@ -172,7 +172,8 @@ function ChatView(props: Props): React.JSX.Element {
                       plugin: e.plugin,
                       label: e.label,
                       detail: e.detail,
-                      warning: e.warning
+                      warning: e.warning,
+                      individual: e.individual
                     }
                   ]
                 }

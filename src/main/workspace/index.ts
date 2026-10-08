@@ -4,7 +4,15 @@ import { join } from 'path'
 import type { Workspace } from '../../shared/plugins'
 import { custardSource, pluginDocsDir, pluginHost, pluginsRoot, sdkDir } from '../plugins'
 import type { Boundary } from './paths'
-import { fileTools, referenceTools, runFileTool, runReferenceTool } from './tools'
+import {
+  FILE_WRITES,
+  fileTools,
+  previewFileChange,
+  referenceTools,
+  runFileTool,
+  runReferenceTool,
+  type FilePreview
+} from './tools'
 
 type Result = { content: string; isError: boolean }
 
@@ -13,7 +21,15 @@ export type WorkspaceTools = {
   prompt: string
   has: (name: string) => boolean
   run: (name: string, input: unknown) => Promise<Result>
+  // File changes need the user's approval of exactly this preview first.
+  // Throws (a PathError) when the change would be refused anyway.
+  preview: (name: string, input: unknown) => FilePreview | null
 }
+
+const previewer =
+  (b: Boundary) =>
+  (name: string, input: unknown): FilePreview | null =>
+    FILE_WRITES.has(name) ? previewFileChange(b, name, input) : null
 
 const devTools: BetaTool[] = [
   {
@@ -41,6 +57,7 @@ function internal(pluginId: string): WorkspaceTools {
   return {
     tools: [...fileTools, ...referenceTools, ...devTools],
     has: (n) => names.has(n),
+    preview: previewer(boundary),
     prompt: [
       `Workspace: Internal (Plugins). You are developing the Custard plugin "${pluginId}". The fs_ tools work only inside plugin/${pluginId}; everything else, including Custard's core, is out of reach.`,
       '- Read the reference first: reference_read docs/API.md and docs/MANIFEST.md, and look at examples/spotify for a complete plugin. sdk/ is the custard-plugin-sdk source.',
@@ -48,6 +65,7 @@ function internal(pluginId: string): WorkspaceTools {
       "- You can't activate, enable or install plugins, and you have no shell. When it validates and tests cleanly, tell the user to open Settings → Plugins, review the changes and permissions, and activate it.",
       '- Plugin code runs in a sandbox with no Node.js and no direct network. Everything goes through the context: ctx.fetch (https, hosts in permissions.network), ctx.storage, ctx.openExternal, ctx.config. There are no npm packages.',
       "- If the plugin needs something the SDK doesn't offer, say so plainly and describe the core change it would need as a separate proposal. Don't try to work around the sandbox.",
+      '- Each file change you make is shown to the user in full and happens only if they allow it; a declined change did nothing.',
       '- Mark every tool that changes something outside Custard as effect "write"; Custard asks the user before each call. Never put secrets in files; secret settings are config fields with secret: true.'
     ].join('\n'),
     run: async (name, input) => {
@@ -89,13 +107,14 @@ function general(root: string, coreAccess: boolean): WorkspaceTools {
   return {
     tools: fileTools,
     has: (n) => names.has(n),
+    preview: previewer(boundary),
     prompt: [
       `Workspace: General Code, in the folder ${root}. The fs_ tools read and edit files only inside it.`,
       coreAccess
         ? "The user explicitly allowed editing Custard's own source in this conversation. Be careful: changes there affect the app itself."
         : "Custard's own source is protected here even if it is inside this folder.",
       "You have no shell, so you can't run builds, tests, installs or scripts. Give the user the exact commands to run themselves.",
-      'Read files before changing them, keep edits focused, and list every file you created, changed, renamed or deleted.'
+      'Read files before changing them, keep edits focused, and list every file you created, changed, renamed or deleted. The user sees each change in full and allows it before it happens; a declined change did nothing.'
     ].join('\n'),
     run: async (name, input) => runFileTool(boundary, name, input)
   }

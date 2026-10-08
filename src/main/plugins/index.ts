@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
-import { existsSync, realpathSync } from 'fs'
+import { existsSync, realpathSync, statSync } from 'fs'
 import { join } from 'path'
 import type { Workspace } from '../../shared/plugins'
 import { handle } from '../ipc'
@@ -71,6 +71,9 @@ export async function startPlugins(): Promise<void> {
 // General Code folders that overlap Custard's source, which the user allowed
 // in a separate confirmation this session. A renderer can't grant this itself.
 const coreGrants = new Set<string>()
+// General Code folders the user chose in the main-process folder picker this
+// session. A folder path from the renderer alone never makes a workspace.
+const generalGrants = new Set<string>()
 
 const overlapsCore = (root: string): boolean => {
   const core = realpathSync.native(custardSource())
@@ -88,6 +91,10 @@ export function verifyWorkspace(w: Workspace | undefined): Workspace | undefined
   if (typeof w.root !== 'string' || !existsSync(w.root))
     throw new Error('That folder no longer exists.')
   const root = realpathSync.native(w.root)
+  if (!generalGrants.has(root) || !statSync(root).isDirectory())
+    throw new Error(
+      'Choose this folder again with "Choose a project folder" so Custard can confirm it.'
+    )
   if (isInside(root, app.getPath('userData')))
     throw new Error("Custard's data folder can't be a workspace.")
   const core = overlapsCore(root)
@@ -176,7 +183,10 @@ export function registerPluginHandlers(): void {
     const root = realpathSync.native(r.filePaths[0])
     if (isInside(root, app.getPath('userData')))
       throw new Error("Custard's data folder can't be a workspace.")
-    if (!overlapsCore(root)) return { kind: 'general', root }
+    if (!overlapsCore(root)) {
+      generalGrants.add(root)
+      return { kind: 'general', root }
+    }
     const ask = {
       type: 'warning' as const,
       buttons: ['Cancel', 'Allow core access'],
@@ -189,11 +199,13 @@ export function registerPluginHandlers(): void {
     const answer = win ? await dialog.showMessageBox(win, ask) : await dialog.showMessageBox(ask)
     if (answer.response === 1) {
       coreGrants.add(root)
+      generalGrants.add(root)
       return { kind: 'general', root, coreAccess: true }
     }
     // Declined: allowed only if the folder merely contains Custard, whose
     // source is then blocked.
     if (isInside(root, custardSource())) return null
+    generalGrants.add(root)
     return { kind: 'general', root }
   })
 }
