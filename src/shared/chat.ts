@@ -49,6 +49,8 @@ export const modes = [
 
 export type Mode = (typeof modes)[number]['id']
 
+export const isMode = (m: unknown): m is Mode => modes.some((x) => x.id === m)
+
 export type ConversationSummary = {
   id: string
   mode: Mode

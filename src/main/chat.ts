@@ -65,6 +65,7 @@ import { isWebTool, runWebTool, webTools } from './web'
 import { repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
   chatModels,
+  isMode,
   providerOf,
   type ActionStatus,
   type ApprovalDecision,
@@ -191,6 +192,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const fileIds = req.attachments?.ids ?? []
   if (!req.text.trim() && !fileIds.length) return refuse('Write a message or attach a file first.')
   const existing = (req.conversationId && openConversation(req.conversationId)) || null
+  // The mode comes from the renderer and picks the prompt and the tools.
+  if (!existing && !isMode(req.mode)) return refuse('Unknown mode.')
   if (existing && active.has(existing.id))
     return refuse('This chat is still answering. Wait for it to finish or stop it first.')
   if (fileIds.length && (existing?.mode ?? req.mode) !== 'chat')
