@@ -55,3 +55,26 @@ Suggested addition (integration's choice of shape):
 
 Until it lands, B's DesignTab reads the list through that preload call
 behind a type guard and shows "Provider list unavailable" if it is missing.
+
+## B3. One refused prompt blocks the operation for the whole session
+
+`tools.ts` `media()` pushes every `failed` job onto `s.failures`
+(`temporary: false`), and `discoverCapabilities` then answers that operation
+`unavailable / failed` for that provider until Custard restarts.
+
+For OpenAI that includes a content-policy refusal of one prompt (HTTP 400,
+`moderation_blocked`). Seen in `test/e2e/design-images.mjs` (mock): after
+"b refuse test", the next, unrelated generate request is refused with
+"Generate an image isn't available (failed): OpenAI refused the request…"
+without an approval card. The user can't make any image until a restart.
+
+Suggested fix: keep the provider's error kind on the job (for example
+`Job.errorKind?: MediaErrorKind`, set from `MediaError.kind` in
+`JobTracker.submit`), and in `media()` record a session failure only for
+provider-level kinds (`unconfigured`, `unsupported`, and `temporary` with
+`temporary: true`), never for `rejected` (that request only). B's provider
+already maps a 4xx refusal to `rejected`, 401/403 to `unconfigured`, 404 to
+`unsupported` and 429 to `temporary`.
+
+The e2e check "after a refused prompt, a new one still asks instead of being
+blocked" fails until this lands.

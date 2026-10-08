@@ -3,9 +3,9 @@ import type { Job, Version } from '../../../../../shared/design'
 import { mediaUrl, type ViewerProps } from './types'
 
 // A generated image: fit or actual size, zoom, and where it came from. An
-// edit is told apart from a new image made in its place: OpenAI and other
-// providers redraw the whole picture, so "edit" only means the earlier
-// version was sent as a reference.
+// edit (of images attached in the chat) is told apart from a new image made
+// from the prompt alone. Even an edit is redrawn by the provider, so it can
+// differ beyond what was asked.
 
 const pill =
   'rounded-full border border-forge-700 px-3 py-1 text-xs text-ash-300 transition-colors hover:border-molten-500/50 hover:text-molten-200 disabled:opacity-40'
@@ -23,7 +23,8 @@ function origin(v: Version, job: Job | undefined, all: Version[]): string {
       ? `Made from ${refs === 1 ? 'an attached image' : `${refs} attached images`}`
       : 'New image from the prompt'
   const what = v.relation === 'variation' ? 'Variation of' : 'Change to'
-  if (op === 'image.edit') return `${what}${of}, with it sent as a reference`
+  const files = refs === 1 ? 'an attached image' : `${refs} attached images`
+  if (op === 'image.edit') return `${what}${of}: an edit of ${files}`
   if (op === 'image.generate') return `${what}${of}: a new image from the prompt, not an edit`
   return `${what}${of}`
 }
