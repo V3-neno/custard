@@ -447,6 +447,12 @@ describe('capture files', () => {
     expect(() => resolveInVault(vault, 'Custard/Captures/x.md')).toThrow(/link/)
   })
 
+  it('refuses Windows short-name aliases and stream names (L22)', () => {
+    for (const p of ['OBSIDI~1/app.json.md', 'Notes/MEMORY~1.MD', 'a.md:hidden.md', 'Inbox/x:y.md'])
+      expect(() => resolveInVault(vault, p), p).toThrow(/short|":"/)
+    expect(resolveInVault(vault, 'Inbox/a~b.md')).toBe(join(vault, 'Inbox', 'a~b.md'))
+  })
+
   it('never writes a capture through a broken link', () => {
     const outside = join(root, 'outside')
     mkdirSync(outside)

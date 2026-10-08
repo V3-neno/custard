@@ -17,8 +17,14 @@ export type Boundary = {
   deny?: string[]
 }
 
-// Names that are never readable or writable through workspace tools.
-const DENIED_NAME = /^(\.git|node_modules|\.env.*|.*\.(pem|key|p12|pfx|keystore))$/i
+// Names that are never readable or writable through workspace tools: VCS
+// and dependency folders, and where common tools keep credentials.
+const DENIED_NAME =
+  /^(\.git|node_modules|\.env.*|.*\.(pem|key|p12|pfx|keystore)|\.ssh|\.aws|\.gnupg|\.docker|\.kube|\.npmrc|\.netrc|_netrc|\.pypirc|\.git-credentials|id_(rsa|dsa|ecdsa|ed25519)(\..*)?)$/i
+
+// Windows 8.3 short names ("GIT~1", "ENV~1") are aliases for long names, so a
+// short name could reach a file the long-name checks refuse.
+export const SHORT_NAME = /~\d/
 
 const caseInsensitive = process.platform === 'win32' || process.platform === 'darwin'
 const norm = (p: string): string => (caseInsensitive ? p.toLowerCase() : p)
@@ -47,6 +53,8 @@ export function splitRelative(rel: unknown): string[] {
     // Windows ignores trailing dots and spaces, so "a.env." would be ".env".
     if (/[. ]$/.test(s)) throw new PathError('File names may not end with a dot or space.')
     if (DENIED_NAME.test(s)) throw new PathError(`"${s}" is off limits.`)
+    if (SHORT_NAME.test(s))
+      throw new PathError(`"${s}" looks like a Windows short name. Use the full name.`)
   }
   return parts
 }

@@ -111,8 +111,9 @@ changing afterwards, and nothing is written based on it.
   - the skills list and `Memory.md`;
   - capture writes.
 
-  It refuses anything outside the vault, hidden folders, and links that lead out
-  of the vault.
+  It refuses anything outside the vault, hidden folders, links that lead out
+  of the vault, `:` in a path (a Windows stream name) and Windows short names
+  such as `OBSIDI~1`.
 - **`vault_list`** shows links that stay inside the vault. It leaves out links
   that lead outside or are broken, and says how many.
 - **Disconnected vault.** Every vault tool first checks that the folder is

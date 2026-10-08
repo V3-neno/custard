@@ -92,6 +92,31 @@ describe('resolveInside', () => {
       expect(() => resolveInside(b(), p)).toThrow(/off limits/)
   })
 
+  it('refuses credential files and folders tools commonly keep in a project (L16)', () => {
+    for (const p of [
+      '.ssh/config',
+      '.aws/credentials',
+      '.npmrc',
+      'sub/.netrc',
+      '.docker/config.json',
+      '.kube/config',
+      '.gnupg/pubring.kbx',
+      'id_rsa',
+      'keys/id_ed25519.pub',
+      'id_ecdsa',
+      '.pypirc',
+      '.git-credentials'
+    ])
+      expect(() => resolveInside(b(), p), p).toThrow(/off limits/)
+    expect(resolveInside(b(), 'docs/ssh-setup.md')).toBe(join(root, 'docs', 'ssh-setup.md'))
+  })
+
+  it('refuses Windows short-name aliases, which could name a protected file (L22)', () => {
+    for (const p of ['ENV~1', 'GIT~1/config', 'NODE_M~1/x.js', 'src/FILE~12.TXT'])
+      expect(() => resolveInside(b(), p), p).toThrow(/short/)
+    expect(resolveInside(b(), 'notes~draft.txt')).toBe(join(root, 'notes~draft.txt'))
+  })
+
   it('refuses denied folders inside the root', () => {
     mkdirSync(join(root, 'core'))
     writeFileSync(join(root, 'core', 'main.ts'), 'x')

@@ -50,8 +50,15 @@ export function resolveInVault(vault: string, path: unknown, mustBeNote = true):
   const rel = relative(vault, full)
   if (rel.startsWith('..') || isAbsolute(rel))
     throw new VaultPathError('Path is outside the vault.')
-  if (rel.split(sep).some((part) => part.startsWith('.')))
+  const parts = rel.split(sep)
+  if (parts.some((part) => part.startsWith('.')))
     throw new VaultPathError('Hidden folders are off limits.')
+  // "a.md:x" names a hidden stream on Windows; "OBSIDI~1" is a short alias
+  // that could reach a hidden folder.
+  if (parts.some((part) => part.includes(':')))
+    throw new VaultPathError('":" is not allowed in note paths.')
+  if (parts.some((part) => /~\d/.test(part)))
+    throw new VaultPathError('That looks like a Windows short name. Use the full name.')
   if (mustBeNote && !full.toLowerCase().endsWith('.md'))
     throw new VaultPathError('Only .md notes are allowed.')
   // A symlinked folder or note inside the vault must not lead outside it,
