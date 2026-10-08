@@ -35,7 +35,10 @@ describe('Spotify settings migration', () => {
     expect(store.config('spotify')).toEqual({ clientId: 'c'.repeat(32) })
     expect(JSON.parse(store.secrets('spotify').__oauth)).toEqual(tokens)
     expect(existsSync(join(dir, 'spotify-tokens.bin'))).toBe(false)
-    expect(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'))).toEqual(settings)
+    // Everything else in settings.json stays; the moved key goes.
+    const { spotifyClientId: _gone, ...rest } = settings
+    expect(_gone).toBeTruthy()
+    expect(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'))).toEqual(rest)
     // The plugin still needs review and activation.
     expect(store.state('spotify').enabled).toBe(false)
   })
@@ -49,6 +52,39 @@ describe('Spotify settings migration', () => {
     expect(migrateLegacySpotify(dir, store, crypto)).toEqual([])
     expect(store.config('spotify').clientId).toBe('new')
     expect(store.secrets('spotify').__oauth).toBe('existing')
+  })
+
+  it('keeps the old token file when it cannot be moved now, and moves it later (L1)', () => {
+    const { dir, store } = setup()
+    writeFileSync(join(dir, 'spotify-tokens.bin'), crypto.encrypt(JSON.stringify(tokens)))
+    const locked = {
+      ...crypto,
+      decrypt: (): string => {
+        throw new Error('keyring locked')
+      }
+    }
+    expect(
+      migrateLegacySpotify(dir, new PluginStore(join(dir, 'plugins'), locked), locked)
+    ).toEqual([])
+    expect(existsSync(join(dir, 'spotify-tokens.bin'))).toBe(true)
+    const noStorage = { ...crypto, available: () => false }
+    expect(
+      migrateLegacySpotify(dir, new PluginStore(join(dir, 'plugins'), noStorage), noStorage)
+    ).toEqual([])
+    expect(existsSync(join(dir, 'spotify-tokens.bin'))).toBe(true)
+    // Secure storage works again: the sign-in moves and the old file goes.
+    expect(migrateLegacySpotify(dir, store, crypto)).toEqual(['Spotify sign-in'])
+    expect(JSON.parse(store.secrets('spotify').__oauth)).toEqual(tokens)
+    expect(existsSync(join(dir, 'spotify-tokens.bin'))).toBe(false)
+  })
+
+  it('does not bring back a Client ID the user cleared (L8)', () => {
+    const { dir, store } = setup()
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ spotifyClientId: 'c'.repeat(32) }))
+    migrateLegacySpotify(dir, store, crypto)
+    store.setConfig('spotify', {})
+    expect(migrateLegacySpotify(dir, store, crypto)).toEqual([])
+    expect(store.config('spotify').clientId).toBeUndefined()
   })
 
   it('does nothing on a fresh install', () => {

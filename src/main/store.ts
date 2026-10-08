@@ -18,6 +18,7 @@ import {
   type Mode
 } from '../shared/chat'
 import type { SecurityDefaults } from '../shared/plugins'
+import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import { defaultMemorySettings, type MemorySettings } from '../shared/memory'
 
 // Conversations are plain JSON files in the app's data folder, one per chat.
@@ -129,12 +130,8 @@ type Config = {
 const defaultSecurity: SecurityDefaults = { askBeforeWriteTools: true }
 
 function readConfig(): Config {
-  let raw: Partial<Config> & Partial<ChatSettings> = {}
-  try {
-    raw = JSON.parse(readFileSync(settingsFile(), 'utf8'))
-  } catch {
-    // First run or unreadable file: use defaults.
-  }
+  // First run: defaults. An unreadable file is kept aside (see settingsFile).
+  const raw = readSettingsFile(settingsFile()) as Partial<Config> & Partial<ChatSettings>
   // Older versions stored the chat settings at the top level.
   const legacy: Partial<ChatSettings> = raw.model ? { model: raw.model } : {}
   if (raw.effort) legacy.effort = raw.effort
@@ -148,13 +145,8 @@ function readConfig(): Config {
 
 // Unknown keys in the file are kept, so settings from other versions survive.
 function writeConfig(patch: Partial<Config>): void {
-  let raw: Record<string, unknown> = {}
-  try {
-    raw = JSON.parse(readFileSync(settingsFile(), 'utf8'))
-  } catch {
-    // First write.
-  }
-  writeFileSync(settingsFile(), JSON.stringify({ ...raw, ...readConfig(), ...patch }))
+  const raw = readSettingsFile(settingsFile())
+  writeSettingsFile(settingsFile(), { ...raw, ...readConfig(), ...patch })
 }
 
 export const getChatSettings = (): ChatSettings => readConfig().chat
