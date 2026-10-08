@@ -169,8 +169,22 @@ longer sent.
 - **Memory: type and count only** (Neno's choice, 2026-10-08). Each request
   in the evidence notes how many files of which types came with it, e.g.
   `[2 files attached (1 image, 1 PDF); names and contents not shown]`.
-  Names and contents never reach the memory summarizer, which is told not to
-  guess what the files held.
+  The summarizer is told not to guess what the files held. To keep names
+  and contents out even when they are quoted:
+  - file names (this chat's, and those listed from a chat it continues) are
+    replaced by `[attached file]` in the user's words, action labels and
+    results, notices, and in capture note titles and file names, including a
+    name cut off at the end of a chat title;
+  - the assistant's answer is left out once the chat has files, since it may
+    quote or describe them;
+  - notices about files are left out, and messages with only files don't
+    count toward starting a capture, so files alone never start one.
+
+  **Known gap:** text a model copied from a file into an action label or a
+  plugin result (for example a search query) can't always be recognized and
+  is not removed, unless it is the file's name. The user's own words are kept
+  apart from the file names.
+
 - **Opt-outs.** Memory off, Forget and temporary chats work as before.
 
 ## Decisions (Neno, 2026-10-08)
@@ -245,5 +259,6 @@ need a Windows build.
   provider enforces its own page limit.
 - **Preserved thinking** after Claude compaction with replaced file notes is
   unverified.
-- **Memory capture with files** is checked in unit tests only, not in the
-  memory end-to-end suite.
+- **Memory capture with files** is checked end to end
+  (`test/e2e/attachments-memory.mjs`) against the mock summarizer; a live
+  summarizer's output hasn't been checked.
