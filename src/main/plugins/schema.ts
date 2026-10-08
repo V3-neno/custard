@@ -1,3 +1,4 @@
+import { createContext, Script } from 'vm'
 import type { JsonSchema } from '../../shared/plugins'
 
 // A deliberately small subset of JSON Schema: enough for tool inputs, and
@@ -67,6 +68,28 @@ const typeOf = (v: unknown): string =>
         ? 'integer'
         : typeof v
 
+// A plugin's `pattern` runs in the main process, so a pattern that
+// backtracks without end could freeze the app. Each match runs with a time
+// limit; a pattern that runs out of time is refused from then on (L11).
+const PATTERN_MS = 100
+const patternContext = createContext({ p: '', v: '' })
+const patternTest = new Script('new RegExp(p, "u").test(v)')
+const slowPatterns = new Set<string>()
+
+function matchesPattern(pattern: string, value: string): boolean | 'slow' {
+  if (slowPatterns.has(pattern)) return 'slow'
+  patternContext.p = pattern
+  patternContext.v = value
+  try {
+    return patternTest.runInContext(patternContext, { timeout: PATTERN_MS }) === true
+  } catch {
+    slowPatterns.add(pattern)
+    return 'slow'
+  } finally {
+    patternContext.v = ''
+  }
+}
+
 // Errors for a value, as short lines a model can act on. Empty means valid.
 export function validate(schema: JsonSchema, value: unknown, at = 'input'): string[] {
   const t = typeOf(value)
@@ -81,8 +104,9 @@ export function validate(schema: JsonSchema, value: unknown, at = 'input'): stri
       errors.push(`${at} is too short`)
     if (schema.maxLength !== undefined && value.length > schema.maxLength)
       errors.push(`${at} is too long (max ${schema.maxLength})`)
-    if (schema.pattern && !new RegExp(schema.pattern, 'u').test(value))
-      errors.push(`${at} has the wrong format`)
+    const match = schema.pattern ? matchesPattern(schema.pattern, value) : true
+    if (match === 'slow') errors.push(`${at}'s format couldn't be checked`)
+    else if (!match) errors.push(`${at} has the wrong format`)
   }
   if (typeof value === 'number') {
     if (schema.minimum !== undefined && value < schema.minimum)
