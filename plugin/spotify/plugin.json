@@ -3,7 +3,7 @@
   "id": "spotify",
   "name": "Spotify",
   "description": "Search and queue music, inspect playback and Spotify Connect devices, open Spotify, transfer playback, and control tracks, pause, resume, seek and volume.",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "apiVersion": 1,
   "entry": "src/index.ts",
   "instructions": "instructions.md",
@@ -47,7 +47,7 @@
       "entry": "widget/player.ts",
       "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
       "tools": ["now_playing", "pause_playback", "resume_playback", "next_track", "seek", "adjust_volume"],
-      "height": { "initial": 240, "min": 200, "max": 360 },
+      "height": { "initial": 200, "min": 120, "max": 360 },
       "presentations": ["compact", "expanded"],
       "refreshSeconds": 15
     }

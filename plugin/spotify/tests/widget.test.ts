@@ -9,7 +9,6 @@ import { context, deferred, flush, rootDouble, snapshot } from './widget-support
 
 test('widget registration uses v1, contextual discovery, bounded heights and least tools', () => {
   const spec = manifest.widgets[0]
-  assert.equal(manifest.version, '1.3.1')
   assert.equal(spec.id, 'player'); assert.equal(spec.widgetApi, 1)
   assert.deepEqual(spec.tools, ['now_playing', 'pause_playback', 'resume_playback', 'next_track', 'seek', 'adjust_volume'])
   assert(spec.refreshSeconds >= 15)

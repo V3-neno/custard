@@ -500,6 +500,15 @@ try {
     'and the player shows Resume'
   )
   await shot('06-spotify')
+  const spotifyBody = async () => (await w.locator('[data-widget-body]').boundingBox()).height
+  const fitted = await spotifyBody()
+  check(fitted < 240, `the player asks only for the height it needs (${fitted}px)`)
+  await slot().getByRole('button', { name: 'Expand' }).click()
+  check(
+    await until(async () => (await spotifyBody()) > fitted),
+    'expanded, it grows to fit Restart and the larger artwork'
+  )
+  await shot('07-spotify-expanded')
 } catch (e) {
   console.log(e)
   process.exitCode = 1

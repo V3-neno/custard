@@ -62,8 +62,9 @@ export class DocumentDouble {
   frames = new Map<number, () => void>()
   private next = 0
   defaultView = {
-    requestAnimationFrame: (fn: () => void) => { const id = ++this.next; this.frames.set(id, fn); return id },
-    cancelAnimationFrame: (id: number) => { this.frames.delete(id) }
+    // Pending clock redraws; tick() runs them whatever their delay.
+    setTimeout: (fn: () => void) => { const id = ++this.next; this.frames.set(id, fn); return id },
+    clearTimeout: (id: number) => { this.frames.delete(id) }
   }
   createElement(tag: string) { return new ElementDouble(tag, this) }
   tick() { const frames = [...this.frames.values()]; this.frames.clear(); frames.forEach((fn) => fn()) }

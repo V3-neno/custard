@@ -8,7 +8,7 @@ export const time = (ms: number | null): string => ms === null ? '--:--' :
 
 const CSS = `
 *{box-sizing:border-box}body{margin:0}button,input{font:inherit}
-.player{height:100%;overflow:auto;scrollbar-width:none;padding:10px 12px;color:var(--custard-text,#eee);background:var(--custard-surface,#202124);font:13px/1.4 var(--custard-font,system-ui);border-radius:10px}
+.player{max-height:100vh;overflow:auto;scrollbar-width:none;padding:10px 12px;color:var(--custard-text,#eee);background:var(--custard-surface,#202124);font:13px/1.4 var(--custard-font,system-ui);border-radius:10px}
 .player::-webkit-scrollbar{display:none;width:0;height:0}
 .summary{display:flex;align-items:center;gap:12px;min-width:0}.art{width:48px;height:48px;flex:none;display:grid;place-items:center;background:var(--custard-accent-soft,#34413d);border-radius:8px;font-size:28px;color:var(--custard-accent,#7dd4a3)}
 .meta{min-width:0;flex:1}.title{font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.artists,.device{color:var(--custard-text-muted,#bbb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -96,7 +96,7 @@ export function createPlayerWidget(clock = () => Date.now()): WidgetDefinition {
         if (el.textContent !== value) el.textContent = value
       }
       const stopAnimation = (): void => {
-        if (frame !== null) win?.cancelAnimationFrame(frame)
+        if (frame !== null) win?.clearTimeout(frame)
         frame = null
       }
       const render = (): void => {
@@ -130,16 +130,30 @@ export function createPlayerWidget(clock = () => Date.now()): WidgetDefinition {
         setText(notice, message); notice.hidden = !message
         panel.setAttribute('aria-busy', String(c.pending || c.reading))
         if (c.visible && ctx.visible && playing && !c.stale() && s?.position !== null && !dead) {
-          if (frame === null && win) frame = win.requestAnimationFrame(() => { frame = null; render() })
+          // The clock shows whole seconds, so redraw when the next one starts.
+          const wait = 1000 - ((position ?? 0) % 1000)
+          if (frame === null && win) frame = win.setTimeout(() => { frame = null; render() }, Math.max(50, wait))
         } else stopAnimation()
       }
       controller = new PlayerController(ctx, render, clock)
       draw = render
       cancelDraft = () => { draft = null; render() }
+      // Ask for the height the content needs, up to the presentation's cap;
+      // without a measurement (no layout yet), ask for the cap.
+      let presentation: WidgetPresentation = ctx.presentation
+      const fit = (): void => {
+        if (dead) return
+        const measured = Math.ceil(panel.scrollHeight || 0)
+        ctx.setHeight(measured > 0 ? Math.min(measured, HEIGHT[presentation]) : HEIGHT[presentation])
+      }
+      const Observer = (win as (Window & typeof globalThis) | null)?.ResizeObserver
+      const resize = Observer ? new Observer(fit) : null
+      resize?.observe(panel)
       layout = (p) => {
+        presentation = p
         panel.className = `player ${p === 'expanded' ? 'expanded' : 'compact'}`
         restart.hidden = p !== 'expanded'
-        root.style.height = `${HEIGHT[p]}px`; ctx.setHeight(HEIGHT[p]); render()
+        render(); fit()
       }
       listen(refresh, 'click', () => { cancelDraft?.(); void controller!.read() })
       listen(toggle, 'click', () => { void controller!.action(controller!.snapshot?.state === 'playing' ? 'pause_playback' : 'resume_playback') })
@@ -163,7 +177,7 @@ export function createPlayerWidget(clock = () => Date.now()): WidgetDefinition {
       listen(range, 'pointercancel', () => cancelDraft?.())
       listen(range, 'blur', () => cancelDraft?.())
       cleanup = () => {
-        dead = true; draft = null; controller?.dispose(); stopAnimation()
+        dead = true; draft = null; controller?.dispose(); stopAnimation(); resize?.disconnect()
         listeners.forEach((remove) => remove()); root.replaceChildren()
       }
       layout(ctx.presentation)
