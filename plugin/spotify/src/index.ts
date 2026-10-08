@@ -3,19 +3,16 @@ import { SpotifyClient } from './client'
 import { SeenTracks, tools, type SpotifyDeps } from './tools'
 import { describeReady, readinessTimeout, waitForDevices } from './readiness'
 
-// Only Spotify-returned track URIs may be queued during this plugin session.
 const seen = new SeenTracks()
 const deps = (ctx: PluginContext): SpotifyDeps => ({
   client: new SpotifyClient(ctx),
   seen,
-  openExternal: (url) => ctx.openExternal(url)
+  openExternal: (url) => ctx.openExternal(url),
+  signal: ctx.signal
 })
 type Input = Record<string, unknown>
 
-async function wait(
-  input: Input,
-  ctx: PluginContext
-): Promise<{ content: string; isError: boolean }> {
+async function wait(input: Input, ctx: PluginContext): Promise<{ content: string; isError: boolean }> {
   try {
     const devices = await waitForDevices(ctx, {
       deviceId: typeof input.device_id === 'string' ? input.device_id : undefined,
@@ -36,7 +33,6 @@ export default definePlugin({
     open: async (i: Input, ctx) => {
       const started = Date.now()
       const opened = await tools(deps(ctx)).open(i)
-      // A plain "open Spotify" still works without requiring Spotify API sign-in.
       if (opened.isError || i.wait_for_device !== true) return opened
       try {
         const devices = await waitForDevices(ctx, { computerOnly: true },
@@ -50,6 +46,12 @@ export default definePlugin({
       }
     },
     wait_for_device: wait,
-    transfer_playback: (i: Input, ctx) => tools(deps(ctx)).transfer_playback(i)
+    transfer_playback: (i: Input, ctx) => tools(deps(ctx)).transfer_playback(i),
+    next_track: (i: Input, ctx) => tools(deps(ctx)).next_track(i),
+    previous_track: (i: Input, ctx) => tools(deps(ctx)).previous_track(i),
+    pause_playback: (i: Input, ctx) => tools(deps(ctx)).pause_playback(i),
+    resume_playback: (i: Input, ctx) => tools(deps(ctx)).resume_playback(i),
+    seek: (i: Input, ctx) => tools(deps(ctx)).seek(i),
+    adjust_volume: (i: Input, ctx) => tools(deps(ctx)).adjust_volume(i)
   }
 })
