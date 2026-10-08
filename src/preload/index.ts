@@ -1,34 +1,128 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { MemorySettings } from '../shared/memory'
 import type {
+  ChatLink,
   ChatEvent,
+  ChatMemory,
   ChatSettings,
+  ContinueResult,
   Conversation,
   ConversationSummary,
+  Mode,
+  Provider,
   SendChatRequest
 } from '../shared/chat'
+import type { VaultInfo } from '../shared/vault'
+import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
+import type { ApprovalDecision } from '../shared/chat'
+import type {
+  PluginReview,
+  PluginStatus,
+  SecurityDefaults,
+  TestReport,
+  Workspace
+} from '../shared/plugins'
 
 // API exposed to the renderer as window.custard. The renderer never sees the
-// API key; all Claude calls happen in the main process.
+// API keys; all model calls happen in the main process.
 const custard = {
   platform: process.platform,
   apiKey: {
-    has: (): Promise<boolean> => ipcRenderer.invoke('apiKey:has'),
-    set: (key: string): Promise<void> => ipcRenderer.invoke('apiKey:set', key),
-    clear: (): Promise<void> => ipcRenderer.invoke('apiKey:clear')
+    has: (p: Provider): Promise<boolean> => ipcRenderer.invoke('apiKey:has', p),
+    set: (p: Provider, key: string): Promise<void> => ipcRenderer.invoke('apiKey:set', p, key),
+    clear: (p: Provider): Promise<void> => ipcRenderer.invoke('apiKey:clear', p)
   },
   settings: {
     get: (): Promise<ChatSettings> => ipcRenderer.invoke('settings:get'),
     set: (s: ChatSettings): Promise<void> => ipcRenderer.invoke('settings:set', s)
   },
+  vault: {
+    get: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:get'),
+    pick: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:pick'),
+    createStarter: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:createStarter'),
+    clear: (): Promise<void> => ipcRenderer.invoke('vault:clear'),
+    addStarterSkills: (): Promise<{ added: string[]; vault: VaultInfo }> =>
+      ipcRenderer.invoke('vault:addStarterSkills')
+  },
+  plugins: {
+    list: (): Promise<PluginStatus[]> => ipcRenderer.invoke('plugins:list'),
+    status: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:status', id),
+    review: (id: string): Promise<PluginReview> => ipcRenderer.invoke('plugins:review', id),
+    test: (id: string): Promise<TestReport> => ipcRenderer.invoke('plugins:test', id),
+    activate: (id: string, buildId: string, approved: string[]): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:activate', id, buildId, approved),
+    rollback: (id: string, approved: string[] = []): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:rollback', id, approved),
+    enable: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:enable', id),
+    disable: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disable', id),
+    uninstall: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:uninstall', id),
+    setConfig: (id: string, values: Record<string, unknown>): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:setConfig', id, values),
+    setAskEveryTime: (id: string, tool: string, ask: boolean): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:setAskEveryTime', id, tool, ask),
+    connect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:connect', id),
+    disconnect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disconnect', id),
+    resetSecrets: (id: string): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:resetSecrets', id),
+    create: (id: string, name: string): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:create', id, name),
+    labels: (): Promise<Record<string, string>> => ipcRenderer.invoke('plugins:labels'),
+    sourceRoot: (): Promise<string> => ipcRenderer.invoke('plugins:sourceRoot')
+  },
+  memory: {
+    getSettings: (): Promise<MemorySettings> => ipcRenderer.invoke('memory:getSettings'),
+    setSettings: (s: MemorySettings): Promise<void> => ipcRenderer.invoke('memory:setSettings', s),
+    setChat: (id: string, off: boolean): Promise<ChatMemory | null> =>
+      ipcRenderer.invoke('memory:setChat', id, off),
+    forgetChat: (id: string): Promise<ChatMemory | null> =>
+      ipcRenderer.invoke('memory:forgetChat', id),
+    onUpdate: (cb: (u: { conversationId: string; memory?: ChatMemory }) => void): (() => void) => {
+      const listener = (_: unknown, u: { conversationId: string; memory?: ChatMemory }): void =>
+        cb(u)
+      ipcRenderer.on('memory:update', listener)
+      return () => ipcRenderer.removeListener('memory:update', listener)
+    }
+  },
+  security: {
+    get: (): Promise<SecurityDefaults> => ipcRenderer.invoke('security:get'),
+    set: (s: SecurityDefaults): Promise<void> => ipcRenderer.invoke('security:set', s)
+  },
+  workspace: {
+    pickGeneral: (): Promise<Workspace | null> => ipcRenderer.invoke('workspace:pickGeneral')
+  },
   conversations: {
-    list: (): Promise<ConversationSummary[]> => ipcRenderer.invoke('conversations:list'),
+    list: (mode: Mode): Promise<ConversationSummary[]> =>
+      ipcRenderer.invoke('conversations:list', mode),
     get: (id: string): Promise<Conversation | null> => ipcRenderer.invoke('conversations:get', id),
-    delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id)
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id),
+    continuations: (id: string): Promise<ChatLink[]> =>
+      ipcRenderer.invoke('conversations:continuations', id)
+  },
+  // Files for a Chat-mode message (see main/attachments). A draft is one
+  // message's files before it is sent.
+  attachments: {
+    pick: (draft: string): Promise<AttachResult[]> => ipcRenderer.invoke('attachments:pick', draft),
+    add: (draft: string, name: string, bytes: Uint8Array): Promise<AttachResult> =>
+      ipcRenderer.invoke('attachments:add', draft, name, bytes),
+    remove: (draft: string, id: string): Promise<void> =>
+      ipcRenderer.invoke('attachments:remove', draft, id),
+    discard: (draft: string): Promise<void> => ipcRenderer.invoke('attachments:discard', draft),
+    list: (draft: string): Promise<DraftAttachment[]> =>
+      ipcRenderer.invoke('attachments:list', draft),
+    preview: (
+      where: { chat?: string; draft?: string },
+      a: Pick<Attachment, 'id' | 'ext' | 'mime' | 'kind'>
+    ): Promise<string | null> => ipcRenderer.invoke('attachments:preview', where, a)
   },
   chat: {
     send: (req: SendChatRequest): void => ipcRenderer.send('chat:send', req),
     stop: (requestId: string): void => ipcRenderer.send('chat:stop', requestId),
+    approve: (id: string, decision: ApprovalDecision): Promise<void> =>
+      ipcRenderer.invoke('chat:approve', id, decision),
+    // Continue a chat that grew too long in a new one; the original is kept.
+    continue: (id: string, withoutSummary?: boolean): Promise<ContinueResult> =>
+      ipcRenderer.invoke('chat:continue', id, withoutSummary),
     onEvent: (cb: (e: ChatEvent) => void): (() => void) => {
       const listener = (_: unknown, e: ChatEvent): void => cb(e)
       ipcRenderer.on('chat:event', listener)

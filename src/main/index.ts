@@ -1,16 +1,38 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, dialog, shell, BrowserWindow } from 'electron'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
-import { registerChatHandlers } from './chat'
+import { chatBusy, openConversation, registerChatHandlers } from './chat'
+import { attachments, registerAttachmentHandlers } from './attachments'
+import { memory, registerMemoryHandlers } from './memory'
+import { handle } from './ipc'
+import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
+import { isPluginContents } from './plugins/runtime'
 import {
   deleteConversation,
   getChatSettings,
-  getConversation,
+  getVaultPath,
   listConversations,
-  setChatSettings
+  setChatSettings,
+  setVaultPath
 } from './store'
+import type { VaultInfo } from '../shared/vault'
+import type { ChatSettings, Mode, Provider } from '../shared/chat'
+import { listSkills } from './vault'
+import { pinProviderEndpoints } from './endpoints'
+import { addMissingStarterSkills, createStarterVault } from './vaultTemplate'
+
+function vaultInfo(): VaultInfo {
+  const path = getVaultPath()
+  if (!path) return null
+  return {
+    path,
+    isObsidian: existsSync(join(path, '.obsidian')),
+    skills: existsSync(path) ? listSkills(path).map((s) => s.name) : []
+  }
+}
 
 function createWindow(): void {
   // Create the browser window.
@@ -33,8 +55,9 @@ function createWindow(): void {
     mainWindow.show()
   })
 
+  // Links in answers can come from web pages, so only web links are opened.
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (/^https?:\/\//i.test(details.url)) shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
@@ -51,6 +74,8 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // Packaged builds ignore ANTHROPIC_BASE_URL / OPENAI_BASE_URL (L13).
+  pinProviderEndpoints(app.isPackaged)
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.custard.app')
 
@@ -61,24 +86,90 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ipcMain.handle('apiKey:has', () => getApiKey() !== null)
-  ipcMain.handle('apiKey:set', (_, key: string) => setApiKey(key))
-  ipcMain.handle('apiKey:clear', () => clearApiKey())
-  ipcMain.handle('settings:get', () => getChatSettings())
-  ipcMain.handle('settings:set', (_, s) => setChatSettings(s))
-  ipcMain.handle('conversations:list', () => listConversations())
-  ipcMain.handle('conversations:get', (_, id: string) => getConversation(id))
-  ipcMain.handle('conversations:delete', (_, id: string) => deleteConversation(id))
+  handle('apiKey:has', (_, p: Provider) => getApiKey(p) !== null)
+  handle('apiKey:set', (_, p: Provider, key: string) => {
+    setApiKey(p, key)
+    void memory().run()
+  })
+  handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
+  handle('settings:get', () => getChatSettings())
+  handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
+  handle('conversations:list', (_, mode: Mode) => listConversations(mode))
+  handle('conversations:get', (_, id: string) => openConversation(id))
+  handle('conversations:delete', async (_, id: string) => {
+    if (chatBusy(id))
+      throw new Error(
+        'This chat is still answering. Stop it or wait for it to finish, then delete it.'
+      )
+    deleteConversation(id)
+    // The chat's attached files go with it.
+    await attachments().deleteChat(id)
+  })
+  handle('vault:get', () => vaultInfo())
+  handle('vault:pick', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options = {
+      title: 'Choose your Obsidian vault folder',
+      properties: ['openDirectory' as const]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (!result.canceled && result.filePaths[0]) {
+      setVaultPath(result.filePaths[0])
+      void memory().run()
+    }
+    return vaultInfo()
+  })
+  handle('vault:createStarter', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options = {
+      title: 'Choose where to create the starter vault',
+      properties: ['openDirectory' as const, 'createDirectory' as const]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (!result.canceled && result.filePaths[0]) {
+      setVaultPath(createStarterVault(result.filePaths[0]))
+      void memory().run()
+    }
+    return vaultInfo()
+  })
+  handle('vault:clear', () => setVaultPath(null))
+  handle('vault:addStarterSkills', () => {
+    const path = getVaultPath()
+    if (!path || !existsSync(path)) throw new Error('Connect a vault first.')
+    return { added: addMissingStarterSkills(path), vault: vaultInfo() }
+  })
   registerChatHandlers()
+  registerAttachmentHandlers()
+  registerPluginHandlers()
+  registerMemoryHandlers()
 
   createWindow()
+  // Plugins start after the window so a slow plugin can't delay the app.
+  void startPlugins()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (appWindows().length === 0) createWindow()
   })
 })
+
+// Plugin sandboxes are hidden windows too; they don't count as the app.
+const appWindows = (): BrowserWindow[] =>
+  BrowserWindow.getAllWindows().filter((w) => !isPluginContents(w.webContents))
+
+app.on('browser-window-created', (_, win) => {
+  win.on('closed', () => {
+    // When the last app window closes, stop the plugins so the app can quit.
+    if (appWindows().length === 0 && process.platform !== 'darwin') pluginHost().shutdown()
+  })
+})
+
+app.on('before-quit', () => pluginHost().shutdown())
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

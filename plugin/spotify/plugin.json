@@ -1,0 +1,220 @@
+{
+  "manifestVersion": 1,
+  "id": "spotify",
+  "name": "Spotify",
+  "description": "Search and queue music, inspect playback and Spotify Connect devices, open Spotify, transfer playback, and control tracks, pause, resume, seek and volume.",
+  "version": "1.2.1",
+  "apiVersion": 1,
+  "entry": "src/index.ts",
+  "instructions": "instructions.md",
+  "permissions": {
+    "network": ["api.spotify.com", "accounts.spotify.com"],
+    "openExternal": ["spotify:"],
+    "storage": false
+  },
+  "config": {
+    "clientId": {
+      "type": "string",
+      "title": "Client ID",
+      "description": "From your app at developer.spotify.com/dashboard. Add http://127.0.0.1:43821/callback as a Redirect URI there.",
+      "pattern": "^[0-9a-fA-F]{32}$"
+    },
+    "deviceReadyTimeoutSeconds": {
+      "type": "number",
+      "title": "Device readiness timeout (seconds)",
+      "description": "Maximum wait for Spotify to become available. Checks immediately, then once a second after each response; continues as soon as ready. The host limits tool calls to 60 seconds.",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 30
+    }
+  },
+  "auth": {
+    "type": "oauth-pkce",
+    "authorizeUrl": "https://accounts.spotify.com/authorize",
+    "tokenUrl": "https://accounts.spotify.com/api/token",
+    "redirectPort": 43821,
+    "redirectPath": "/callback",
+    "scopes": ["user-read-playback-state", "user-read-currently-playing", "user-modify-playback-state"],
+    "clientIdConfigKey": "clientId",
+    "apiHosts": ["api.spotify.com"]
+  },
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search Spotify for tracks. Returns up to 10 real tracks with title, artists, album, explicit flag, duration and Spotify URI. Search one specific track or artist per call (e.g. Nils Frahm Says), not a mood. Only URIs returned by this tool can be queued.",
+      "effect": "read",
+      "label": "Searched Spotify for \"{query}\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Track and/or artist to find" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Defaults to 5" }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "now_playing",
+      "description": "Read current Spotify playback. Retains the human-readable track/state/device summary and appends playback_metadata JSON schema v1 with title, artists, album, artwork, URI/link, milliseconds, state, device, observation time and action restrictions. A snapshot, not continuous monitoring or proof a prior command caused it. No playback changes.",
+      "effect": "read",
+      "label": "Checked what is playing",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "name": "devices",
+      "description": "List available Spotify Connect devices and which is active. These are NOT Bluetooth connections; Spotify cannot enumerate OS Bluetooth pairing or audio routes. Read-only snapshot. During startup use wait_for_device instead of treating an empty list as failure.",
+      "effect": "read",
+      "label": "Listed Spotify devices",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    },
+    {
+      "name": "wait_for_device",
+      "description": "Wait until Spotify exposes a controllable device, returning immediately if ready. Read-only polling bounded by the configured readiness timeout (default 30 seconds, maximum 50). Use during startup or before a dependent step, rather than reporting failure after one empty device list. Returns device IDs; does not open Spotify, queue, transfer or start playback. Authentication, permission and rate-limit errors are reported without repeated polling.",
+      "effect": "read",
+      "label": "Waited for Spotify device readiness",
+      "timeoutMs": 60000,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Optional specific device ID previously returned by Spotify" },
+          "active_only": { "type": "boolean", "description": "Require an active device. Default false; inactive controllable devices can be addressed explicitly by ID." }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "add_to_queue",
+      "description": "Add tracks to the end of the user's Spotify queue, in order. Does not start, pause or replace playback. Needs an active device, or an explicit device_id returned by Spotify. During startup first await open with wait_for_device=true or wait_for_device. Each URI must come from spotify__search or spotify__now_playing. Use only when the user asked for songs to be queued. Do not automatically repeat uncertain queue writes.",
+      "effect": "write",
+      "label": "Spotify queue: {uris} tracks",
+      "timeoutMs": 45000,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uris": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^spotify:track:[0-9A-Za-z]{22}$" },
+            "minItems": 1,
+            "maxItems": 10,
+            "description": "Spotify track URIs returned by search or now_playing"
+          },
+          "device_id": { "type": "string", "maxLength": 100, "description": "Optional device ID returned by Spotify. Leave out to use the active device." }
+        },
+        "required": ["uris"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "open",
+      "description": "Open the Spotify desktop app, optionally on a track, album, artist or playlist page. Does not start playback or change the queue. For open-and-queue or open-and-play requests set wait_for_device=true and await this tool before the dependent step: it polls until a controllable Computer device appears, up to the configured readiness timeout. Spotify cannot identify this computer uniquely; ask if the target is ambiguous. A plain open can omit the wait.",
+      "effect": "write",
+      "label": "Opened Spotify",
+      "timeoutMs": 60000,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "uri": { "type": "string", "pattern": "^spotify:(track|album|artist|playlist):[0-9A-Za-z]{22}$", "description": "Optional Spotify URI to show" },
+          "wait_for_device": { "type": "boolean", "description": "Set true when another requested step needs Spotify ready. Default false. Returns immediately once a controllable Computer device is visible." }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "transfer_playback",
+      "description": "Move Spotify playback to another device. play must be set: true starts playing there, false moves without changing play/pause. Use only when the user asked to switch devices or start playback. During startup await device readiness first.",
+      "effect": "write",
+      "label": "Moved Spotify playback to a device",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "A device ID returned by Spotify" },
+          "play": { "type": "boolean", "description": "Start playback on the device" }
+        },
+        "required": ["device_id", "play"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "next_track",
+      "description": "Skip to the next track only when requested. Targets the current active device; an optional device_id must match it. No implicit resume, transfer or queue replacement. Reports API acceptance, not verified playback. Never blindly retry after timeout, server error or an unknown outcome.",
+      "effect": "write",
+      "label": "Requested next Spotify track",
+      "timeoutMs": 45000,
+      "inputSchema": {
+        "type": "object",
+        "properties": { "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Optional current active Spotify device ID; guards against targeting another device" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "previous_track",
+      "description": "Spotify native Skip To Previous. Use only for an explicit request for Spotify's native Previous behavior, NOT Back or return to the song actually just heard. This endpoint follows Spotify's queue semantics, not reliable listening history. History-based Back is unavailable in this version; do not substitute this tool. Clarify ambiguous previous-song requests. Restart-current-song uses seek with position_ms=0. Current active device only. Reports API acceptance, not verified playback. Never blindly retry an uncertain outcome.",
+      "effect": "write",
+      "label": "Requested Spotify native Previous",
+      "timeoutMs": 45000,
+      "inputSchema": {
+        "type": "object",
+        "properties": { "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Optional current active Spotify device ID; must match" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "pause_playback",
+      "description": "Pause existing playback only when the user requests it. Requires an active, controllable Spotify device; optional device_id must match it. No implicit transfer, start or queue replacement. Reports accepted, not verified; now_playing can separately observe the state.",
+      "effect": "write",
+      "label": "Requested Spotify pause",
+      "timeoutMs": 45000,
+      "inputSchema": {
+        "type": "object",
+        "properties": { "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Optional current active Spotify device ID; must match" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "resume_playback",
+      "description": "Resume existing playback only when explicitly requested, using PUT play with no body: never supplies or replaces context, tracks, queue, offset or position. Requires an existing item on the current active device; does not transfer or start a new context as a fallback. Optional device_id must match. Reports accepted, not verified.",
+      "effect": "write",
+      "label": "Requested Spotify resume",
+      "timeoutMs": 45000,
+      "inputSchema": {
+        "type": "object",
+        "properties": { "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Optional current active Spotify device ID; must match" } },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "seek",
+      "description": "Seek within the current music track only when requested. position_ms is an absolute non-negative integer in milliseconds, strictly less than the known track duration. Zero requests a restart; no implicit resume. Rejects unknown duration and positions at/beyond the end to avoid Spotify advancing tracks. Current active device only; reports accepted, not verified.",
+      "effect": "write",
+      "label": "Requested Spotify seek to {position_ms} ms",
+      "timeoutMs": 45000,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "position_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991, "description": "Absolute position in milliseconds; must be less than current track duration" },
+          "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Optional current active Spotify device ID; must match" }
+        },
+        "required": ["position_ms"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "adjust_volume",
+      "description": "Raise or lower Spotify playback volume only when requested. Reads current volume, adds/subtracts amount_percent percentage points (default 5), clamps to 0–100, then sends one absolute volume command. Requires current active device and known volume; refuses devices that report unsupported volume. Not OS/Bluetooth volume. Optional device_id must match. Reports accepted, not verified; no automatic retry.",
+      "effect": "write",
+      "label": "Requested Spotify volume {direction}",
+      "timeoutMs": 45000,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "direction": { "type": "string", "enum": ["raise", "lower"] },
+          "amount_percent": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Percentage points to add/subtract, default 5" },
+          "device_id": { "type": "string", "minLength": 1, "maxLength": 100, "description": "Optional current active Spotify device ID; must match" }
+        },
+        "required": ["direction"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

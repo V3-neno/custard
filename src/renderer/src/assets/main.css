@@ -1,16 +1,58 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/space-grotesk';
+@import '@fontsource-variable/jetbrains-mono';
 
+/* Foundry palette: near-black warm iron, ash text, molten amber accents. */
 @theme {
-  --color-custard-50: #fffbeb;
-  --color-custard-100: #fef3c7;
-  --color-custard-300: #fcd34d;
-  --color-custard-400: #f6c445;
-  --color-custard-500: #e9a91f;
-  --color-ink-900: #17140f;
-  --color-ink-800: #211d16;
-  --color-ink-700: #2d281f;
-  --color-ink-500: #6b6253;
-  --color-ink-300: #b5ab98;
+  --color-forge-950: #0a0705;
+  --color-forge-900: #110c08;
+  --color-forge-850: #17110b;
+  --color-forge-800: #1e160f;
+  --color-forge-700: #2a1f15;
+  --color-forge-600: #3a2b1d;
+  --color-ash-500: #7a6853;
+  --color-ash-400: #95826a;
+  --color-ash-300: #b3a086;
+  --color-ash-100: #eee2cc;
+  --color-molten-200: #ffe2a3;
+  --color-molten-300: #ffcd6e;
+  --color-molten-400: #f5ae3f;
+  --color-molten-500: #e08a1e;
+  --color-ember-600: #b4531a;
+  --color-ember-700: #6e2f0e;
+
+  --font-sans: 'Space Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', Consolas, monospace;
+}
+
+/* Glow colors as RGB channels, for use with an alpha: rgb(var(--glow) / 0.3). */
+:root {
+  --glow: 245 174 63;
+  --glow-deep: 224 138 30;
+  --glow-ember: 180 83 26;
+}
+
+/* OpenAI tint: the same forge, cooled to blue-grey steel. */
+:root[data-provider='openai'] {
+  --color-forge-950: #07090c;
+  --color-forge-900: #0c1015;
+  --color-forge-850: #11161d;
+  --color-forge-800: #171d26;
+  --color-forge-700: #212a35;
+  --color-forge-600: #2f3a48;
+  --color-ash-500: #66717f;
+  --color-ash-400: #838e9c;
+  --color-ash-300: #a3adba;
+  --color-ash-100: #e3e8ee;
+  --color-molten-200: #dbe6f3;
+  --color-molten-300: #bccfe4;
+  --color-molten-400: #95afcc;
+  --color-molten-500: #7190b3;
+  --color-ember-600: #4f6b8c;
+  --color-ember-700: #2d3f55;
+  --glow: 149 175 204;
+  --glow-deep: 113 144 179;
+  --glow-ember: 79 107 140;
 }
 
 html,
@@ -20,19 +62,92 @@ body,
 }
 
 body {
-  @apply bg-ink-900 text-custard-50 antialiased;
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
+  @apply bg-forge-950 font-sans text-ash-100 antialiased;
+  /* A faint heat glow rising from the bottom, where the input sits. */
+  background-image:
+    radial-gradient(ellipse 70% 45% at 50% 115%, rgb(var(--glow-deep) / 0.13), transparent 70%),
+    radial-gradient(ellipse 50% 35% at 50% -10%, rgb(var(--glow-ember) / 0.06), transparent 70%);
 }
 
-/* Chat message Markdown */
+::selection {
+  background: rgb(var(--glow) / 0.3);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-forge-600) transparent;
+}
+
+/* Hairline with a molten center, used for dividers and focus edges. */
+.forge-line {
+  background: linear-gradient(90deg, transparent, rgb(var(--glow) / 0.35), transparent);
+  height: 1px;
+}
+
+.molten-fill {
+  background: linear-gradient(
+    135deg,
+    var(--color-molten-300),
+    var(--color-molten-500) 55%,
+    var(--color-ember-600)
+  );
+}
+
+/* ---------- Working stages ---------- */
+
+.stage-in {
+  animation: stage-in 0.35s ease-out both;
+}
+@keyframes stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* A hairline under each stage: lit when done, a travelling spark while active. */
+.stage-track {
+  height: 1px;
+  background: linear-gradient(90deg, rgb(var(--glow) / 0.45), rgb(var(--glow) / 0.08));
+}
+.stage-track.is-active {
+  background:
+    linear-gradient(90deg, transparent, rgb(var(--glow) / 0.9), transparent) -40% 0 / 40% 100%
+      no-repeat,
+    var(--color-forge-700);
+  animation: stage-spark 1.4s ease-in-out infinite;
+}
+@keyframes stage-spark {
+  to {
+    background-position:
+      140% 0,
+      0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-in,
+  .stage-track.is-active {
+    animation: none;
+  }
+}
+
+/* ---------- Drawer ---------- */
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-16px);
+    opacity: 0;
+  }
+}
+.drawer-in {
+  animation: drawer-in 180ms ease-out;
+}
+
+/* ---------- Message Markdown ---------- */
+
 .markdown {
-  @apply text-sm leading-relaxed;
+  @apply text-[15px] leading-relaxed text-ash-100;
 }
 .markdown > * + * {
   @apply mt-3;
@@ -40,42 +155,51 @@ body {
 .markdown h1,
 .markdown h2,
 .markdown h3 {
-  @apply font-semibold text-custard-100;
+  @apply font-semibold tracking-tight text-molten-200;
 }
 .markdown h1 {
-  @apply text-lg;
+  @apply text-xl;
 }
 .markdown h2 {
-  @apply text-base;
+  @apply text-lg;
+}
+.markdown strong {
+  @apply font-semibold text-molten-200;
 }
 .markdown ul {
-  @apply list-disc pl-6;
+  @apply list-disc pl-6 marker:text-molten-500;
 }
 .markdown ol {
-  @apply list-decimal pl-6;
+  @apply list-decimal pl-6 marker:text-molten-500;
 }
 .markdown li + li {
   @apply mt-1;
 }
 .markdown a {
-  @apply text-custard-300 underline;
+  @apply text-molten-300 underline decoration-molten-500/50 underline-offset-2 hover:decoration-molten-300;
 }
 .markdown code {
-  @apply rounded bg-ink-700 px-1 py-0.5 font-mono text-[0.85em];
+  @apply rounded-md bg-forge-700 px-1.5 py-0.5 font-mono text-[0.85em] text-molten-200;
 }
 .markdown pre {
-  @apply overflow-x-auto rounded-lg border border-ink-700 bg-ink-800 p-3;
+  @apply overflow-x-auto rounded-xl border border-forge-700 bg-forge-900 p-4;
 }
 .markdown pre code {
-  @apply bg-transparent p-0;
+  @apply bg-transparent p-0 text-ash-100;
 }
 .markdown blockquote {
-  @apply border-l-2 border-ink-500 pl-3 text-ink-300;
+  @apply border-l-2 border-molten-500/60 pl-4 text-ash-300;
+}
+.markdown hr {
+  @apply border-forge-700;
 }
 .markdown table {
-  @apply border-collapse;
+  @apply border-collapse text-sm;
 }
 .markdown th,
 .markdown td {
-  @apply border border-ink-700 px-2 py-1;
+  @apply border border-forge-700 px-3 py-1.5;
+}
+.markdown th {
+  @apply bg-forge-850 text-molten-200;
 }

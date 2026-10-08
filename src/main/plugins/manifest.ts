@@ -1,0 +1,390 @@
+import {
+  SUPPORTED_API_VERSIONS,
+  type ConfigField,
+  type OAuthSpec,
+  type PluginManifest,
+  type ToolSpec
+} from '../../shared/plugins'
+import { checkSchema } from './schema'
+
+// Mechanical checks on plugin.json. Passing them means the manifest is well
+// formed and internally consistent, not that the plugin's code is safe or
+// does what its descriptions say.
+
+export const PLUGIN_ID = /^[a-z][a-z0-9-]{1,30}$/
+const TOOL_NAME = /^[a-z][a-z0-9_]{0,40}$/
+const CONFIG_KEY = /^[a-zA-Z][a-zA-Z0-9_]{0,40}$/
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+const HOST = /^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/
+// Schemes a plugin may never hand to the OS, even if declared.
+const BLOCKED_SCHEMES = new Set([
+  'file',
+  'javascript',
+  'data',
+  'vbscript',
+  'about',
+  'blob',
+  'chrome',
+  'devtools',
+  'http',
+  'ftp',
+  'smb',
+  'jar',
+  'search-ms',
+  'search',
+  'ms-msdt',
+  'ms-settings',
+  'shell',
+  // Windows help, archive and remote-content handlers.
+  'its',
+  'mk',
+  'hcp',
+  'res',
+  'mhtml',
+  'jnlp',
+  // Remote shares and logins.
+  'ldap',
+  'ssh',
+  'telnet',
+  'nfs',
+  'dav',
+  'webdav',
+  'cifs',
+  // Editors whose links can open terminals or install extensions.
+  'vscode',
+  'vscode-insiders',
+  'cursor'
+])
+
+// What ctx.openExternal may pass on: unreserved and reserved URL characters
+// (RFC 3986) and %-escapes, without "'". No spaces, quotes, backslashes or
+// other characters an app's command line could read as more arguments.
+export const PLAIN_URL =
+  /^[A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=]*(%[0-9A-Fa-f]{2}[A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=]*)*$/
+
+// Tool names as the model sees them. Both Claude and OpenAI require
+// ^[a-zA-Z0-9_-]{1,64}$, so "spotify.search" becomes "spotify__search".
+// Plugin ids can't contain "_", so the split is unambiguous.
+export const SEP = '__'
+export const fullToolName = (pluginId: string, tool: string): string => `${pluginId}${SEP}${tool}`
+export function splitToolName(name: string): { pluginId: string; tool: string } | null {
+  const i = name.indexOf(SEP)
+  if (i <= 0) return null
+  return { pluginId: name.slice(0, i), tool: name.slice(i + SEP.length) }
+}
+
+const isRelativePath = (p: unknown): p is string =>
+  typeof p === 'string' &&
+  p.length > 0 &&
+  p.length < 200 &&
+  !/^([a-zA-Z]:|[\\/])/.test(p) &&
+  !p.split(/[\\/]/).some((s) => s === '..' || s === '' || s.startsWith('.')) &&
+  !/[:\0]/.test(p)
+
+export function validOpenPrefix(p: unknown): p is string {
+  if (typeof p !== 'string' || p.length > 200) return false
+  const scheme = /^([a-z][a-z0-9+.-]*):/.exec(p)?.[1]
+  if (!scheme || BLOCKED_SCHEMES.has(scheme) || scheme.startsWith('ms-')) return false
+  if (scheme === 'https') {
+    try {
+      const u = new URL(p)
+      return HOST.test(u.hostname) && !u.hostname.startsWith('*') && p.startsWith(`${u.origin}/`)
+    } catch {
+      return false
+    }
+  }
+  return p === `${scheme}:`
+}
+
+const httpsUrl = (u: unknown): boolean => {
+  try {
+    const url = new URL(String(u))
+    return url.protocol === 'https:' && HOST.test(url.hostname) && !url.username && !url.password
+  } catch {
+    return false
+  }
+}
+
+export function hostAllowed(patterns: string[], host: string): boolean {
+  const h = host.toLowerCase()
+  return patterns.some((p) =>
+    p === '*' ? true : p.startsWith('*.') ? h.endsWith(p.slice(1)) : p === h
+  )
+}
+
+function checkConfig(config: unknown, errors: string[]): Record<string, ConfigField> {
+  if (config === undefined) return {}
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    errors.push('config must be an object of fields')
+    return {}
+  }
+  const out: Record<string, ConfigField> = {}
+  for (const [key, raw] of Object.entries(config as Record<string, unknown>)) {
+    const at = `config.${key}`
+    if (!CONFIG_KEY.test(key)) errors.push(`${at}: invalid key`)
+    const f = raw as Partial<ConfigField> & Record<string, unknown>
+    if (!f || typeof f !== 'object') {
+      errors.push(`${at}: must be an object`)
+      continue
+    }
+    const allowed = new Set([
+      'type',
+      'title',
+      'description',
+      'enum',
+      'pattern',
+      'minimum',
+      'maximum',
+      'default',
+      'required',
+      'secret'
+    ])
+    for (const k of Object.keys(f))
+      if (!allowed.has(k)) errors.push(`${at}: "${k}" is not supported`)
+    if (!['string', 'number', 'boolean'].includes(f.type as string))
+      errors.push(`${at}: type must be string, number or boolean`)
+    if (typeof f.title !== 'string' || !f.title) errors.push(`${at}: title is required`)
+    if (f.secret && f.type !== 'string') errors.push(`${at}: only string fields can be secret`)
+    if (f.secret && f.default !== undefined)
+      errors.push(`${at}: secret fields can't have a default`)
+    if (f.default !== undefined && typeof f.default !== f.type)
+      errors.push(`${at}: default must be a ${f.type}`)
+    if (f.enum !== undefined && (!Array.isArray(f.enum) || f.type !== 'string'))
+      errors.push(`${at}: enum must be a list of strings on a string field`)
+    if (f.pattern !== undefined)
+      try {
+        new RegExp(String(f.pattern), 'u')
+      } catch {
+        errors.push(`${at}: invalid pattern`)
+      }
+    out[key] = f as ConfigField
+  }
+  return out
+}
+
+function checkTools(id: string, tools: unknown, errors: string[]): ToolSpec[] {
+  if (!Array.isArray(tools) || tools.length === 0 || tools.length > 32) {
+    errors.push('tools must list 1 to 32 tools')
+    return []
+  }
+  const names = new Set<string>()
+  for (const [i, t] of (tools as Partial<ToolSpec>[]).entries()) {
+    const at = `tools[${i}]${t?.name ? ` (${t.name})` : ''}`
+    if (!t || typeof t !== 'object') {
+      errors.push(`${at}: must be an object`)
+      continue
+    }
+    const allowed = new Set(['name', 'description', 'inputSchema', 'effect', 'label', 'timeoutMs'])
+    for (const k of Object.keys(t))
+      if (!allowed.has(k)) errors.push(`${at}: "${k}" is not supported`)
+    if (typeof t.name !== 'string' || !TOOL_NAME.test(t.name))
+      errors.push(`${at}: name must be lowercase letters, digits and _ (start with a letter)`)
+    else if (names.has(t.name)) errors.push(`${at}: duplicate tool name`)
+    else if (fullToolName(id, t.name).length > 64)
+      errors.push(`${at}: "${fullToolName(id, t.name)}" is longer than 64 characters`)
+    if (typeof t.name === 'string') names.add(t.name)
+    if (typeof t.description !== 'string' || !t.description || t.description.length > 1024)
+      errors.push(`${at}: description must be 1 to 1024 characters`)
+    if (t.effect !== 'read' && t.effect !== 'write')
+      errors.push(`${at}: effect must be "read" or "write"`)
+    const schemaErrors = checkSchema(t.inputSchema, `${at}.inputSchema`)
+    errors.push(...schemaErrors)
+    if (!schemaErrors.length && t.inputSchema?.type !== 'object')
+      errors.push(`${at}.inputSchema: type must be "object"`)
+    if (t.label !== undefined && (typeof t.label !== 'string' || t.label.length > 120))
+      errors.push(`${at}: label must be a short string`)
+    if (
+      t.timeoutMs !== undefined &&
+      (typeof t.timeoutMs !== 'number' || t.timeoutMs < 1000 || t.timeoutMs > 60_000)
+    )
+      errors.push(`${at}: timeoutMs must be between 1000 and 60000`)
+  }
+  return tools as ToolSpec[]
+}
+
+function checkAuth(
+  auth: unknown,
+  network: string[],
+  config: Record<string, ConfigField>,
+  errors: string[]
+): OAuthSpec | undefined {
+  if (auth === undefined) return undefined
+  const a = auth as Partial<OAuthSpec>
+  if (!a || a.type !== 'oauth-pkce') {
+    errors.push('auth.type must be "oauth-pkce" (the only supported kind)')
+    return undefined
+  }
+  if (!httpsUrl(a.authorizeUrl)) errors.push('auth.authorizeUrl must be an https URL')
+  if (!httpsUrl(a.tokenUrl)) errors.push('auth.tokenUrl must be an https URL')
+  else if (
+    !hostAllowed(
+      network.filter((n) => n !== '*'),
+      new URL(a.tokenUrl!).hostname
+    )
+  )
+    errors.push('auth.tokenUrl host must be listed in permissions.network')
+  if (!Number.isInteger(a.redirectPort) || a.redirectPort! < 1024 || a.redirectPort! > 65535)
+    errors.push('auth.redirectPort must be a port from 1024 to 65535')
+  if (typeof a.redirectPath !== 'string' || !/^\/[\w/-]*$/.test(a.redirectPath))
+    errors.push('auth.redirectPath must start with /')
+  if (
+    !Array.isArray(a.scopes) ||
+    a.scopes.some((s) => typeof s !== 'string' || !/^[\w:.-]+$/.test(s))
+  )
+    errors.push('auth.scopes must be a list of scope names')
+  const key = a.clientIdConfigKey
+  if (
+    typeof key !== 'string' ||
+    !config[key] ||
+    config[key].secret ||
+    config[key].type !== 'string'
+  )
+    errors.push('auth.clientIdConfigKey must name a non-secret string config field')
+  if (!Array.isArray(a.apiHosts) || a.apiHosts.length === 0)
+    errors.push('auth.apiHosts must list the hosts that receive the access token')
+  else
+    for (const h of a.apiHosts)
+      if (typeof h !== 'string' || !HOST.test(h) || h.startsWith('*') || !network.includes(h))
+        errors.push(`auth.apiHosts: ${h} must be an exact host also listed in permissions.network`)
+  return a as OAuthSpec
+}
+
+export type ManifestResult =
+  | { ok: true; manifest: PluginManifest; errors: [] }
+  | { ok: false; manifest: null; errors: string[] }
+
+export function parseManifest(raw: unknown, folderName?: string): ManifestResult {
+  const errors: string[] = []
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return { ok: false, manifest: null, errors: ['plugin.json must be a JSON object'] }
+  const m = raw as Record<string, unknown>
+  const allowed = new Set([
+    '$schema',
+    'manifestVersion',
+    'id',
+    'name',
+    'description',
+    'version',
+    'apiVersion',
+    'entry',
+    'permissions',
+    'tools',
+    'config',
+    'auth',
+    'instructions'
+  ])
+  for (const k of Object.keys(m)) if (!allowed.has(k)) errors.push(`"${k}" is not a manifest field`)
+  if (m.manifestVersion !== 1) errors.push('manifestVersion must be 1')
+  const id = m.id
+  if (typeof id !== 'string' || !PLUGIN_ID.test(id))
+    errors.push('id must be 2 to 31 lowercase letters, digits or hyphens, starting with a letter')
+  else if (folderName !== undefined && id !== folderName)
+    errors.push(`id "${id}" must match its folder name "${folderName}"`)
+  if (typeof m.name !== 'string' || !m.name || m.name.length > 60)
+    errors.push('name must be 1 to 60 characters')
+  if (typeof m.description !== 'string' || !m.description || m.description.length > 300)
+    errors.push('description must be 1 to 300 characters')
+  if (typeof m.version !== 'string' || !SEMVER.test(m.version))
+    errors.push('version must be semver, like 1.0.0')
+  if (!Number.isInteger(m.apiVersion)) errors.push('apiVersion must be an integer')
+  else if (!SUPPORTED_API_VERSIONS.includes(m.apiVersion as number))
+    errors.push(
+      `apiVersion ${m.apiVersion} is not supported by this Custard (supports ${SUPPORTED_API_VERSIONS.join(', ')})`
+    )
+  if (!isRelativePath(m.entry) || !/\.(ts|js)$/.test(m.entry as string))
+    errors.push('entry must be a relative .ts or .js path inside the plugin folder')
+  if (
+    m.instructions !== undefined &&
+    (!isRelativePath(m.instructions) || !/\.md$/.test(m.instructions))
+  )
+    errors.push('instructions must be a relative .md path inside the plugin folder')
+
+  const p = (m.permissions ?? {}) as Record<string, unknown>
+  if (typeof p !== 'object') errors.push('permissions must be an object')
+  for (const k of Object.keys(p))
+    if (!['network', 'openExternal', 'storage'].includes(k))
+      errors.push(`permissions.${k} is not a known permission`)
+  const network = Array.isArray(p.network) ? (p.network as unknown[]) : []
+  if (p.network !== undefined && !Array.isArray(p.network))
+    errors.push('permissions.network must be a list of hosts')
+  for (const h of network)
+    if (h !== '*' && (typeof h !== 'string' || !HOST.test(h)))
+      errors.push(
+        `permissions.network: "${h}" must be a host name like api.example.com, *.example.com or "*"`
+      )
+  const open = Array.isArray(p.openExternal) ? (p.openExternal as unknown[]) : []
+  if (p.openExternal !== undefined && !Array.isArray(p.openExternal))
+    errors.push('permissions.openExternal must be a list of URL prefixes')
+  for (const o of open)
+    if (!validOpenPrefix(o))
+      errors.push(
+        `permissions.openExternal: "${o}" must be a custom scheme like "spotify:" or an https prefix like "https://example.com/"`
+      )
+  if (p.storage !== undefined && typeof p.storage !== 'boolean')
+    errors.push('permissions.storage must be true or false')
+
+  const config = checkConfig(m.config, errors)
+  const tools = checkTools(typeof id === 'string' ? id : 'x', m.tools, errors)
+  const auth = checkAuth(m.auth, network as string[], config, errors)
+
+  if (errors.length) return { ok: false, manifest: null, errors }
+  return {
+    ok: true,
+    errors: [],
+    manifest: {
+      manifestVersion: 1,
+      id: id as string,
+      name: m.name as string,
+      description: m.description as string,
+      version: m.version as string,
+      apiVersion: m.apiVersion as number,
+      entry: m.entry as string,
+      permissions: {
+        network: network as string[],
+        openExternal: open as string[],
+        storage: p.storage === true
+      },
+      tools,
+      config,
+      ...(auth ? { auth } : {}),
+      ...(m.instructions ? { instructions: m.instructions as string } : {})
+    }
+  }
+}
+
+// Everything that decides where an account's credentials go and what they
+// allow. Saved tokens are kept across an update only if this is unchanged.
+export function credentialScope(m: PluginManifest): string {
+  if (!m.auth) return ''
+  const a = m.auth
+  return JSON.stringify({
+    authorize: a.authorizeUrl,
+    token: a.tokenUrl,
+    api: [...a.apiHosts].sort(),
+    scopes: [...a.scopes].sort(),
+    clientIdKey: a.clientIdConfigKey,
+    redirect: [a.redirectPort, a.redirectPath]
+  })
+}
+
+// Everything a manifest asks for, as stable strings. A string missing from
+// the user's grants means the user has to approve it before activation.
+export function permissionsOf(m: PluginManifest): string[] {
+  return [
+    ...m.permissions.network.map((h) => `network:${h}`),
+    ...m.permissions.openExternal.map((o) => `open:${o}`),
+    ...(m.permissions.storage ? ['storage'] : []),
+    ...(m.auth
+      ? [
+          `account:${new URL(m.auth.authorizeUrl).hostname}`,
+          // Where the account's credentials go: the token endpoint (codes
+          // and refresh tokens) and each host that gets the access token.
+          // A change to either needs approval again.
+          `account-token:${new URL(m.auth.tokenUrl).hostname}`,
+          ...m.auth.apiHosts.map((h) => `account-api:${h}`),
+          ...m.auth.scopes.map((s) => `account-scope:${s}`)
+        ]
+      : []),
+    ...m.tools.filter((t) => t.effect === 'write').map((t) => `action:${t.name}`)
+  ]
+}

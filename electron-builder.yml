@@ -5,12 +5,26 @@ directories:
 files:
   - '!**/.vscode/*'
   - '!src/*'
+  - '!{plugin,test,scripts,out-test}/**'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+  # esbuild runs a native binary to build plugins.
+  - node_modules/esbuild/**
+  - node_modules/@esbuild/**
+# Plugin sources, the SDK and its docs, read by the plugin host. Not tested in
+# a packaged build yet; development (npm run dev) is the supported setup.
+extraResources:
+  - from: plugin
+    to: plugin
+  - from: src/plugin-sdk
+    to: plugin-sdk
+    filter: ['*.ts', '!*.test.ts']
+  - from: docs/plugins
+    to: docs/plugins
 win:
   executableName: custard
 nsis:

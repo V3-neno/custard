@@ -1,44 +1,99 @@
 import { useCallback, useEffect, useState } from 'react'
-import Sidebar from './components/Sidebar'
+import TopBar from './components/TopBar'
 import SettingsDialog from './components/SettingsDialog'
 import ChatView from './components/chat/ChatView'
-import { modes, type Mode } from './modes'
+import {
+  defaultChatSettings,
+  modes,
+  providerOf,
+  type ChatSettings,
+  type Mode
+} from '../../shared/chat'
+import { ProviderContext } from './provider'
+import { ToolLabelsContext } from './toolLabels'
 
 function App(): React.JSX.Element {
   const [mode, setMode] = useState<Mode>('chat')
   const [hasKey, setHasKey] = useState(true)
+  const [vaultConnected, setVaultConnected] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const current = modes.find((m) => m.id === mode)!
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [settings, setSettings] = useState<ChatSettings>(defaultChatSettings)
+  const [labels, setLabels] = useState<Record<string, string>>({})
+  // Whether the chat on screen (or the next new one) is temporary. Switching
+  // it in a chat that has started opens a new chat of the other kind.
+  const [temporary, setTemporary] = useState(false)
+  const [newChat, setNewChat] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const provider = providerOf(settings.model)
 
-  const checkKey = useCallback(() => window.custard.apiKey.has().then(setHasKey), [])
   useEffect(() => {
-    checkKey()
-  }, [checkKey])
+    window.custard.settings.get().then(setSettings)
+  }, [])
+
+  // The whole palette follows the provider (see main.css).
+  useEffect(() => {
+    document.documentElement.dataset.provider = provider
+  }, [provider])
+
+  const refreshStatus = useCallback(() => {
+    window.custard.apiKey.has(provider).then(setHasKey)
+    window.custard.vault.get().then((v) => setVaultConnected(v !== null))
+    window.custard.plugins.labels().then(setLabels)
+  }, [provider])
+  useEffect(() => {
+    refreshStatus()
+  }, [refreshStatus])
+
+  const updateSettings = (s: ChatSettings): void => {
+    setSettings(s)
+    window.custard.settings.set(s)
+  }
 
   return (
-    <div className="flex h-full">
-      <Sidebar mode={mode} onChange={setMode} onOpenSettings={() => setSettingsOpen(true)} />
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-ink-700 px-6 py-4">
-          <h1 className="text-base font-semibold">{current.label}</h1>
-          <p className="text-sm text-ink-300">{current.blurb}</p>
-        </header>
-        {mode === 'chat' ? (
-          <ChatView hasKey={hasKey} onOpenSettings={() => setSettingsOpen(true)} />
-        ) : (
-          <section className="flex flex-1 items-center justify-center text-ink-500">
-            {current.label} mode is coming next.
-          </section>
-        )}
-      </main>
-      {settingsOpen && (
-        <SettingsDialog
-          hasKey={hasKey}
-          onClose={() => setSettingsOpen(false)}
-          onChanged={checkKey}
-        />
-      )}
-    </div>
+    <ProviderContext.Provider value={provider}>
+      <ToolLabelsContext.Provider value={labels}>
+        <div className="flex h-full flex-col">
+          <TopBar
+            modeLabel={modes.find((m) => m.id === mode)?.label ?? 'Chat'}
+            vaultConnected={vaultConnected}
+            temporary={temporary}
+            busy={busy}
+            onTemporary={() => {
+              setTemporary((t) => !t)
+              setNewChat((n) => n + 1)
+            }}
+            onHistory={() => setHistoryOpen(true)}
+            onSettings={() => setSettingsOpen(true)}
+          />
+          {/* Each mode has its own history, so switching mode starts fresh. */}
+          <ChatView
+            key={mode}
+            mode={mode}
+            onModeChange={setMode}
+            hasKey={hasKey}
+            settings={settings}
+            onSettings={updateSettings}
+            onOpenSettings={() => setSettingsOpen(true)}
+            historyOpen={historyOpen}
+            onCloseHistory={() => setHistoryOpen(false)}
+            temporary={temporary}
+            onTemporary={setTemporary}
+            newChat={newChat}
+            onBusy={setBusy}
+          />
+          {settingsOpen && (
+            <SettingsDialog
+              onClose={() => {
+                setSettingsOpen(false)
+                refreshStatus()
+              }}
+              onChanged={refreshStatus}
+            />
+          )}
+        </div>
+      </ToolLabelsContext.Provider>
+    </ProviderContext.Provider>
   )
 }
 

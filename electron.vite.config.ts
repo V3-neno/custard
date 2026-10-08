@@ -5,7 +5,17 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   main: {},
-  preload: {},
+  preload: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/preload/index.ts'),
+          // Preload for plugin sandboxes; it may only import "electron".
+          plugin: resolve('src/preload/plugin.ts')
+        }
+      }
+    }
+  },
   renderer: {
     resolve: {
       alias: {
