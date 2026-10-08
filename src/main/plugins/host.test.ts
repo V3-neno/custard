@@ -744,7 +744,13 @@ describe('the Spotify reference plugin through the host', () => {
     'account-scope:user-modify-playback-state',
     'action:add_to_queue',
     'action:open',
-    'action:transfer_playback'
+    'action:transfer_playback',
+    'action:next_track',
+    'action:previous_track',
+    'action:pause_playback',
+    'action:resume_playback',
+    'action:seek',
+    'action:adjust_volume'
   ]
   const track = {
     uri: `spotify:track:${'a'.repeat(22)}`,
