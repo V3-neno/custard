@@ -13,6 +13,7 @@ import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import type { Conversation } from '../../shared/chat'
 import { TurnLog, type Call } from '../turn'
+import { resolveInVault, VaultPathError } from '../memory/paths'
 import {
   boundMemory,
   MEMORY_LIMITS,
@@ -303,6 +304,31 @@ describe('vault read', () => {
 // --- Safeguards ----------------------------------------------------------------
 
 describe('vault safeguards', () => {
+  it('never writes through a broken link, at the note or any folder above it', async () => {
+    const outside = join(root, 'outside')
+    mkdirSync(outside)
+    // The note itself is a link to a file that doesn't exist yet.
+    symlinkSync(join(outside, 'planted.md'), join(vault, 'Planted.md'))
+    // A folder in the path is a link to a folder that doesn't exist yet.
+    symlinkSync(join(outside, 'later'), join(vault, 'Inbox'))
+    // A folder in the path is a link to an existing folder outside.
+    symlinkSync(outside, join(vault, 'Out'))
+    for (const path of ['Planted.md', 'Inbox/x.md', 'Inbox/deeper/x.md', 'Out/x.md'])
+      expect(await run('vault_create_note', { path, content: 'escaped' }), path).toMatchObject({
+        isError: true,
+        outcome: 'not-run'
+      })
+    for (const path of ['Planted.md', 'Inbox/x.md', 'Out/x.md'])
+      expect(() => resolveInVault(vault, path), path).toThrow(VaultPathError)
+    expect(readdirSync(outside)).toEqual([])
+    // A link that stays inside the vault is still fine.
+    mkdirSync(join(vault, 'Real'))
+    symlinkSync(join(vault, 'Real'), join(vault, 'Alias'))
+    expect(await run('vault_create_note', { path: 'Alias/ok.md', content: 'ok' })).toMatchObject({
+      isError: false
+    })
+  })
+
   it('reports a disconnected vault as not run for every tool', async () => {
     rmSync(vault, { recursive: true })
     for (const name of [

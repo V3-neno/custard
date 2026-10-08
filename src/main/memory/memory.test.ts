@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -444,6 +445,15 @@ describe('capture files', () => {
     mkdirSync(outside)
     symlinkSync(outside, join(vault, 'Custard'))
     expect(() => resolveInVault(vault, 'Custard/Captures/x.md')).toThrow(/link/)
+  })
+
+  it('never writes a capture through a broken link', () => {
+    const outside = join(root, 'outside')
+    mkdirSync(outside)
+    mkdirSync(join(vault, 'Custard'))
+    symlinkSync(join(outside, 'not-yet'), join(vault, 'Custard/Captures'))
+    expect(() => writeCapture(vault, 'Custard/Captures', 'n', text(), 'k-broken')).toThrow(/link/)
+    expect(readdirSync(outside)).toEqual([])
   })
 
   it('makes safe names', () => {

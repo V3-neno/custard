@@ -1,5 +1,5 @@
-import { existsSync, realpathSync } from 'fs'
-import { dirname, isAbsolute, relative, resolve, sep } from 'path'
+import { lstatSync, realpathSync } from 'fs'
+import { isAbsolute, join, relative, resolve, sep } from 'path'
 
 // Where a vault path may point. Shared by the vault tools and by Custard's
 // own memory writes so the rules are the same everywhere: inside the vault,
@@ -13,15 +13,35 @@ const inside = (root: string, p: string): boolean => {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
-// The closest part of `p` that exists, resolved through symlinks.
-function realAncestor(p: string): string {
-  let cur = p
-  while (!existsSync(cur)) {
-    const up = dirname(cur)
-    if (up === cur) return cur
-    cur = up
+// Checks every part of `rel` below the vault, from the top. A symlink must
+// lead to something that exists inside the vault; a broken one (whose target
+// doesn't exist yet) is refused, because writing through it would create the
+// target wherever it points. Parts that don't exist yet end the walk.
+//
+// Limitation: this runs just before the write. Another program replacing a
+// folder with a link in between (a race) isn't prevented by this check; new
+// notes are opened with exclusive create, which doesn't follow a link at the
+// note itself, but a swapped parent folder could still be followed.
+function checkLinks(vault: string, realVault: string, rel: string): void {
+  let cur = vault
+  for (const part of rel.split(sep).filter(Boolean)) {
+    cur = join(cur, part)
+    let st: import('fs').Stats
+    try {
+      st = lstatSync(cur)
+    } catch {
+      return
+    }
+    if (!st.isSymbolicLink()) continue
+    let target: string
+    try {
+      target = realpathSync(cur)
+    } catch {
+      throw new VaultPathError('Path goes through a broken link.')
+    }
+    if (!inside(realVault, target))
+      throw new VaultPathError('Path leads outside the vault through a link.')
   }
-  return realpathSync(cur)
 }
 
 export function resolveInVault(vault: string, path: unknown, mustBeNote = true): string {
@@ -34,9 +54,9 @@ export function resolveInVault(vault: string, path: unknown, mustBeNote = true):
     throw new VaultPathError('Hidden folders are off limits.')
   if (mustBeNote && !full.toLowerCase().endsWith('.md'))
     throw new VaultPathError('Only .md notes are allowed.')
-  // A symlinked folder or note inside the vault must not lead outside it.
-  if (!inside(realpathSync(vault), realAncestor(full)))
-    throw new VaultPathError('Path leads outside the vault through a link.')
+  // A symlinked folder or note inside the vault must not lead outside it,
+  // and a broken one must not be written through.
+  checkLinks(vault, realpathSync(vault), rel)
   return full
 }
 

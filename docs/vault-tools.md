@@ -22,6 +22,14 @@ below for why.
   Turning it off also removes the model's side of the race with Obsidian and
   sync clients writing the same note. Approval would not have closed that
   race.
+- **Links (M4).** Before any write, every part of the path below the vault is
+  checked. A link must lead to something that exists inside the vault, and a
+  broken link (one whose target doesn't exist yet) is refused. That covers
+  model-created notes and automatic captures, at the note and at any folder
+  above it. **Remaining race:** the check runs just before the write. New
+  notes use exclusive create, which won't follow a link at the note itself,
+  but another program swapping a parent folder for a link in between isn't
+  prevented.
 - **Retrieved notes stay untrusted.** Approving a note doesn't change how it
   is read later: it is still data, not instructions.
 - **Automatic memory is unchanged.** It still writes one new note per capture
