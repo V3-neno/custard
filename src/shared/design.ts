@@ -228,6 +228,8 @@ export type Job = {
   remoteId?: string
   progress?: number
   error?: string
+  // What kind of error the provider reported, when it said so.
+  errorKind?: MediaErrorKind
   // Custard is watching it now. Stopping that never cancels the job.
   tracking: boolean
   checks: number
