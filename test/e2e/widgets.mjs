@@ -83,9 +83,25 @@ async function launch() {
     }
   })
   if (process.env.WDEBUG) app.process().stdout.on('data', (d) => process.stdout.write('MAIN ' + d))
-  await app.evaluate(({ safeStorage, dialog }, vault) => {
+  await app.evaluate(({ safeStorage, dialog, shell }, vault) => {
     safeStorage.setUsePlainTextEncryption?.(true)
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [vault] })
+    // Spotify's API and sign-in go to the mock.
+    globalThis.__custardPluginTransport = async (req) => {
+      const r = await fetch('http://127.0.0.1:8899' + req.url.pathname + req.url.search, {
+        method: req.method,
+        headers: req.headers,
+        body: req.body,
+        signal: req.signal
+      })
+      return { status: r.status, headers: Object.fromEntries(r.headers), body: await r.text() }
+    }
+    shell.openExternal = async (url) => {
+      if (url.startsWith('https://accounts.spotify.com/authorize')) {
+        const p = new URL(url).searchParams
+        setTimeout(() => fetch(`${p.get('redirect_uri')}?code=CODE&state=${p.get('state')}`), 300)
+      }
+    }
   }, OUT + '/vault')
   let w = null
   for (let i = 0; !w && i < 300; i++) {
@@ -437,6 +453,53 @@ try {
     'widgets.json keeps only identity and input'
   )
   await shot('05-restored')
+
+  step("Spotify's own player widget, on the same host")
+  await w.click('button[title=Settings]')
+  await w.click('button:text-is("Plugins")')
+  await w.click('button:has-text("Spotify")')
+  await w.click('button:has-text("Review and activate")')
+  await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
+  check(
+    await w.locator('text=Show its "player" panel').isVisible(),
+    'the review asks for the player widget permission'
+  )
+  const spBoxes = w.locator('section:has-text("New permissions to approve") input[type=checkbox]')
+  for (let i = 0; i < (await spBoxes.count()); i++) await spBoxes.nth(i).check()
+  await w.click('button:text-matches("^Activate [0-9]")')
+  await w.waitForSelector('text=Save configuration', { timeout: 30000 })
+  await w.fill('input[aria-label="Client ID"]', '0123456789abcdef0123456789abcdef')
+  await w.click('button:has-text("Save configuration")')
+  await w.click('button:text-is("Connect")')
+  await w.waitForSelector('text=· connected', { timeout: 15000 })
+  await w.click('button:text-is("Done")')
+  await newChat()
+  await send('widget spotify test')
+  await idle()
+  check(
+    await until(async () => (await slot().getAttribute('data-widget')) === 'spotify/player'),
+    'the assistant shows the Spotify player'
+  )
+  check(
+    await until(async () => /Says[\s\S]*Pause/.test(await inWidget('document.body.innerText'))),
+    'it reads and draws playback itself'
+  )
+  const spotifyCalls = () => read(OUT + '/spotify.json', []).map((x) => `${x.method} ${x.path}`)
+  check(!spotifyCalls().includes('PUT /v1/me/player/pause'), 'showing it changed nothing')
+  await clickInWidget('button[aria-label="Pause Spotify playback"]')
+  const pauseCard = w.locator('[aria-label="Allow widget action"]')
+  await pauseCard.waitFor({ timeout: 10000 })
+  check((await pauseCard.innerText()).includes('pause'), 'Pause asks first')
+  await pauseCard.getByRole('button', { name: 'Allow', exact: true }).click()
+  check(
+    await until(async () => spotifyCalls().includes('PUT /v1/me/player/pause')),
+    'allowed: the pause reached Spotify'
+  )
+  check(
+    await until(async () => /Resume/.test(await inWidget('document.body.innerText'))),
+    'and the player shows Resume'
+  )
+  await shot('06-spotify')
 } catch (e) {
   console.log(e)
   process.exitCode = 1

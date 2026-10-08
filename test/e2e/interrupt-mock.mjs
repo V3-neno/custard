@@ -20,6 +20,7 @@ const save = () => {
   fs.writeFileSync(OUT + '/anthropic.json', JSON.stringify(anth, null, 1))
   fs.writeFileSync(OUT + '/spotify.json', JSON.stringify(spotify, null, 1))
 }
+let paused = false
 const T1 = 'spotify:track:' + '1'.padStart(22, 'a')
 const track = {
   uri: T1,
@@ -97,6 +98,30 @@ http
             ]
           })
         if (url.pathname === '/v1/me/player/queue' && req.method === 'POST') return // never answers
+        // Playback for the Spotify player widget: playing until paused.
+        if (url.pathname === '/v1/me/player' && req.method === 'GET')
+          return j(200, {
+            device: {
+              id: 'desk1',
+              name: 'Desktop',
+              type: 'Computer',
+              is_active: true,
+              is_restricted: false,
+              volume_percent: 40,
+              supports_volume: true
+            },
+            is_playing: !paused,
+            progress_ms: 61000,
+            currently_playing_type: 'track',
+            item: { ...track, type: 'track', album: { ...track.album, images: [] } },
+            actions: { disallows: {} },
+            timestamp: Date.now()
+          })
+        if (url.pathname === '/v1/me/player/pause' && req.method === 'PUT') {
+          paused = true
+          res.writeHead(204)
+          return res.end()
+        }
         return j(404, { error: { status: 404, message: 'nope' } })
       }
       const b = JSON.parse(body)
@@ -274,7 +299,8 @@ http
         [/widget update test/, 'wupdate'],
         [/widget hide test/, 'whide'],
         [/widget crash test/, 'wcrash'],
-        [/widget hang test/, 'whang']
+        [/widget hang test/, 'whang'],
+        [/widget spotify test/, 'wspotify']
       ].find(([r]) => r.test(ask))?.[1]
       const key =
         hardening ??
@@ -539,6 +565,10 @@ http
           'Updated the meter.'
         ],
         whide: [() => tool('widget_hide', {}), 'Hid it.'],
+        wspotify: [
+          () => tool('widget_show', { widget: 'spotify/player', input: {} }),
+          'Here is the player.'
+        ],
         wcrash: [() => tool('widget_show', { widget: 'broken/crash' }), 'Showed it.'],
         whang: [() => tool('widget_show', { widget: 'broken/hang' }), 'Showed it.'],
         plain: ['OK.']

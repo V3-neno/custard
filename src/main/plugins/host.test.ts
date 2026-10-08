@@ -1028,7 +1028,8 @@ describe('the Spotify reference plugin through the host', () => {
     'action:pause_playback',
     'action:resume_playback',
     'action:seek',
-    'action:adjust_volume'
+    'action:adjust_volume',
+    'widget:player'
   ]
   const track = {
     uri: `spotify:track:${'a'.repeat(22)}`,
