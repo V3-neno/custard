@@ -58,8 +58,16 @@ export type DesignToolHandler = (
 ) => Promise<ToolRun>
 
 const handlers = new Map<DesignToolName, DesignToolHandler>()
-export const setDesignToolHandler = (name: DesignToolName, h: DesignToolHandler): void =>
-  void handlers.set(name, h)
+// A handler may bring its own schema in place of the base entry.
+const schemas = new Map<DesignToolName, BetaTool>()
+export const setDesignToolHandler = (
+  name: DesignToolName,
+  h: DesignToolHandler,
+  schema?: BetaTool
+): void => {
+  handlers.set(name, h)
+  if (schema) schemas.set(name, { ...schema, name })
+}
 
 const notRun = (content: string): ToolRun => ({ content, isError: true, outcome: 'not-run' })
 
@@ -113,7 +121,7 @@ export const designToolSchemas: BetaTool[] = [
         references: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Ids of files the user attached in this chat.'
+          description: 'Files the user attached in this chat, by exact file name.'
         },
         size: {
           type: 'object',
@@ -387,4 +395,6 @@ export async function runDesignTool(
 
 // Tools offered: only those with a handler.
 export const designTools = (): BetaTool[] =>
-  designToolSchemas.filter((t) => handlers.has(t.name as DesignToolName))
+  designToolSchemas
+    .filter((t) => handlers.has(t.name as DesignToolName))
+    .map((t) => schemas.get(t.name as DesignToolName) ?? t)

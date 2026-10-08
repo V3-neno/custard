@@ -4,7 +4,12 @@ import { isWidgetContents } from './widgets/surface'
 
 // IPC for the app window only. Plugin sandboxes and widget views can't reach
 // ipcRenderer at all, but if one ever did, these channels still refuse it.
-const refused = (wc: Electron.WebContents): boolean => isPluginContents(wc) || isWidgetContents(wc)
+// Other untrusted contents (Design's HTML preview) register here.
+const extraRefusals: ((wc: Electron.WebContents) => boolean)[] = []
+export const refuseContents = (test: (wc: Electron.WebContents) => boolean): void =>
+  void extraRefusals.push(test)
+const refused = (wc: Electron.WebContents): boolean =>
+  isPluginContents(wc) || isWidgetContents(wc) || extraRefusals.some((t) => t(wc))
 
 export function handle<A extends unknown[], R>(
   channel: string,
