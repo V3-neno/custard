@@ -172,6 +172,10 @@ export type SafeFetchOptions = {
   // Extra headers for one hop, e.g. the access token for an API host. Called
   // again for every redirect, so a token never follows a redirect elsewhere.
   extraHeaders?: (url: URL) => Promise<Record<string, string>>
+  // Hosts a redirect may lead to; any other redirect is refused, not
+  // followed. An empty list refuses every redirect (token requests, whose
+  // body carries a code verifier or refresh token). Unset: any allowed host.
+  redirectHosts?: string[]
   transport?: Transport
 }
 
@@ -198,6 +202,10 @@ export async function safeFetch(rawUrl: string, o: SafeFetchOptions): Promise<Ne
     const location = res.headers['location']
     if (!location) return res
     url = checkUrl(new URL(location, url).toString(), o.allowedHosts)
+    if (o.redirectHosts && !o.redirectHosts.includes(url.hostname))
+      throw new NetError(
+        `Refused a redirect to ${url.hostname}: this request carries account credentials, so it only goes to the hosts approved for them.`
+      )
     if (res.status === 303 || ((res.status === 301 || res.status === 302) && m === 'POST')) {
       m = 'GET'
       body = undefined

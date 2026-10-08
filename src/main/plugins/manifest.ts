@@ -326,6 +326,21 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
   }
 }
 
+// Everything that decides where an account's credentials go and what they
+// allow. Saved tokens are kept across an update only if this is unchanged.
+export function credentialScope(m: PluginManifest): string {
+  if (!m.auth) return ''
+  const a = m.auth
+  return JSON.stringify({
+    authorize: a.authorizeUrl,
+    token: a.tokenUrl,
+    api: [...a.apiHosts].sort(),
+    scopes: [...a.scopes].sort(),
+    clientIdKey: a.clientIdConfigKey,
+    redirect: [a.redirectPort, a.redirectPath]
+  })
+}
+
 // Everything a manifest asks for, as stable strings. A string missing from
 // the user's grants means the user has to approve it before activation.
 export function permissionsOf(m: PluginManifest): string[] {
@@ -336,6 +351,11 @@ export function permissionsOf(m: PluginManifest): string[] {
     ...(m.auth
       ? [
           `account:${new URL(m.auth.authorizeUrl).hostname}`,
+          // Where the account's credentials go: the token endpoint (codes
+          // and refresh tokens) and each host that gets the access token.
+          // A change to either needs approval again.
+          `account-token:${new URL(m.auth.tokenUrl).hostname}`,
+          ...m.auth.apiHosts.map((h) => `account-api:${h}`),
           ...m.auth.scopes.map((s) => `account-scope:${s}`)
         ]
       : []),

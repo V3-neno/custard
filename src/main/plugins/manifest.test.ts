@@ -155,6 +155,8 @@ describe('manifest', () => {
       'open:demo:',
       'storage',
       'account:auth.example.com',
+      'account-token:auth.example.com',
+      'account-api:api.example.com',
       'account-scope:read',
       'account-scope:write',
       'action:act'

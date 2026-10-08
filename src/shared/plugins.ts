@@ -151,6 +151,10 @@ export function describePermission(p: string): string {
       return 'Store its own data in Custard'
     case 'account':
       return `Sign in to your account at ${v}`
+    case 'account-token':
+      return `Send your account's sign-in codes and refresh token to ${v}`
+    case 'account-api':
+      return `Send your account's access token to ${v}`
     case 'account-scope':
       return `Account access: ${v}`
     case 'action':

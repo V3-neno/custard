@@ -333,7 +333,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   // Asks the user before an action, unless they allowed it for this chat. A
   // repeat of an action whose outcome is unknown (`warning`) always asks.
   const approve = async (r: ApprovalRequest, warning?: string): Promise<boolean> => {
-    const key = `${conversation.id}:${r.pluginId}:${r.tool}`
+    // Tied to the plugin build, so an update or rollback asks again.
+    const key = `${conversation.id}:${r.pluginId}:${r.buildId ?? ''}:${r.tool}`
     const perChat = !warning && !r.individual
     if (perChat && allowedInChat.has(key)) return true
     if (controller.signal.aborted) return false

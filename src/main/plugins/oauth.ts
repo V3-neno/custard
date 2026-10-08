@@ -77,6 +77,8 @@ async function tokenRequest(
     body: new URLSearchParams(body).toString(),
     allowedHosts: o.allowedHosts,
     signal: AbortSignal.timeout(20_000),
+    // The body holds the code verifier or refresh token: never redirected.
+    redirectHosts: [],
     transport: o.transport
   })
   let data: Record<string, unknown> = {}

@@ -269,6 +269,8 @@ const ALL = [
   'open:demo:',
   'storage',
   'account:auth.example.com',
+  'account-token:auth.example.com',
+  'account-api:api.example.com',
   'account-scope:read',
   'action:act'
 ]
@@ -687,6 +689,125 @@ describe('capabilities', () => {
   })
 })
 
+describe('where account credentials may go (M3)', () => {
+  const signedIn = (): void =>
+    store.setSecret(
+      'demo',
+      '__oauth',
+      JSON.stringify({
+        accessToken: 'tok-123456',
+        refreshToken: 'ref-123456',
+        expiresAt: Date.now() + 3600_000,
+        scope: 'read'
+      })
+    )
+  // v2 already had cdn.example.net for plain network access; it now also
+  // gets the access token, and the token endpoint moves there.
+  const moved = (): Record<string, unknown> => {
+    const m = manifest({ version: '2.0.0' })
+    ;(m.permissions as { network: string[] }).network.push('cdn.example.net')
+    return m
+  }
+
+  it('an update that sends the token to another allowed host needs approval, and signs out', async () => {
+    const v1 = manifest()
+    ;(v1.permissions as { network: string[] }).network.push('cdn.example.net')
+    writePlugin({}, v1)
+    await activate([...ALL, 'network:cdn.example.net'])
+    signedIn()
+    const m = moved()
+    ;(m.auth as { apiHosts: string[] }).apiHosts.push('cdn.example.net')
+    writePlugin({}, m)
+    const r = await host.review('demo')
+    expect(r.newPermissions).toEqual(['account-api:cdn.example.net'])
+    await expect(host.activate('demo', r.buildId!, [])).rejects.toThrow(/Approve these permissions/)
+    expect(host.status('demo').auth?.connected).toBe(true)
+    await host.activate('demo', r.buildId!, ['account-api:cdn.example.net'])
+    // The saved tokens were issued for a different set of destinations.
+    expect(host.status('demo').auth?.connected).toBe(false)
+  })
+
+  it('a moved token endpoint needs approval too', async () => {
+    const v1 = manifest()
+    ;(v1.permissions as { network: string[] }).network.push('cdn.example.net')
+    writePlugin({}, v1)
+    await activate([...ALL, 'network:cdn.example.net'])
+    const m = moved()
+    ;(m.auth as { tokenUrl: string }).tokenUrl = 'https://cdn.example.net/token'
+    writePlugin({}, m)
+    expect((await host.review('demo')).newPermissions).toEqual(['account-token:cdn.example.net'])
+  })
+
+  it('an update that leaves the credentials alone keeps the sign-in', async () => {
+    writePlugin({})
+    await activate()
+    signedIn()
+    writePlugin({}, manifest({ version: '1.1.0' }))
+    const r = await host.review('demo')
+    expect(r.newPermissions).toEqual([])
+    await host.activate('demo', r.buildId!, [])
+    expect(host.status('demo').auth?.connected).toBe(true)
+  })
+
+  it('never follows a redirect off the approved API hosts with the token', async () => {
+    writePlugin({})
+    await activate()
+    signedIn()
+    netRoute = (r): NetResponse =>
+      r.url.hostname === 'api.example.com'
+        ? { status: 307, headers: { location: 'https://auth.example.com/elsewhere' }, body: '' }
+        : { status: 200, headers: {}, body: 'followed' }
+    const r = await invoke('demo__call_api', { url: 'https://api.example.com/me', auth: true })
+    expect(r.content).toMatch(/Refused a redirect to auth.example.com/)
+    expect(net.map((n) => n.url.hostname)).toEqual(['api.example.com'])
+  })
+
+  it('never redirects a token request, whose body carries the refresh token', async () => {
+    writePlugin({})
+    await activate()
+    host.setConfig('demo', { clientId: 'abc' })
+    store.setSecret(
+      'demo',
+      '__oauth',
+      JSON.stringify({
+        accessToken: 'old-123456',
+        refreshToken: 'ref-123456',
+        expiresAt: 0,
+        scope: ''
+      })
+    )
+    netRoute = (r): NetResponse =>
+      r.url.pathname === '/token'
+        ? { status: 307, headers: { location: 'https://api.example.com/steal' }, body: '' }
+        : { status: 200, headers: {}, body: 'ok' }
+    await invoke('demo__call_api', { url: 'https://api.example.com/me', auth: true })
+    expect(net.some((n) => n.url.pathname === '/steal')).toBe(false)
+    expect(net.filter((n) => String(n.body ?? '').includes('ref-123456'))).toHaveLength(1)
+  })
+
+  it('an update or rollback asks again for actions set to not ask, and per-chat approvals name the build', async () => {
+    writePlugin({})
+    const first = await activate()
+    host.setAskEveryTime('demo', 'act', false)
+    let seen: ApprovalRequest | null = null
+    await invoke('demo__act', { text: 'x' }, undefined, async (r) => {
+      seen = r
+      return true
+    })
+    expect(seen).toBeNull()
+    writePlugin({}, manifest({ version: '1.1.0' }))
+    const r = await host.review('demo')
+    await host.activate('demo', r.buildId!, [])
+    expect(host.status('demo').tools.find((t) => t.name === 'act')?.askEveryTime).toBe(true)
+    await invoke('demo__act', { text: 'x' }, undefined, async (req) => {
+      seen = req
+      return true
+    })
+    expect(seen!.buildId).toBe(r.buildId)
+    expect(seen!.buildId).not.toBe(first)
+  })
+})
+
 describe('settings persistence', () => {
   it('keeps config and credentials across updates, and uninstall removes them but not the source', async () => {
     writePlugin({})
@@ -739,6 +860,8 @@ describe('the Spotify reference plugin through the host', () => {
     'network:accounts.spotify.com',
     'open:spotify:',
     'account:accounts.spotify.com',
+    'account-token:accounts.spotify.com',
+    'account-api:api.spotify.com',
     'account-scope:user-read-playback-state',
     'account-scope:user-read-currently-playing',
     'account-scope:user-modify-playback-state',

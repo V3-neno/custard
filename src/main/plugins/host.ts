@@ -13,12 +13,19 @@ import { formatLabel } from '../../shared/vault'
 import { resolveInside } from '../workspace/paths'
 import { bundle, hashSources, readSources, type SourceFile } from './build'
 import { diffSources } from './diff'
-import { fullToolName, parseManifest, permissionsOf, PLUGIN_ID, splitToolName } from './manifest'
+import {
+  credentialScope,
+  fullToolName,
+  parseManifest,
+  permissionsOf,
+  PLUGIN_ID,
+  splitToolName
+} from './manifest'
 import { safeFetch, type NetResponse, type Transport } from './net'
 import { AuthError, refreshTokens, signIn, type Tokens } from './oauth'
 import { redact } from './redact'
 import { validate } from './schema'
-import type { PluginStore } from './store'
+import { SecretsLockedError, type PluginStore } from './store'
 
 // The plugin host: discovers plugins in plugin/, builds and validates them,
 // activates reviewed builds, runs them in sandboxes and mediates everything
@@ -86,6 +93,8 @@ export type ApprovalRequest = {
   detail?: string
   // Asks every time: "Allow for this chat" isn't offered.
   individual?: boolean
+  // The plugin build asking. "Allow for this chat" covers this build only.
+  buildId?: string
 }
 
 const RESERVED_IDS = new Set(['vault', 'fs', 'reference', 'plugin', 'custard', 'core'])
@@ -430,6 +439,14 @@ export class PluginHost {
     const granted = new Set([...st.granted, ...approved])
     const missing = perms.filter((p) => !granted.has(p))
     if (missing.length) throw new Error(`Approve these permissions first: ${missing.join(', ')}`)
+    // Saved tokens are only reused when the credentials would go to the same
+    // places with the same scopes. Otherwise the account must be connected
+    // again. Checked before anything changes, so locked secrets stop it.
+    const changedBuild = !st.active || st.active.buildId !== buildId
+    const signOut =
+      !!st.active &&
+      credentialScope(this.build(id, st.active.buildId).manifest) !== credentialScope(manifest)
+    if (signOut && this.d.store.secretsLocked(id)) throw new SecretsLockedError()
 
     this.stop(id, 'a new version is being activated')
     try {
@@ -449,7 +466,19 @@ export class PluginHost {
     const previous = st.active && st.active.buildId !== buildId ? st.active : st.previous
     // Grants shrink to what this version asks for, so a later version that
     // asks again needs approval again.
-    this.d.store.setState(id, { enabled: true, active: info, previous, granted: perms })
+    // A different build may behave differently, so "don't ask" choices for
+    // its write tools don't carry over: they ask again until turned off again.
+    const askEveryTime = changedBuild
+      ? Object.fromEntries(Object.entries(st.askEveryTime).filter(([, ask]) => ask))
+      : st.askEveryTime
+    this.d.store.setState(id, {
+      enabled: true,
+      active: info,
+      previous,
+      granted: perms,
+      askEveryTime
+    })
+    if (signOut) this.d.store.setSecret(id, OAUTH_KEY, null)
     this.d.store.pruneBuilds(id, [buildId, ...(previous ? [previous.buildId] : [])])
     return this.status(id)
   }
@@ -702,7 +731,8 @@ export class PluginHost {
         pluginName: c.manifest.name,
         tool: tool.name,
         label,
-        input
+        input,
+        buildId: offered.buildId
       })
       if (!allowed)
         return notRun(
@@ -869,6 +899,9 @@ export class PluginHost {
         allowedHosts: this.allowedHosts(m, granted),
         signal,
         transport: this.d.transport?.(),
+        // A request sent with the account's token only follows redirects to
+        // the hosts approved to receive it.
+        ...(auth ? { redirectHosts: m.auth!.apiHosts } : {}),
         extraHeaders: async (u): Promise<Record<string, string>> =>
           auth && m.auth!.apiHosts.includes(u.hostname)
             ? { authorization: `Bearer ${await this.accessToken(id, m, granted, false)}` }
