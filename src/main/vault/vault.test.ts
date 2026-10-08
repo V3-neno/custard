@@ -400,6 +400,13 @@ describe('vault safeguards', () => {
     expect(boundMemory('short')).toBe('short')
   })
 
+  it('builds the prompt when the Skills or Captures folder is not a folder (L6)', () => {
+    note('Custard/Skills', 'a file where the folder should be')
+    note('Custard/Captures', 'also a file')
+    expect(() => vaultSystemPrompt(vault, 'chat')).not.toThrow()
+    expect(vaultSystemPrompt(vault, 'chat')).toContain('<memory>')
+  })
+
   it('says how many skills and capture items it left out', () => {
     for (let i = 0; i < 65; i++)
       note(`Custard/Skills/s${i}/SKILL.md`, `---\nname: s${i}\ndescription: Skill ${i}\n---\nbody`)

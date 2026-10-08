@@ -246,15 +246,18 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
   ]
   if (workspace) system.push({ type: 'text', text: workspace.prompt })
+  let vaultPrompt: string | null = null
   if (vaultReady)
-    system.push({
-      type: 'text',
-      text: vaultSystemPrompt(
+    try {
+      vaultPrompt = vaultSystemPrompt(
         vault,
         conversation.mode,
         getMemorySettings().auto && !conversation.memory?.off
       )
-    })
+    } catch (err) {
+      console.error('Vault prompt:', err)
+    }
+  if (vaultPrompt) system.push({ type: 'text', text: vaultPrompt })
   else if (vault !== null) system.push({ type: 'text', text: unreachableVaultPrompt(vault) })
   if (plugins.instructions.length)
     system.push({
@@ -791,6 +794,10 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
 // written by the provider the original was last sent to, so its text goes
 // nowhere it hasn't been already.
 const continuing = new Set<string>()
+
+// A chat that is answering or being continued is still being saved, so it
+// can't be deleted until that ends (or the delete would be undone).
+export const chatBusy = (id: string): boolean => active.has(id) || continuing.has(id)
 async function continueFrom(id: string, withoutSummary: boolean): Promise<ContinueResult> {
   if (active.has(id) || continuing.has(id))
     return {
@@ -830,7 +837,21 @@ export function registerChatHandlers(): void {
       .sort((a, b) => a.createdAt - b.createdAt)
       .map((c) => ({ id: c.id, title: c.title, mode: c.mode }))
   )
-  on('chat:send', (e, req: SendChatRequest) => void send(e.sender, req))
+  // Anything that fails before the turn's own error handling still ends the
+  // turn in the UI, rather than leaving it on "thinking" for good.
+  on('chat:send', (e, req: SendChatRequest) =>
+    send(e.sender, req).catch((err) => {
+      console.error('Chat:', err)
+      if (!e.sender.isDestroyed())
+        e.sender.send('chat:event', {
+          requestId: req.requestId,
+          type: 'error',
+          message: `Something went wrong before this message could be sent (${err instanceof Error ? err.message : String(err)}). It wasn't sent.`,
+          conversation: null,
+          kept: false
+        } satisfies ChatEvent)
+    })
+  )
   on('chat:stop', (_, requestId: string) => running.get(requestId)?.abort())
   handle('chat:approve', (_, id: string, decision: ApprovalDecision) => {
     const a = approvals.get(id)

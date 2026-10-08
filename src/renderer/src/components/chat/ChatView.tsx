@@ -21,6 +21,7 @@ import { SentFiles } from './Attachments'
 import { ATTACHMENT_LIMITS, type DraftAttachment } from '../../../../shared/attachments'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
+import { cleanError } from '../settings/ui'
 import {
   CompactionLine,
   ContinuedIn,
@@ -91,6 +92,8 @@ type Props = {
   onBusy: (busy: boolean) => void
 }
 
+const unsent = new Map<Mode, { text: string; draftId: string; files: DraftAttachment[] }>()
+
 function ChatView(props: Props): React.JSX.Element {
   const { mode, onModeChange, hasKey, settings, onSettings, onOpenSettings } = props
   const { historyOpen, onCloseHistory, temporary, onTemporary, newChat, onBusy } = props
@@ -98,11 +101,17 @@ function ChatView(props: Props): React.JSX.Element {
   const [current, setCurrent] = useState<Conversation | null>(null)
   const [live, setLive] = useState<Live | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
+  // The unsent message (and its files) of each mode, kept when switching
+  // mode, which mounts a new view.
+  const saved = unsent.get(mode)
+  const [draft, setDraft] = useState(saved?.text ?? '')
   // Chat mode: files for the next message. They live in a draft folder in
   // app data until sent (see main/attachments).
-  const [draftId, setDraftId] = useState<string>(() => crypto.randomUUID())
-  const [files, setFiles] = useState<DraftAttachment[]>([])
+  const [draftId, setDraftId] = useState<string>(() => saved?.draftId ?? crypto.randomUUID())
+  const [files, setFiles] = useState<DraftAttachment[]>(saved?.files ?? [])
+  useEffect(() => {
+    unsent.set(mode, { text: draft, draftId, files })
+  }, [mode, draft, draftId, files])
   const [fileErrors, setFileErrors] = useState<{ name: string; error: string }[]>([])
   const [adding, setAdding] = useState(false)
   // The last send stopped because the chat is too long (nothing was kept).
@@ -357,7 +366,12 @@ function ChatView(props: Props): React.JSX.Element {
   }
 
   const remove = async (id: string): Promise<void> => {
-    await window.custard.conversations.delete(id)
+    try {
+      await window.custard.conversations.delete(id)
+    } catch (e) {
+      setError(cleanError(e))
+      return
+    }
     if (current?.id === id) setCurrent(null)
     refreshList()
   }

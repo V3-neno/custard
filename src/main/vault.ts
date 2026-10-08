@@ -95,10 +95,18 @@ type Skill = { name: string; description: string; path: string; modes: Mode[] }
 // Skills are folders in the vault with a SKILL.md whose frontmatter has a name
 // and description, and optionally the modes it applies to. Only those fields
 // go in the prompt; the model reads the full file when a request matches.
+// A Skills folder that can't be listed (a file, a permission error, a cloud
+// placeholder) gives no skills rather than failing the turn.
 export function listSkills(vault: string): Skill[] {
   const dir = join(vault, SKILLS_DIR)
   if (!existsSync(dir)) return []
-  return readdirSync(dir, { withFileTypes: true })
+  let entries: import('fs').Dirent[]
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return entries
     .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
     .slice(0, 500)
     .flatMap((e) => {
@@ -160,9 +168,13 @@ export function vaultSystemPrompt(vault: string, mode: Mode, memoryAuto = true):
   } catch {
     // Not there yet, or a link out of the vault.
   }
-  const captured = memoryAuto
-    ? readCaptures(vault)
-    : { remembered: [], activity: [], notes: 0, cut: 0 }
+  const none = { remembered: [], activity: [], notes: 0, cut: 0 }
+  let captured: ReturnType<typeof readCaptures> = none
+  try {
+    if (memoryAuto) captured = readCaptures(vault)
+  } catch {
+    // Unreadable capture folder: nothing from it this turn.
+  }
   const capturesLeft = Math.max(0, captured.notes - 20)
   return [
     "The user's Obsidian vault is connected. It is their second brain: notes, projects and anything they want remembered.",

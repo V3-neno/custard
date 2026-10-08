@@ -280,6 +280,17 @@ try {
   await send('note test: save two notes')
   c = await nextCard()
   check(!!c, 'creating a note asks first')
+  // L3: the chat is answering (waiting for approval); deleting it is refused.
+  const answering = newest()
+  const deleted = await w.evaluate(
+    (id) =>
+      window.custard.conversations.delete(id).then(
+        () => 'deleted',
+        (e) => String(e.message ?? e)
+      ),
+    answering?.id
+  )
+  check(/still answering/.test(deleted), `deleting a chat while it answers is refused (${deleted})`)
   if (c) {
     const text = await c.innerText()
     check(text.includes('Inbox/Approved.md'), 'the card names the note')
@@ -307,6 +318,19 @@ try {
   check(!(await nextCard(3000)), 'no approval is offered for an append')
   await idle()
   check(fs.readFileSync(prefs, 'utf8') === prefsBefore, 'the existing note is unchanged')
+  check(
+    conversations().some((x) => x.id === answering?.id),
+    'the chat that was answering still exists afterwards'
+  )
+
+  step('L4: an unsent message survives switching mode')
+  await w.fill('textarea', 'half-written message 6612')
+  await w.click('button:text-is("Design")')
+  await w.click('button:text-is("Chat")')
+  check(
+    (await w.inputValue('textarea')) === 'half-written message 6612',
+    'the draft is still there after switching away and back'
+  )
   check(
     !(read('/anthropic.json', []).at(-1)?.tools ?? []).includes('vault_append'),
     'vault_append is not offered'

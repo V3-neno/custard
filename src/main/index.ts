@@ -4,7 +4,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
-import { openConversation, registerChatHandlers } from './chat'
+import { chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
 import { memory, registerMemoryHandlers } from './memory'
 import { handle } from './ipc'
@@ -94,6 +94,10 @@ app.whenReady().then(() => {
   handle('conversations:list', (_, mode: Mode) => listConversations(mode))
   handle('conversations:get', (_, id: string) => openConversation(id))
   handle('conversations:delete', async (_, id: string) => {
+    if (chatBusy(id))
+      throw new Error(
+        'This chat is still answering. Stop it or wait for it to finish, then delete it.'
+      )
     deleteConversation(id)
     // The chat's attached files go with it.
     await attachments().deleteChat(id)
