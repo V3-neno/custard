@@ -158,6 +158,14 @@ export function HandoffCard({
         Left out: the earlier messages, tool results, note and page contents, and reasoning. The
         original chat is unchanged.
       </p>
+      {k.files?.length ? (
+        <p className="mt-1 [overflow-wrap:anywhere]">
+          Files aren&apos;t carried over, so this chat can&apos;t see{' '}
+          {k.files.length + (k.moreFiles ?? 0) === 1 ? 'it' : 'them'}:{' '}
+          <span className="text-ash-300">{k.files.map((f) => f.name).join(', ')}</span>
+          {k.moreFiles ? ` and ${k.moreFiles} more` : ''}. Attach a file again to use it here.
+        </p>
+      ) : null}
       <button onClick={() => setOpen(!open)} className="mt-2 text-ash-500 hover:text-ash-300">
         {open ? '▾' : '▸'} What the new chat was given
       </button>

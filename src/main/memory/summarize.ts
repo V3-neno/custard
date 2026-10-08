@@ -78,6 +78,7 @@ export const SUMMARY_SYSTEM = [
   'requested: "seen" when a check shows what the user asked for; "not-seen" when a check shows it was not in place at that moment; "unclear" when a check does not settle it; "unchecked" when nothing checked. Do not judge the actions themselves; their status is recorded separately.',
   'When something was retried, describe the attempts in one workflow. When the evidence contradicts itself, say so in uncertain instead of choosing.',
   'preferences.replaces: the earlier preference this one changes, in the words of the evidence, or "" if none. preferences.plugin: the plugin id from the evidence when the preference is about using that plugin, else "". resolutions: only when the evidence shows an earlier problem was fixed.',
+  "A request may say files were attached, with only their number and types: you can't see them, so never guess what they contained.",
   'Write short plain sentences in the language the user used.'
 ].join('\n')
 

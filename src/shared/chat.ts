@@ -1,6 +1,6 @@
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { Workspace } from './plugins'
-import type { Attachment } from './attachments'
+import type { Attachment, AttachmentKind } from './attachments'
 
 export type Provider = 'claude' | 'openai'
 
@@ -168,6 +168,11 @@ export type Continuation = {
   counts: Record<string, number>
   // Actions whose outcome is unknown, still guarded against repeats here.
   unknown: { key: string; name: string; label: string }[]
+  // Files attached in the earlier chat (and the chats before it). They are
+  // not carried over: the new chat can't see them.
+  files?: { name: string; kind: AttachmentKind }[]
+  // How many more there were than `files` lists.
+  moreFiles?: number
   at: number
 }
 

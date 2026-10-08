@@ -99,8 +99,8 @@ message box. Nothing is dropped without saying so.
 **Nothing is uploaded to a provider's file storage.** Files go inline as
 base64 inside each request, which both providers document. Neither provider's
 Files API is used, so no file is left on a provider's servers by Custard (the
-providers' usual handling of request data still applies). This depends on
-decision A below.
+providers' usual handling of request data still applies). Neno chose this
+(inline only) on 2026-10-08.
 
 ## In a request
 
@@ -150,11 +150,14 @@ longer sent.
   replaced by a note. That this leaves Claude's preserved thinking intact is
   **unverified**.
 
-**"Continue in a new chat"** is decision C below. Until it's answered:
+**"Continue in a new chat" doesn't carry files** (Neno's choice, 2026-10-08):
 
-- files aren't copied to the new chat;
-- the handoff summarizer only ever saw message text, never file contents;
-- the handoff doesn't yet list the files or say the new chat can't see them.
+- no file is copied to the new chat or sent from it;
+- the handoff summarizer sees, per message, only how many files of which
+  types were attached, and is told the new chat can't see them;
+- the new chat's card and its opening context list the earlier files by name
+  (up to 50, then a count), say this chat can't see them, and ask for them to
+  be attached again. Names from a chat continued before are passed on too.
 
 ## Privacy
 
@@ -163,18 +166,21 @@ longer sent.
   search in that chat ask for its exact query first (the Step 2 gate).
 - **Not in the vault.** Custard never copies attachments or their contents
   into the vault, and attaching a file grants no permission for any action.
-- **Memory.** Memory capture reads message text only. File contents never
-  reach the memory summarizer, and as built it sees nothing about files at all.
-  Decision B decides whether it may see the type and count.
+- **Memory: type and count only** (Neno's choice, 2026-10-08). Each request
+  in the evidence notes how many files of which types came with it, e.g.
+  `[2 files attached (1 image, 1 PDF); names and contents not shown]`.
+  Names and contents never reach the memory summarizer, which is told not to
+  guess what the files held.
 - **Opt-outs.** Memory off, Forget and temporary chats work as before.
 
-## Decisions waiting for Neno
+## Decisions (Neno, 2026-10-08)
 
-- **A. Provider-side uploads.** Built as inline only (no provider storage),
-  the recommended option. Uploading would be added only if chosen.
-- **B. What memory capture sees of attachments.** Nothing is built for this
-  yet. The summarizer currently sees nothing about files.
-- **C. "Continue in a new chat".** Nothing is built for this yet.
+- **A. Provider-side uploads:** inline only. Nothing is stored on a
+  provider's file storage.
+- **B. What memory capture sees:** the number and types of files, never names
+  or contents.
+- **C. "Continue in a new chat":** files aren't carried; the new chat lists
+  them by name and says it can't see them.
 
 ## Tests
 
@@ -186,7 +192,9 @@ longer sent.
 - both providers' request shapes;
 - animated GIFs to OpenAI;
 - image and page limits per model;
-- compaction, and token estimates.
+- compaction, and token estimates;
+- what memory capture and the handoff summarizer see, and the names carried
+  to a continued chat.
 
 **End to end** (`test/e2e/attachments.mjs`, Linux under xvfb against the mock
 in `test/e2e/interrupt-mock.mjs`) [M]:
@@ -194,6 +202,8 @@ in `test/e2e/interrupt-mock.mjs`) [M]:
 - pick, paste and drop; refusals; removal;
 - what reaches Claude; reopening;
 - a missing copy; a send that never went through;
+- continuing in a new chat (names listed, no files sent, the summarizer sees
+  only counts and types);
 - the search gate; Code mode; deleting a chat.
 
 The OpenAI request shape is checked in unit tests only; the e2e mock is
@@ -235,4 +245,5 @@ need a Windows build.
   provider enforces its own page limit.
 - **Preserved thinking** after Claude compaction with replaced file notes is
   unverified.
-- **Not built yet:** decisions B and C.
+- **Memory capture with files** is checked in unit tests only, not in the
+  memory end-to-end suite.

@@ -285,6 +285,44 @@ try {
   )
   await shot('step5-03-missing')
 
+  step('Continue in a new chat: names only, files not carried')
+  await send('too long test')
+  const length = '[aria-label="Chat length"]'
+  await w.waitForSelector(`${length} button:has-text("Continue in a new chat")`, {
+    timeout: 30000
+  })
+  await w.click(`${length} button:has-text("Continue in a new chat")`)
+  const handoffCard = '[aria-label="Continued chat"]'
+  await w.waitForSelector(handoffCard, { timeout: 30000 })
+  const cardText = await w.locator(handoffCard).textContent()
+  check(
+    /can.t see them/.test(cardText) &&
+      ['photo.png', 'report.pdf', 'notes.md', 'dropped.png'].every((n) => cardText.includes(n)),
+    "the new chat lists the earlier files by name and says it can't see them"
+  )
+  const evidence = JSON.parse(fs.readFileSync(`${OUT}/handoffs.json`, 'utf8')).at(-1).evidence
+  check(
+    /\[4 files attached \(2 images, 1 PDF, 1 text file\); names and contents not shown\]/.test(
+      evidence
+    ) && !/photo\.png|report\.pdf|notes\.md|Ignore the user/.test(evidence),
+    'the handoff summarizer saw only the count and types'
+  )
+  const next = conversations().find((c) => c.continuedFrom?.from.id === c1.id)
+  check(!next.attachments?.length && !fs.existsSync(`${STORE}/${next.id}`), 'no files were copied')
+  const before4 = requests().length
+  await send('what was in the report?')
+  await idle()
+  const r4 = requests()[before4]
+  const sys = r4.system.map((b) => b.text).join('\n')
+  check(
+    /not carried over, and you cannot see them: "photo\.png"/.test(sys) &&
+      !r4.messages.some(
+        (m) => Array.isArray(m.content) && m.content.some((b) => b.type !== 'text')
+      ),
+    'the new chat is told it cannot see them, and no file is sent'
+  )
+  await shot('step5-05-continued')
+
   step('A send that never went through keeps the draft')
   await newChat()
   await pickNext(['report.pdf'])

@@ -1,6 +1,7 @@
 import type { Continuation, ContinueResult, Conversation } from '../shared/chat'
 import {
   actionLedger,
+  carriedFiles,
   carriedUnknown,
   handoffEvidence,
   type HandoffSummarizer,
@@ -68,6 +69,7 @@ export async function continueChat(
     ledger: ledger.text + earlier,
     counts: ledger.counts,
     unknown: carriedUnknown(original),
+    ...carriedFiles(original),
     at: deps.now?.() ?? Date.now()
   }
   const next = deps.create(original.mode, `${original.title} (continued)`)

@@ -105,6 +105,22 @@ export const kindLabel: Record<AttachmentKind, string> = {
   text: 'Text'
 }
 
+// What memory capture and the handoff summarizer may know about a message's
+// files: how many and of which types. Never names or contents.
+export function filesNote(files: Pick<Attachment, 'kind'>[]): string {
+  if (!files.length) return ''
+  const names: Record<AttachmentKind, [string, string]> = {
+    image: ['image', 'images'],
+    pdf: ['PDF', 'PDFs'],
+    text: ['text file', 'text files']
+  }
+  const kinds = (['image', 'pdf', 'text'] as AttachmentKind[])
+    .map((k) => [k, files.filter((f) => f.kind === k).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => `${n} ${names[k][n === 1 ? 0 : 1]}`)
+  return `[${files.length} ${files.length === 1 ? 'file' : 'files'} attached (${kinds.join(', ')}); names and contents not shown]`
+}
+
 export const formatBytes = (n: number): string =>
   n < 1000
     ? `${n} B`

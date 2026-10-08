@@ -1,10 +1,12 @@
 import type { ActionRecord, Conversation } from '../../shared/chat'
+import { filesNote } from '../../shared/attachments'
 
 // What a capture is allowed to see: built in code from the saved chat and
 // Step 1's action records, cut down and stripped of secrets before any model
 // reads it. Raw tool inputs, note and file contents and fetched pages never go
 // in; plugin read results do (shortened), because they are the observations
-// that say whether an earlier action worked.
+// that say whether an earlier action worked. Attached files appear only as a
+// count and their types (see filesNote), never by name or content.
 
 export const LIMITS = { total: 8000, request: 600, result: 300, answer: 800 }
 
@@ -86,10 +88,12 @@ export function buildEvidence(
   const msgs = c.messages.slice(from, to)
   const isResults = (m: (typeof msgs)[number]): boolean =>
     typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
-  const requests = msgs
-    .filter((m) => m.role === 'user' && !isResults(m))
-    .map((m) => textOf(m).trim())
-    .filter(Boolean)
+  const files = (i: number): string =>
+    filesNote((c.attachments ?? []).filter((a) => a.message === from + i))
+  const asked = msgs.flatMap((m, i) =>
+    m.role === 'user' && !isResults(m) ? [{ text: textOf(m).trim(), files: files(i) }] : []
+  )
+  const requests = asked.map((r) => r.text).filter(Boolean)
   const actions: EvidenceAction[] = []
   for (const m of msgs)
     if (m.role === 'assistant' && typeof m.content !== 'string')
@@ -122,7 +126,9 @@ export function buildEvidence(
     .filter((n) => n.after > from && n.after <= to)
     .map((n) => n.text)
   return {
-    requests: requests.map((r) => redact(cut(r, LIMITS.request))),
+    requests: asked
+      .filter((r) => r.text || r.files)
+      .map((r) => [redact(cut(r.text, LIMITS.request)), r.files].filter(Boolean).join(' ')),
     actions,
     notices,
     answer: answerMsg ? redact(cut(textOf(answerMsg).trim(), LIMITS.answer)) : '',
