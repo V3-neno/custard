@@ -5,7 +5,9 @@ import {
   type MediaProvider,
   type MediaProviderInfo,
   type MediaRequest,
+  type PluginMediaJobInput,
   type PluginMediaSpec,
+  type PluginMediaSubmitInput,
   type RemoteStatus
 } from '../../../shared/design'
 import type { ApprovalRequest, MediaEntry, MediaRole, ToolOutcome } from '../../plugins/host'
@@ -191,7 +193,7 @@ export class PluginMediaProvider implements MediaProvider {
         base64: Buffer.from(bytes).toString('base64')
       })
     }
-    const input = {
+    const input: PluginMediaSubmitInput = {
       operation: request.operation,
       prompt: request.prompt,
       idempotencyKey: o.idempotencyKey,
@@ -226,7 +228,7 @@ export class PluginMediaProvider implements MediaProvider {
   async status(remoteId: string, signal?: AbortSignal): Promise<RemoteStatus> {
     const { op, id } = unwrapId(remoteId)
     this.cap(op)
-    const r = await this.call('status', op, { remoteId: id }, signal)
+    const r = await this.call('status', op, { remoteId: id } satisfies PluginMediaJobInput, signal)
     if (r.isError || r.outcome !== 'completed')
       throw new Error(short(r.content) || 'The status check failed.')
     const s = readStatus(r.data)
@@ -238,17 +240,35 @@ export class PluginMediaProvider implements MediaProvider {
     const { op, id } = unwrapId(remoteId)
     if (!this.cap(op).tools.cancel) return 'not-cancelled'
     // The user asked for this cancel; it can't start or charge for anything.
-    const r = await this.call('cancel', op, { remoteId: id }, undefined, true)
+    const r = await this.call(
+      'cancel',
+      op,
+      { remoteId: id } satisfies PluginMediaJobInput,
+      undefined,
+      true
+    )
     if (r.isError || r.outcome !== 'completed') return 'not-cancelled'
     return readStatus(r.data)?.state === 'cancelled' ? 'cancelled' : 'not-cancelled'
   }
 
+  // A permanent problem with the result fails the job (Design settles the
+  // version failed); anything else can be fetched again on a later check.
   async result(remoteId: string, signal?: AbortSignal): Promise<MediaFile[]> {
+    try {
+      return await this.fetchFiles(remoteId, signal)
+    } catch (err) {
+      if (err instanceof ResultError && !err.transient)
+        throw new MediaError('rejected', err.message, true)
+      throw err
+    }
+  }
+
+  private async fetchFiles(remoteId: string, signal?: AbortSignal): Promise<MediaFile[]> {
     const { op, id } = unwrapId(remoteId)
     const cap = this.cap(op)
-    const r = await this.call('result', op, { remoteId: id }, signal)
+    const r = await this.call('result', op, { remoteId: id } satisfies PluginMediaJobInput, signal)
     if (r.isError || r.outcome !== 'completed')
-      throw new ResultError(short(r.content) || 'Getting the result failed.')
+      throw new ResultError(short(r.content) || 'Getting the result failed.', true)
     const files = (r.data as { files?: unknown } | undefined)?.files
     if (!Array.isArray(files) || !files.length || files.length > RESULT_LIMITS.files)
       throw new ResultError(`${this.spec.name} returned a result Custard can't read.`)

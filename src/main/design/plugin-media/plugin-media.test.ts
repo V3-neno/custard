@@ -424,11 +424,7 @@ describe('plugin media jobs', () => {
     await install(host)
     const s = service(host)
     expect((await submit(s, ctx(), 'please reject this')).outcome).toBe('failed')
-    // A failure marks the provider failed for this session (integration's
-    // rule; see docs/design/requests/c.md). Cleared here to go on.
-    s.failures.length = 0
     expect((await submit(s, ctx(), 'this gets lost')).outcome).toBe('unknown')
-    s.failures.length = 0
     expect((await submit(s, ctx(), 'garbled reply')).outcome).toBe('unknown')
     const states = s.jobs.list(CHAT).map((j) => j.state)
     expect(states).toEqual(['failed', 'unknown', 'unknown'])
@@ -498,7 +494,9 @@ describe('plugin media jobs', () => {
       /isn't ready: the Slowmo .* turned off/
     )
     host.uninstall('slowmo')
-    await expect(jobAction(s, CHAT, 'check', second.id)).rejects.toThrow(/isn't available now/)
+    await expect(jobAction(s, CHAT, 'check', second.id)).rejects.toThrow(
+      /removed or turned off.*Saved outputs stay/
+    )
     const art = s.artifacts.get(CHAT, first.target.artifactId)!
     const v = art.versions[0]
     expect(v.status).toBe('succeeded')
@@ -526,12 +524,29 @@ describe('plugin media jobs', () => {
     const [ok, evil, wrong] = s.jobs.list(CHAT)
     expect((await checkUntilDone(s, ok.id)).state).toBe('completed')
     expect(fetched).toEqual(['https://media.example.com/clip.webm'])
+    // A forbidden host or a wrong type is permanent: the job and its
+    // version fail rather than being retried.
     const e = await checkUntilDone(s, evil.id)
-    expect(e.state).toBe('running')
+    expect(e.state).toBe('failed')
     expect(e.error).toMatch(/no permission to connect to evil\.example\.net/)
     const w = await checkUntilDone(s, wrong.id)
+    expect(w.state).toBe('failed')
     expect(w.error).toMatch(/says it is video\/webm but is image\/png/)
+    for (const j of [e, w])
+      expect(s.artifacts.get(CHAT, j.target.artifactId)!.versions[0].status).toBe('failed')
     expect(fetched).toHaveLength(1)
+  })
+
+  it('keeps a job open when its result link has expired, so a later check can fetch it', async () => {
+    const host = newHost()
+    await install(host)
+    const s = service(host)
+    transport = async () => ({ status: 410, headers: {}, body: new Uint8Array() })
+    await submit(s, ctx(), 'url fast')
+    const [job] = s.jobs.list(CHAT)
+    const after = await checkUntilDone(s, job.id)
+    expect(after.state).toBe('running')
+    expect(after.error).toMatch(/expired/)
   })
 })
 

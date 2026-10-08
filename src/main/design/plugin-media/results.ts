@@ -18,7 +18,17 @@ export const RESULT_LIMITS = {
   timeoutMs: 60_000
 }
 
-export class ResultError extends Error {}
+// A result that can't be used. Permanent unless `transient`: an expired or
+// refused link, or an HTTP error, may work on a later check (the plugin can
+// return a fresh link); a wrong type, bad data or a forbidden host won't.
+export class ResultError extends Error {
+  constructor(
+    message: string,
+    readonly transient = false
+  ) {
+    super(message)
+  }
+}
 
 // What a file's first bytes say it is. Only types the app window may show
 // (see MEDIA_TYPES in main/design/index.ts).
@@ -143,11 +153,11 @@ export async function fetchResult(
       continue
     }
     if (res.status === 404 || res.status === 410)
-      throw new ResultError('The result link has expired or is gone.')
+      throw new ResultError('The result link has expired or is gone.', true)
     if (res.status === 401 || res.status === 403)
-      throw new ResultError('The result link was refused; it may have expired.')
+      throw new ResultError('The result link was refused; it may have expired.', true)
     if (res.status < 200 || res.status >= 300)
-      throw new ResultError(`Fetching the result failed (HTTP ${res.status}).`)
+      throw new ResultError(`Fetching the result failed (HTTP ${res.status}).`, true)
     if (res.body.length > maxBytes)
       throw new ResultError('The result is larger than Custard accepts.')
     return res.body

@@ -110,10 +110,12 @@ Everything a plugin returns is checked before use:
 - A submit answer Custard can't read counts as outcome unknown, because the
   plugin may have started something.
 
-A result that fails these checks leaves the job running, with the reason
-shown. A later check can fetch it again, for example when a link has
-expired and the plugin returns a fresh one. Checks are capped per job (see
-`JOB_LIMITS`).
+A result that fails these checks permanently (a type it didn't declare,
+bytes that aren't that type, bad base64, too large, a host the plugin may
+not reach) fails the job, and its version settles as failed. An expired or
+refused link, an HTTP error or a network error leaves the job running with
+the reason shown, so a later check can fetch it again (the plugin may
+return a fresh link). Checks are capped per job (see `JOB_LIMITS`).
 
 ## Restarts, disabling and removal
 
@@ -125,7 +127,7 @@ expired and the plugin returns a fresh one. Checks are capped per job (see
 - **Disabled plugin.** Saved videos stay viewable. Checks and new jobs say
   the plugin is turned off.
 - **Removed or uninstalled plugin.** Saved videos stay viewable. Checks say
-  the provider isn't available, and new jobs say video needs a plugin.
+  the plugin was removed or turned off, and new jobs say video needs a plugin.
 - **Updated plugin.** Checks use the new build only if it still declares
   the same provider and operation.
 

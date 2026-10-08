@@ -237,14 +237,11 @@ try {
       lastResults().some((r) => /refused/.test(r)),
       `a refused prompt fails (${lastResults().at(-1)?.slice(0, 80)})`
     )
-    // Known issue for integration (docs/design/requests/c.md, item 2): one
-    // refused prompt marks the provider failed for the rest of the session.
+    // A refused prompt doesn't turn the provider off for the session.
     await turn('c video test')
-    console.log(
-      `  (after a refusal: ${lastResults()
-        .filter((r) => /^(Not run: Make a video|Submitted)/.test(r))
-        .at(-1)
-        ?.slice(0, 100)})`
+    check(
+      lastResults().some((r) => /^Submitted to Slowmo/.test(r)),
+      'a new request after a refusal is still sent'
     )
   }
 
