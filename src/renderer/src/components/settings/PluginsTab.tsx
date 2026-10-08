@@ -470,25 +470,6 @@ function Detail({
           </button>
         </section>
       )}
-      {p.secretsLocked && (
-        <section className="mb-5 rounded-xl border border-ember-600/50 p-3" role="alert">
-          <p className="text-sm text-ember-600">
-            Custard can&apos;t read this plugin&apos;s saved secrets right now: the system&apos;s
-            secure storage refused. They&apos;re kept as they are, and nothing can change them until
-            they can be read.
-          </p>
-          <p className="mt-1 text-xs text-ash-500">
-            Unlock your keyring or secure storage and restart Custard. Reset only if they can&apos;t
-            be recovered: it deletes the account sign-in and secret settings.
-          </p>
-          <button
-            className={`${danger} mt-2`}
-            onClick={() => run('Resetting…', () => window.custard.plugins.resetSecrets(p.id))}
-          >
-            Reset saved secrets
-          </button>
-        </section>
-      )}
 
       {p.auth && (
         <section className="mb-5">
