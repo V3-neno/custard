@@ -10,7 +10,7 @@ macOS or against a live provider.
 | --- | --- | --- |
 | D1 | Plugin `open:` permission | **Gap.** Chat and Design can reach protected locations and local tools through an approved custom-scheme link. Fix needs Neno's decision. |
 | D2 | Tool routes in Chat and Design | Enforced in code, except D1 and the residual network route below. |
-| D3 | Link-swap race (`src/main/fsafe`) | Not started. |
+| D3 | Link-swap race (`src/main/fsafe`) | Helper built and tested on Linux. Narrowed, not closed; residual risk below. Callers not switched yet. |
 | D4 | HTML preview sandbox | Waiting for Workstream A's branch. |
 | D5 | Reliability and privacy flows | Waiting for A, B and C. |
 
@@ -89,6 +89,41 @@ change them. The `it.fails` tests flip to passing when the fix lands.
 | Widgets | No network; a write needs a real input event plus the plugin's approval card. | `docs/plugins/WIDGETS.md`, `src/main/widgets/*` |
 | IPC | Plugin sandboxes and widget views are refused on every channel. Installing, activating and plugin approval are app-window actions. | `src/main/ipc.ts` |
 | Design tools | `design_html` and export: tested when A lands (D4). `design_media`: one individual approval card per submission (integration). | `src/main/design/tools.ts` |
+
+## D3: link-swap race (`src/main/fsafe`)
+
+Every write path today checks the path, then writes with `flag: 'wx'`
+(`vault.ts`, `memory/write.ts`, `design/store.ts`). `wx` already refuses a
+link at the final name. The gap is a **parent folder** swapped for a link
+between the check and the write.
+
+`writeNew(path, data, { guard })` and `writeReplace(...)`:
+
+1. resolve the parent's real path and pass the real target to `guard`;
+2. create with `O_CREAT | O_EXCL | O_NOFOLLOW` (no `O_NOFOLLOW` on Windows);
+3. before writing any content, check the new file is at the expected real
+   path (same device and inode, parent's real path unchanged); if not, remove
+   the empty file where it can still be found and refuse;
+4. write through the open handle.
+
+`writeReplace` writes a fresh file beside the target the same way and renames
+it over, so a link at the target is replaced, not followed. Asking before
+overwriting stays with the caller.
+
+Tests (`src/main/fsafe/fsafe.security.test.ts`, Linux, real symlinks)
+simulate the swap at the moment of opening.
+
+**Residual risk.** Node has no `openat()`, so the window can't be closed. If
+a parent folder is swapped for a link and swapped back between steps 2 and 3,
+the write is refused but an **empty** file can stay where the link pointed.
+No content is written there. On Windows, junctions and NTFS file ids should
+behave the same way but haven't been run there. Native Windows verification
+is outstanding.
+
+**Who switches over.** A's export and the vault and memory note writes
+belong to A and the integration owner. Until they call `fsafe`, the gap
+documented in `docs/plugins/SECURITY.md` ("File-check races") still applies
+to them.
 
 ## Windows and macOS
 
