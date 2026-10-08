@@ -5,8 +5,12 @@ import type { Provider } from '../shared/chat'
 
 // Keys are encrypted with the OS keychain (DPAPI on Windows) and never
 // leave the main process. One file per provider.
-const keyPath = (provider: Provider): string =>
-  join(app.getPath('userData'), provider === 'claude' ? 'api-key.bin' : `${provider}-key.bin`)
+// The provider name comes from the renderer, so only known names make a path.
+function keyPath(provider: Provider): string {
+  if (provider === 'claude') return join(app.getPath('userData'), 'api-key.bin')
+  if (provider === 'openai') return join(app.getPath('userData'), 'openai-key.bin')
+  throw new Error('Unknown provider')
+}
 
 export function getApiKey(provider: Provider): string | null {
   if (!existsSync(keyPath(provider))) return null
