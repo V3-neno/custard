@@ -13,7 +13,7 @@ import type {
   ResponseStreamEvent
 } from 'openai/resources/responses/responses'
 import type { ChatEvent, Conversation, Effort } from '../shared/chat'
-import type { TurnLog } from './turn'
+import { MALFORMED_ARGUMENTS, type TurnLog } from './turn'
 import {
   compactionRefused,
   dropBeforeCompaction,
@@ -148,7 +148,8 @@ function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
       try {
         input = JSON.parse(item.arguments || '{}')
       } catch {
-        // Leave malformed arguments empty; the tool reports what's missing.
+        // Refused when the call comes to run (see runTool).
+        input = { [MALFORMED_ARGUMENTS]: item.arguments }
       }
       blocks.push({ type: 'tool_use', id: item.call_id, name: item.name, input })
     }

@@ -62,7 +62,7 @@ import { pluginHost, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
 import { workspaceTools, type WorkspaceTools } from './workspace'
 import { isWebTool, runWebTool, webTools } from './web'
-import { repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
+import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
   chatModels,
   isMode,
@@ -393,6 +393,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     if (!available.has(c.name))
       return {
         content: `${c.name} isn't available in this chat, so nothing was done.`,
+        isError: true,
+        outcome: 'not-run'
+      }
+    if (hasMalformedArguments(c.input))
+      return {
+        content: `The arguments for ${c.name} weren't valid JSON, so nothing was done. Send the call again with valid arguments.`,
         isError: true,
         outcome: 'not-run'
       }

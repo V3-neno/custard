@@ -297,3 +297,28 @@ describe('OpenAI long chats (mocked Responses API)', () => {
     expect(sent[0].body.context_management).toBeDefined()
   })
 })
+
+describe('malformed tool arguments (L14)', () => {
+  it('are marked so the call is refused rather than run with no arguments', async () => {
+    requests.length = 0
+    replies = [
+      completed([
+        { type: 'function_call', call_id: 'bad1', name: 'vault_list', arguments: '{"path": "x' }
+      ]),
+      completed([message('done')])
+    ]
+    const seen: unknown[] = []
+    const { t } = turn(conv(), 'gpt-6-luna', {
+      runRound: async (calls) => {
+        seen.push(...calls.map((x) => x.input))
+        return calls.map((x) => ({
+          type: 'tool_result' as const,
+          tool_use_id: x.id,
+          content: 'ok'
+        }))
+      }
+    })
+    await runOpenAI(t)
+    expect(seen).toEqual([{ __custardMalformedArguments: '{"path": "x' }])
+  })
+})

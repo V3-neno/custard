@@ -259,3 +259,10 @@ export function repairInterrupted(c: Conversation): boolean {
   }
   return false
 }
+
+// A tool call whose arguments weren't valid JSON (OpenAI sends them as a
+// string). Kept as given so the history still shows them, and never run:
+// running it with no arguments could do something nobody asked for (L14).
+export const MALFORMED_ARGUMENTS = '__custardMalformedArguments'
+export const hasMalformedArguments = (input: unknown): boolean =>
+  typeof input === 'object' && input !== null && MALFORMED_ARGUMENTS in input
