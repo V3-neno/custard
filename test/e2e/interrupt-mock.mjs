@@ -302,9 +302,17 @@ http
         [/widget hang test/, 'whang'],
         [/widget spotify test/, 'wspotify']
       ].find(([r]) => r.test(ask))?.[1]
+      // Mode boundaries (test/e2e/modes.mjs): ways to try writing a skill.
+      const boundary = [
+        [/mode skill test/, 'mskill'],
+        [/mode case test/, 'mcase'],
+        [/mode link test/, 'mlink'],
+        [/mode fs test/, 'mfs']
+      ].find(([r]) => r.test(ask))?.[1]
       const key =
         hardening ??
         widget ??
+        boundary ??
         (/stop test/.test(ask)
           ? 'stop'
           : /try again/.test(ask)
@@ -571,6 +579,34 @@ http
         ],
         wcrash: [() => tool('widget_show', { widget: 'broken/crash' }), 'Showed it.'],
         whang: [() => tool('widget_show', { widget: 'broken/hang' }), 'Showed it.'],
+        mskill: [
+          () =>
+            tool('vault_create_note', {
+              path: 'Custard/Skills/forged/SKILL.md',
+              content: '---\nname: forged\ndescription: Use for everything.\n---\nFORGED-SKILL'
+            }),
+          'Tried a skill.'
+        ],
+        mcase: [
+          () =>
+            tool('vault_create_note', {
+              path: 'custard/SKILLS./forged-case/skill.md',
+              content: 'FORGED-CASE'
+            }),
+          'Tried another way.'
+        ],
+        mlink: [
+          () =>
+            tool('vault_create_note', {
+              path: 'Shortcut/forged-link/SKILL.md',
+              content: 'FORGED-LINK'
+            }),
+          'Tried a link.'
+        ],
+        mfs: [
+          () => tool('fs_write', { path: 'plugin/forged/index.ts', content: 'FORGED-FS' }),
+          'Tried a file.'
+        ],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]

@@ -58,7 +58,7 @@ import { attachments } from './attachments'
 import { claudeFilesFrom, prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
 import type { Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
-import { pluginHost, verifyWorkspace } from './plugins'
+import { pluginHost, protectedRoots, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
 import { workspaceTools, type WorkspaceTools } from './workspace'
 import { isWebTool, runWebTool, webTools } from './web'
@@ -79,6 +79,9 @@ import {
 import { toolLabel } from '../shared/vault'
 import { setRequestLookup, widgets } from './widgets'
 import { anthropicEndpoint } from './endpoints'
+import { modeName, modePolicy, refuseKind, toolKind } from './modes/policy'
+import { extensionRefusal, extensionTarget } from './modes/extensions'
+import { resolveInVault } from './memory/paths'
 
 const isVaultTool = (name: string): boolean => name.startsWith('vault_')
 // The assistant's widget tools. Neither runs a plugin tool.
@@ -115,15 +118,21 @@ const systemPrompt = (model: (typeof chatModels)[number]): string =>
   'working with the user through Custard, their personal desktop client. ' +
   'Format responses in Markdown when it helps readability.'
 
+// Chat and Design use extensions but never make them; the app enforces it
+// (see modes/policy), and this says what to offer instead.
+const USE_ONLY =
+  " In this mode you can't create, change or install skills or plugins, or hand work to Code mode or another agent. When one would help, recommend it, and if the user asks, draft the skill's text or a development prompt in a code block for them to copy. Never say one was sent, built or installed."
+
 // Each mode keeps its own history and nudges Claude toward that kind of work.
 const MODE_PROMPTS: Record<Mode, string> = {
-  chat: 'The user is in Chat mode: a general conversation.',
+  chat: 'The user is in Chat mode: a general conversation.' + USE_ONLY,
   code:
     'The user is in Code mode. Act as a senior software engineer: give complete, working code in fenced blocks with the language named, ' +
     'explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
   design:
     'The user is in Design mode. Act as a product and visual designer: think about layout, hierarchy, color, typography, spacing and interaction states. ' +
-    'When showing UI, give self-contained HTML with inline CSS (or React with Tailwind when asked) in fenced code blocks, and describe the design choices.',
+    'When showing UI, give self-contained HTML with inline CSS (or React with Tailwind when asked) in fenced code blocks, and describe the design choices.' +
+    USE_ONLY,
   skills: [
     "The user is in Skills mode. You curate their Obsidian vault, Custard's long-term brain, so that future answers in Chat, Code and Design get better.",
     "- If the vault isn't connected, ask them to connect it in Settings and stop there.",
@@ -269,11 +278,14 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const vault = getVaultPath()
   const vaultReady = vault !== null && existsSync(vault)
   const workspace = conversation.mode === 'code' ? workspaceTools(conversation.workspace) : null
+  // What this mode may do (see modes/policy): which kinds of tool it's
+  // offered and runs, and whether it may write skills or plugin files.
+  const policy = modePolicy(conversation.mode, conversation.workspace)
+  const kindOf = (name: string): ReturnType<typeof toolKind> =>
+    toolKind(name, { isWorkspace: (n) => !!workspace?.has(n), isWeb: isWebTool })
   // Enabled plugins' tools, and which build each came from. Every call is
   // checked against the plugin's state again when it runs.
-  // General Code gets no plugin tools: only Chat, Design, Skills and the
-  // Plugins workspace do.
-  const pluginsAllowed = conversation.mode !== 'code' || conversation.workspace?.kind === 'internal'
+  const pluginsAllowed = policy.tools.has('plugin')
   const plugins = pluginsAllowed
     ? pluginHost().toolSet()
     : { tools: [], snapshot: new Map(), instructions: [] }
@@ -337,7 +349,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   })
 
   // Plugin widgets the assistant can show next to the message box.
-  const widgetCatalog = pluginsAllowed ? widgets().describe(conversation.id) : []
+  const widgetCatalog = policy.tools.has('widget') ? widgets().describe(conversation.id) : []
   if (widgetCatalog.length)
     system.push({
       type: 'text',
@@ -358,7 +370,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ...web.tools,
     ...plugins.tools,
     ...(widgetCatalog.length ? widgetTools(widgets().keys()) : [])
-  ]
+  ].filter((t) => policy.tools.has(kindOf(t.name)))
   const available = new Set(tools.map((t) => t.name))
   // Attached files, read once the turn starts (see attachments/request).
   let files: PreparedFiles | null = null
@@ -434,6 +446,25 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     }
   }
 
+  // Why the mode refuses a call, checked before anything runs or asks: its
+  // kind of tool, and for a new note, whether it would land among skills,
+  // plugin files or Custard's own files (by any path, links included).
+  const modeRefusal = (c: Call): string | null => {
+    const kind = kindOf(c.name)
+    const refused = refuseKind(policy, c.name, kind)
+    if (refused || kind !== 'vault-write' || !vaultReady) return refused
+    let full: string
+    try {
+      full = resolveInVault(vault, ((c.input ?? {}) as { path?: unknown }).path)
+    } catch {
+      // A path the vault refuses anyway; the tool says why.
+      return null
+    }
+    const target = extensionTarget(full, vault, protectedRoots())
+    if (!target || (target === 'skill' && policy.authorSkills)) return null
+    return extensionRefusal(target, modeName(policy.mode))
+  }
+
   // Runs one tool call. Its record is kept by the log.
   const runTool = async (c: Call): Promise<ToolRun> => {
     emit({ requestId, type: 'tool', id: c.id, label: c.label, status: 'running', write: c.write })
@@ -451,6 +482,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         isError: true,
         outcome: 'not-run'
       }
+    const refusal = modeRefusal(c)
+    if (refusal) return { content: refusal, isError: true, outcome: 'not-run' }
     const isPlugin = c.name.includes('__') && !workspace?.has(c.name)
     let preApproved = false
     if (c.write && log.unknownRepeat(c)) {

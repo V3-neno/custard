@@ -5,6 +5,7 @@ import { resolveInVault, VaultPathError } from './memory/paths'
 import { CAPTURES, readCaptures } from './memory/write'
 import { MEMORY_NOTE } from '../shared/vault'
 import { modes, type Mode } from '../shared/chat'
+import { SKILLS_DIR } from './modes/extensions'
 import type { ToolRun } from './turn'
 import { search, SearchError, SEARCH_LIMITS } from './vault/search'
 import { ReadError, readPart, toVaultPath, READ_LIMITS } from './vault/read'
@@ -84,7 +85,6 @@ export const vaultTools: BetaTool[] = [
   }
 ]
 
-const SKILLS_DIR = 'Custard/Skills'
 // Skills listed in the prompt; the rest are counted and can be listed.
 const MAX_SKILLS = 60
 // Memory.md in the prompt: the start and the newest end, up to this much.
