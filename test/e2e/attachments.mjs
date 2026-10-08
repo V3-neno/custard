@@ -272,8 +272,14 @@ try {
   await idle()
   const r2 = requests()[before2]
   check(
-    blocks(r2).some((b) => b.type === 'text' && /photo\.png.*missing or changed/.test(b.text)),
-    'the model is told the file is no longer included'
+    blocks(r2).some(
+      (b) =>
+        b.type === 'text' &&
+        /"photo\.png" \(Image\): Custard's copy is missing or changed.*You can't see this file now.*ask them to attach it again; don't answer as if you had looked at it/.test(
+          b.text
+        )
+    ),
+    'the model is told which file it cannot see, and to ask for it again rather than answer as if it had'
   )
   check(blocks(r2).filter((b) => b.type === 'image').length === 1, 'the other image is still sent')
   await w.waitForSelector('text=photo.png is no longer available')
@@ -316,6 +322,7 @@ try {
   const sys = r4.system.map((b) => b.text).join('\n')
   check(
     /not carried over, and you cannot see them: "photo\.png"/.test(sys) &&
+      /ask them to attach it again here; never answer as if you had looked at it/.test(sys) &&
       !r4.messages.some(
         (m) => Array.isArray(m.content) && m.content.some((b) => b.type !== 'text')
       ),
