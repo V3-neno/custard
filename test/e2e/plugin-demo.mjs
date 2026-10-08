@@ -3,7 +3,7 @@
 //   node test/e2e/mock.mjs <out> <out>/plugin &   (with <out>/plugin a copy of plugin/
 //                                                    and <out>/vault a copy of vault-template/)
 //   node test/e2e/plugin-demo.mjs <out> <screenshot dir>
-// <out>/vault's Music Preferences note should mention Nils Frahm under Focus.
+// The script itself writes Nils Frahm under Focus in <out>/vault's Music Preferences.
 // Linux only as written (XDG_CONFIG_HOME isolates the app's data), with a display
 // or xvfb-run. Needs the playwright package, which isn't a dependency of this repo.
 import { _electron as electron } from 'playwright'
@@ -17,6 +17,17 @@ const pluginJson = PLUGIN_DIR + '/spotify/plugin.json'
 fs.writeFileSync(
   pluginJson,
   fs.readFileSync(pluginJson, 'utf8').replace(/"version": "[^"]+"/, '"version": "1.0.0"')
+)
+// The preference the demo expects the model to read from the vault.
+const prefs = OUT + '/vault/Areas/Music Preferences.md'
+fs.writeFileSync(
+  prefs,
+  fs
+    .readFileSync(prefs, 'utf8')
+    .replace(
+      '- **Focus / deep work:** ',
+      '- **Focus / deep work:** Nils Frahm, Tycho, Ólafur Arnalds'
+    )
 )
 const app = await electron.launch({
   executablePath: createRequire(import.meta.url)('electron'),
@@ -82,6 +93,12 @@ const send = async (t) => {
 const idle = () => w.waitForSelector('button[title=Send]', { timeout: 30000 })
 const spotifyLog = () => JSON.parse(fs.readFileSync(OUT + '/spotify.json', 'utf8'))
 const anthLog = () => JSON.parse(fs.readFileSync(OUT + '/anthropic.json', 'utf8'))
+// Chat turns only: automatic memory's summarizer requests quote the user's
+// messages too.
+const chatLog = () =>
+  anthLog().filter(
+    (r) => !(typeof r.system === 'string' && r.system.startsWith('You decide what Custard'))
+  )
 const toolResults = (req) =>
   req.messages
     .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
@@ -121,7 +138,7 @@ try {
   await w.waitForSelector('text=It is not active yet', { timeout: 60000 })
   await idle()
   await shot('02-edit-validate-test')
-  const bump = anthLog().filter(
+  const bump = chatLog().filter(
     (r) => r.messages[0] && JSON.stringify(r.messages[0]).includes('Bump')
   )
   const results = toolResults(bump.at(-1)).map((r) =>
@@ -210,7 +227,7 @@ try {
   await w.waitForSelector('text=I queued five focus tracks', { timeout: 30000 })
   await idle()
   await shot('06-queued')
-  const q = anthLog().filter((r) => JSON.stringify(r.messages[0]).includes('Queue five'))
+  const q = chatLog().filter((r) => JSON.stringify(r.messages[0]).includes('Queue five'))
   check(
     q[0].tools.includes('spotify__add_to_queue') && q[0].tools.includes('vault_read'),
     'plugin tools offered next to vault tools'
@@ -267,9 +284,11 @@ try {
   await w.waitForSelector('text=nothing was queued', { timeout: 30000 })
   await idle()
   await shot('07-disabled')
-  const st = anthLog().filter((r) => JSON.stringify(r.messages).includes('Queue one more'))
+  const st = chatLog().filter((r) => JSON.stringify(r.messages).includes('Queue one more'))
   check(!st[0].tools.some((t) => t.startsWith('spotify__')), 'spotify tools no longer offered')
-  const staleResult = JSON.stringify(toolResults(st.at(-1)).at(-1))
+  // The refused call's result, in the request after it. Its tool is no longer
+  // offered, so Custard sends it as text (see main/history), not tool_result.
+  const staleResult = JSON.stringify(st.at(-1).messages.at(-1).content)
   console.log('   stale call result:', staleResult.slice(0, 200))
   check(
     /not available|disabled|isn't|unknown|not offered/i.test(staleResult),

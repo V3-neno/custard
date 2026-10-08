@@ -108,7 +108,10 @@ http
           !(
             Array.isArray(b.messages[last].content) &&
             b.messages[last].content.some((c) => c.type === 'tool_result')
-          )
+          ) &&
+          // Results of calls to tools no longer offered are sent as text
+          // (see main/history); they are not something the user asked.
+          !textOf(b.messages[last]).startsWith('[Result of that earlier call')
         )
       )
         last--
