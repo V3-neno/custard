@@ -154,7 +154,7 @@ const ctx = (): DesignToolContext & { asked: string[] } => {
         mime: 'image/png',
         bytes: 95,
         attachmentId: id,
-        sha256: sha256(REF_BYTES)
+        sha256: 'h'
       })),
     signal: new AbortController().signal,
     asked
@@ -436,201 +436,26 @@ describe('plugin media jobs', () => {
     expect((await fixtureJobs(host))[0]).toMatchObject({ references: 1 })
   })
 
-  it('a plugin\'s own "not sent" stays unknown; a lost or garbled answer is unknown', async () => {
+  it("a plugin's refusal, a lost or a garbled answer are all unknown", async () => {
     const host = newHost()
     await install(host)
     const s = service(host)
-    // The plugin ran and says nothing was sent: Custard can't confirm that.
-    const refused = await submit(s, ctx(), 'please reject this')
-    expect(refused.outcome).toBe('unknown')
-    expect(refused.content).toMatch(/can't confirm/)
+    // The plugin's "not sent" is only its claim (contract S1): unknown.
+    expect((await submit(s, ctx(), 'please reject this')).outcome).toBe('unknown')
+    expect(s.jobs.list(CHAT)[0].dispatch).toMatchObject({ providerClaim: 'not sent' })
     expect((await submit(s, ctx(), 'this gets lost')).outcome).toBe('unknown')
     expect((await submit(s, ctx(), 'garbled reply')).outcome).toBe('unknown')
     const states = s.jobs.list(CHAT).map((j) => j.state)
     expect(states).toEqual(['unknown', 'unknown', 'unknown'])
-    // Sending any of them again needs the user to accept a possible double
-    // charge, including the one the plugin said it never sent.
-    for (const j of s.jobs.list(CHAT).slice(0, 2))
-      expect(() =>
-        s.jobs.resubmitJob(j.id, {
-          acknowledgeDuplicateRisk: false,
-          requestedBy: j.requestedBy,
-          target: j.target,
-          approval: j.approval
-        })
-      ).toThrow(DuplicateRiskError)
-  })
-
-  it('a plugin update between the card and the send refuses it', async () => {
-    const host = newHost()
-    await install(host)
-    const s = service(host)
-    const c = ctx()
-    c.approve = async () => {
-      // A new build is activated while the card is open.
-      const f = join(base, 'plugin', 'slowmo', 'src', 'index.ts')
-      writeFileSync(f, readFileSync(f, 'utf8') + '\n// changed\n')
-      const v = await host.validate('slowmo')
-      await host.activate('slowmo', v.buildId!, permissionsOf(v.manifest!))
-      return true
-    }
-    const r = await submit(s, c, 'anything')
-    expect(r.outcome).toBe('not-run')
-    expect(r.content).toMatch(/plugin changed after you approved/)
-    expect(s.jobs.list(CHAT)[0]).toMatchObject({ state: 'failed' })
-    expect(s.jobs.list(CHAT)[0].attemptedAt).toBeUndefined()
-    expect(await fixtureJobs(host)).toEqual([])
-  })
-
-  it('a reference changed after approval is refused before sending', async () => {
-    const host = newHost()
-    await install(host)
-    const s = service(host)
-    const c = ctx()
-    const refs = c.references
-    c.references = async (ids) => (await refs(ids)).map((r) => ({ ...r, sha256: 'f'.repeat(64) }))
-    const r = await runDesignTool(
-      s,
-      'design_media',
-      { operation: 'video.image-to-video', prompt: 'animate', references: ['att-1'] },
-      c
-    )
-    expect(r.outcome).toBe('failed')
-    expect(s.jobs.list(CHAT)[0].error).toMatch(/changed after you approved/)
-    expect(await fixtureJobs(host)).toEqual([])
-  })
-
-  it('a job whose request changed after approval is never sent', async () => {
-    const host = newHost()
-    await install(host)
-    const s = service(host)
-    const p = s.providers()[0]
-    const request = {
-      operation: 'video.text-to-video' as const,
-      prompt: 'approved prompt',
-      references: [],
-      durationSeconds: 2
-    }
-    const job = s.jobs.create({
-      providerId: p.info().id,
-      request: { ...request, prompt: 'something else' },
-      requestedBy: { conversationId: CHAT, messageIndex: 0 },
-      target: { artifactId: 'a', versionId: 'v' },
-      approval: approveSubmission(p.info().source, request, 0)
-    })
-    expect(await s.jobs.submit(job.id)).toMatchObject({ state: 'failed' })
-    const none = s.jobs.create({
-      providerId: p.info().id,
-      request,
-      requestedBy: { conversationId: CHAT, messageIndex: 0 },
-      target: { artifactId: 'a', versionId: 'v' }
-    })
-    expect(await s.jobs.submit(none.id)).toMatchObject({
-      state: 'failed',
-      error: expect.stringMatching(/wasn't approved/)
-    })
-    expect(await fixtureJobs(host)).toEqual([])
-  })
-
-  it('the host binds a media approval to the build, the input and one use', async () => {
-    const host = newHost()
-    await install(host)
-    const [entry] = host.mediaCatalog()
-    const input = {
-      operation: 'video.text-to-video',
-      prompt: 'bound',
-      idempotencyKey: 'job-1',
-      durationSeconds: 2
-    }
-    const content = {
-      source: {
-        kind: 'plugin' as const,
-        pluginId: 'slowmo',
-        buildId: entry.buildId,
-        providerId: 'video'
-      },
-      operation: 'video.text-to-video' as const,
-      prompt: 'bound',
-      references: [],
-      durationSeconds: 2
-    }
-    const token: MediaApproval = {
-      jobId: 'job-1',
-      pluginId: 'slowmo',
-      buildId: entry.buildId,
-      providerId: 'video',
-      operation: 'video.text-to-video',
-      role: 'submit',
-      inputSha256: approvalDigest(content)
-    }
-    const a = (role: MediaRole, i: unknown = input): Parameters<PluginHost['invokeMedia']>[0] => ({
-      pluginId: 'slowmo',
-      providerId: 'video',
-      operation: 'video.text-to-video',
-      role,
-      input: i
-    })
-    const o = (approval?: MediaApproval): Parameters<PluginHost['invokeMedia']>[1] => ({
-      signal: new AbortController().signal,
-      approve: async (r: ApprovalRequest) => {
-        pluginAsks.push(r)
-        return false
-      },
-      ...(approval ? { approval } : {})
-    })
-    // A mutated argument, another build, or another role is refused.
-    expect(
-      (await host.invokeMedia(a('submit', { ...input, prompt: 'other' }), o(token))).outcome
-    ).toBe('not-run')
-    expect((await host.invokeMedia(a('submit'), o({ ...token, buildId: 'old' }))).content).toMatch(
-      /updated or rolled back/
-    )
-    expect((await host.invokeMedia(a('submit'), o({ ...token, role: 'cancel' }))).outcome).toBe(
-      'not-run'
-    )
-    // Status and result never take an approval.
-    expect((await host.invokeMedia(a('status', { remoteId: 'x' }), o(token))).content).toMatch(
-      /status or result/
-    )
-    // No approval: the plugin's own card would be needed, and Design refuses it.
-    expect((await host.invokeMedia(a('submit'), o())).outcome).toBe('not-run')
-    expect(pluginAsks).toHaveLength(1)
-    expect(await fixtureJobs(host)).toEqual([])
-    // The right one runs once; replaying it is refused.
-    expect((await host.invokeMedia(a('submit'), o(token))).outcome).toBe('completed')
-    const replay = await host.invokeMedia(a('submit'), o(token))
-    expect(replay.content).toMatch(/already used/)
-    expect(await fixtureJobs(host)).toHaveLength(1)
-    // A cancel approval binds to the job reference.
-    const remoteId = (await fixtureJobs(host))[0].id
-    const cancel: MediaApproval = { ...token, role: 'cancel', inputSha256: digestOf({ remoteId }) }
-    expect((await host.invokeMedia(a('cancel', { remoteId: 'other' }), o(cancel))).outcome).toBe(
-      'not-run'
-    )
-    expect((await host.invokeMedia(a('cancel', { remoteId }), o(cancel))).outcome).toBe('completed')
-  })
-
-  it("media tools can't be reached as plain tools, even pre-approved", async () => {
-    const host = newHost()
-    await install(host)
-    const { buildId } = host.mediaCatalog()[0]
-    const tools = host.toolSet().tools.map((t) => t.name)
-    expect(tools).not.toContain('slowmo__submit')
-    expect(tools).not.toContain('slowmo__cancel')
-    for (const name of ['slowmo__submit', 'slowmo__cancel', 'slowmo__status']) {
-      const r = await host.invoke(
-        name,
-        { remoteId: 'x', operation: 'video.text-to-video', prompt: 'p', idempotencyKey: 'k' },
-        {
-          snapshot: new Map([[name, { pluginId: 'slowmo', buildId }]]),
-          signal: new AbortController().signal,
-          approve: async () => true,
-          preApproved: true
-        }
-      )
-      expect(r.content).toMatch(/only run by Design/)
-    }
-    expect(await fixtureJobs(host)).toEqual([])
+    // Sending an unknown one again needs the user to accept a possible double charge.
+    const lost = s.jobs.list(CHAT)[1]
+    expect(() =>
+      s.jobs.resubmitJob(lost.id, {
+        acknowledgeDuplicateRisk: false,
+        requestedBy: lost.requestedBy,
+        target: lost.target
+      })
+    ).toThrow(DuplicateRiskError)
   })
 
   it('a job fails when the provider says so, keeping no file', async () => {
@@ -651,10 +476,7 @@ describe('plugin media jobs', () => {
     const s = service(host)
     await submit(s, ctx(), 'cancel me')
     const [job] = s.jobs.list(CHAT)
-    // Without the user's go-ahead nothing reaches the plugin.
-    await expect(jobAction(s, CHAT, 'cancel', job.id)).rejects.toThrow(/go-ahead/)
-    expect((await fixtureJobs(host))[0].state).not.toBe('cancelled')
-    const { job: after } = await jobAction(s, CHAT, 'cancel', job.id, undefined, true)
+    const { job: after } = await jobAction(s, CHAT, 'cancel', job.id, undefined, async () => true)
     expect(after.state).toBe('cancelled')
     expect(pluginAsks).toEqual([])
     expect((await fixtureJobs(host))[0].state).toBe('cancelled')

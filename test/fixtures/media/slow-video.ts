@@ -77,8 +77,13 @@ export function slowVideo(o: SlowVideoOptions = {}): MediaProvider & {
     info: () => info,
     async submit(request, { idempotencyKey }) {
       calls.submit.push({ request, key: idempotencyKey })
-      // Refused by the provider's own client before anything left: confirmed.
-      if (o.submit === 'rejected') throw new MediaError('rejected', 'Prompt rejected.', false, true)
+      // A response saying the operation failed (contract S1). Whether it was
+      // charged isn't known, so a repeat still warns.
+      if (o.submit === 'rejected')
+        throw new MediaError('rejected', 'Prompt rejected.', false, {
+          state: 'rejected',
+          repeat: { risk: 'unknown' }
+        })
       if (o.submit === 'lost') throw new MediaError('temporary', 'Connection reset.', 'unknown')
       if (o.idempotency && byKey.has(idempotencyKey))
         return { remoteId: byKey.get(idempotencyKey)!, status: { state: 'pending' } }

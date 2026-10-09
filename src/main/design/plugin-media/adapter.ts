@@ -28,6 +28,12 @@ import {
   type BinaryTransport
 } from './results'
 
+// Custard refused before any plugin code ran (contract S1).
+const NOT_DISPATCHED = {
+  state: 'not-dispatched' as const,
+  repeat: { risk: 'safe' as const, basis: 'refused by Custard before the plugin ran' }
+}
+
 // Design's view of a plugin's `media` declaration: a MediaProvider whose
 // every step is one of the plugin's own declared tools, run by the plugin
 // host with its usual checks (enabled, same build, granted permissions,
@@ -188,7 +194,9 @@ export class PluginMediaProvider implements MediaProvider {
     if (this.deps.submitApproval() !== 'design-card')
       throw refuse(
         'unconfigured',
-        'Plugin media submissions are waiting on a decision about approval cards, so nothing was sent.'
+        'Plugin media submissions are waiting on a decision about approval cards, so nothing was sent.',
+        false,
+        NOT_DISPATCHED
       )
     const a = o.approval
     const src = a?.source
@@ -225,7 +233,12 @@ export class PluginMediaProvider implements MediaProvider {
         total > MEDIA_INPUT_LIMITS.referenceBytes ||
         bytes.length > (cap.references?.maxBytes ?? 0)
       )
-        throw refuse('rejected', `${ref.name} is too large to send to ${this.spec.name}.`)
+        throw new MediaError(
+          'rejected',
+          `${ref.name} is too large to send to ${this.spec.name}.`,
+          false,
+          NOT_DISPATCHED
+        )
       references.push({
         name: ref.name,
         mime: ref.mime,
@@ -243,34 +256,18 @@ export class PluginMediaProvider implements MediaProvider {
         : {}),
       ...(request.format ? { format: request.format } : {})
     }
-    // The host checks this against the active build and the input it sends,
-    // and uses it once (plugins/host.ts invokeMedia).
-    const r = await this.call('submit', request.operation, input, o.signal, {
-      jobId: o.jobId,
-      pluginId: this.entry.pluginId,
-      buildId: src.buildId,
-      providerId: this.spec.id,
-      operation: request.operation,
-      role: 'submit',
-      inputSha256: a.requestSha256
-    })
-    // The host refused before the plugin was called: nothing was sent.
-    if (r.outcome === 'not-run') throw refuse('unconfigured', short(r.content))
+    const r = await this.call('submit', request.operation, input, o.signal, true)
+    // TODO(Thread 1): confirm every 'not-run' here comes from a host check
+    // before plugin code ran, never from the plugin's own result.
+    if (r.outcome === 'not-run')
+      throw new MediaError('unconfigured', short(r.content), false, NOT_DISPATCHED)
     if (r.outcome === 'unknown' || r.interrupted)
       throw new MediaError('temporary', short(r.content) || 'The plugin was cut off.', 'unknown')
     if (r.isError) {
-      // Once the plugin ran, its own "not sent" can't be confirmed by
-      // Custard: the outcome stays unknown, so a repeat warns about a second
-      // charge and nothing is sent again on its own.
-      const claimed = (r.data as { sent?: unknown } | undefined)?.sent === false
-      const text = short(r.content) || 'The plugin reported an error.'
-      throw new MediaError(
-        'rejected',
-        claimed
-          ? `${text} (The plugin says it wasn't sent, but Custard can't confirm that.)`
-          : text,
-        'unknown'
-      )
+      // Only the plugin can say its service never got the request: a claim,
+      // never evidence (contract S1), so the outcome stays unknown.
+      const sent = (r.data as { sent?: unknown } | undefined)?.sent === false ? false : 'unknown'
+      throw new MediaError('rejected', short(r.content) || 'The plugin reported an error.', sent)
     }
     const d = r.data as Record<string, unknown> | undefined
     const status = readStatus(d?.status)

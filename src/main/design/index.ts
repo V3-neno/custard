@@ -20,6 +20,7 @@ import { JobTracker, JobError } from './jobs'
 import { mediaProvider, mediaProviders } from './registry'
 import { ArtifactStore, JobStore } from './store'
 import { jobAction, type DesignService } from './tools'
+import { authorizations } from './authorization'
 import { registerHtml } from './html'
 import { registerImages } from './images'
 import { registerPluginMedia } from './plugin-media'
@@ -42,6 +43,9 @@ async function readReference(job: Job, ref: MediaReference): Promise<Uint8Array>
   const chat = job.requestedBy.conversationId
   const a = getConversation(chat)?.attachments?.find((x) => x.id === ref.attachmentId)
   if (!a || a.missing) throw new Error(`${ref.name} is no longer in this chat.`)
+  // The approved content only (contract S3): the record must still be the
+  // one approved, and read() checks the bytes against it.
+  if (a.sha256 !== ref.sha256) throw new Error(`${ref.name} changed since it was approved.`)
   return new Uint8Array(await attachments().read(chat, a))
 }
 
@@ -96,6 +100,7 @@ export function designChatDeleted(chat: string): void {
   const s = design()
   s.artifacts.deleteChat(chat)
   s.jobs.forgetChat(chat)
+  authorizations.forgetChat(chat)
   jobStore?.deleteChat(chat)
 }
 
@@ -127,9 +132,9 @@ export function registerDesignHandlers(): void {
     if (action !== 'check' && action !== 'cancel' && action !== 'stop')
       throw new Error('Unknown action.')
     try {
-      // The workspace's "Cancel job" is confirmed in the UI before it gets
-      // here: that click is the user's explicit go-ahead.
-      return await jobAction(design(), chat, action, id, undefined, action === 'cancel')
+      // A cancel from the workspace is the user's own click, confirmed in
+      // the workspace (Thread 1 adds that confirmation).
+      return await jobAction(design(), chat, action, id, undefined, async () => true)
     } catch (err) {
       if (err instanceof JobError) return { error: err.message }
       throw err

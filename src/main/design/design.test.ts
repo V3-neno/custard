@@ -25,12 +25,21 @@ import { approveSubmission } from './approval'
 import { fingerprint, planSkills, skillChanges, skillUse, type Candidate } from './skills'
 import {
   defaultDesignSettings,
+  MediaError,
   type Job,
   type MediaProvider,
   type MediaProviderInfo,
   type Source
 } from '../../shared/design'
 import { slowVideo } from '../../../test/fixtures/media/slow-video'
+import { authorizations } from './authorization'
+import type { AuthorizationToken } from '../../shared/design'
+
+// Single-use authorizations as Design mints them after the user approves.
+const auth = (t: JobTracker, id: string): AuthorizationToken =>
+  authorizations.mint(t.submitBinding(id))
+const authCancel = (t: JobTracker, id: string): AuthorizationToken =>
+  authorizations.mint(t.cancelBinding(id))
 
 const chatSource: Source = { kind: 'chat-model', provider: 'claude', model: 'claude-opus-5-5' }
 const base = (over: Partial<DiscoverInput> = {}): DiscoverInput => ({
@@ -265,7 +274,14 @@ describe('media capability contract', () => {
           ...req,
           operation: 'video.image-to-video',
           references: [
-            { kind: 'image', name: 'a.jpg', mime: 'image/jpeg', bytes: 10, attachmentId: 'x' }
+            {
+              kind: 'image',
+              name: 'a.jpg',
+              mime: 'image/jpeg',
+              bytes: 10,
+              attachmentId: 'x',
+              sha256: 'h'
+            }
           ]
         },
         i2v
@@ -371,7 +387,7 @@ describe('generation jobs, with the development-only video fixture', () => {
     })
     expect(job.state).toBe('not-submitted')
     expect(saved.get(job.id)?.state).toBe('not-submitted')
-    const sent = await tracker.submit(job.id)
+    const sent = await tracker.submit(job.id, undefined, auth(tracker, job.id))
     expect(sent).toMatchObject({ state: 'pending', remoteId: 'remote-1', tracking: true })
     expect(p.calls.submit[0].key).toBe(job.idempotencyKey)
     let files
@@ -404,11 +420,13 @@ describe('generation jobs, with the development-only video fixture', () => {
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
-    await tracker.submit(job.id)
+    await tracker.submit(job.id, undefined, auth(tracker, job.id))
     await new Promise((r) => setTimeout(r, 50))
     expect(p.calls).toMatchObject({ status: 0, result: 0, cancel: 0 })
     expect(p.calls.submit).toHaveLength(1)
-    await expect(tracker.submit(job.id)).rejects.toThrow(/already sent/)
+    await expect(tracker.submit(job.id, undefined, auth(tracker, job.id))).rejects.toThrow(
+      /already sent/
+    )
   })
 
   it('bounds status checks', async () => {
@@ -421,7 +439,7 @@ describe('generation jobs, with the development-only video fixture', () => {
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
-    await tracker.submit(job.id)
+    await tracker.submit(job.id, undefined, auth(tracker, job.id))
     await tracker.check(job.id)
     await expect(tracker.check(job.id)).rejects.toThrow(/too recently/)
     expect(p.calls.status).toBe(1)
@@ -437,7 +455,7 @@ describe('generation jobs, with the development-only video fixture', () => {
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
-    expect((await tracker.submit(job.id)).state).toBe('unknown')
+    expect((await tracker.submit(job.id, undefined, auth(tracker, job.id))).state).toBe('unknown')
     const next = {
       requestedBy: { conversationId: 'c', messageIndex: 2 },
       target: { artifactId: 'a', versionId: 'v2' },
@@ -452,7 +470,7 @@ describe('generation jobs, with the development-only video fixture', () => {
     expect(p.calls.submit).toHaveLength(1)
   })
 
-  it('a rejected submission is a plain failure', async () => {
+  it('a rejected submission is a failure', async () => {
     const p = slowVideo({ submit: 'rejected' })
     const tracker = new JobTracker(deps(p))
     const job = tracker.create({
@@ -462,10 +480,122 @@ describe('generation jobs, with the development-only video fixture', () => {
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
-    expect(await tracker.submit(job.id)).toMatchObject({
+    expect(await tracker.submit(job.id, undefined, auth(tracker, job.id))).toMatchObject({
       state: 'failed',
       error: 'Prompt rejected.'
     })
+  })
+
+  it('a plugin saying "not sent" is a claim: the outcome stays unknown and a repeat warns', async () => {
+    const base = slowVideo()
+    const p: MediaProvider = {
+      ...base,
+      info: base.info,
+      submit: async () => {
+        throw new MediaError('rejected', 'Service refused.', false)
+      }
+    }
+    const tracker = new JobTracker(deps(p))
+    const job = tracker.create({
+      providerId: p.info().id,
+      request,
+      requestedBy: { conversationId: 'c', messageIndex: 0 },
+      target: { artifactId: 'a', versionId: 'v' }
+    })
+    const sent = await tracker.submit(job.id, undefined, auth(tracker, job.id))
+    expect(sent).toMatchObject({
+      state: 'unknown',
+      dispatch: { state: 'unknown', repeat: { risk: 'unknown' }, providerClaim: 'not sent' }
+    })
+    // Even a plugin "not dispatched" can't be host evidence.
+    expect(() =>
+      tracker.resubmitJob(job.id, {
+        acknowledgeDuplicateRisk: false,
+        requestedBy: { conversationId: 'c', messageIndex: 1 },
+        target: { artifactId: 'a', versionId: 'v2' }
+      })
+    ).toThrow(DuplicateRiskError)
+  })
+
+  it('a provider rejection is a failure, but a repeat still warns', async () => {
+    const p = slowVideo({ submit: 'rejected' })
+    const tracker = new JobTracker(deps(p))
+    const job = tracker.create({
+      providerId: p.info().id,
+      request,
+      requestedBy: { conversationId: 'c', messageIndex: 0 },
+      target: { artifactId: 'a', versionId: 'v' }
+    })
+    await tracker.submit(job.id, undefined, auth(tracker, job.id))
+    expect(tracker.get(job.id)?.dispatch?.state).toBe('rejected')
+    expect(() =>
+      tracker.resubmitJob(job.id, {
+        acknowledgeDuplicateRisk: false,
+        requestedBy: { conversationId: 'c', messageIndex: 1 },
+        target: { artifactId: 'a', versionId: 'v2' }
+      })
+    ).toThrow(DuplicateRiskError)
+  })
+
+  it('without a valid single-use authorization nothing is dispatched', async () => {
+    const p = slowVideo()
+    const tracker = new JobTracker(deps(p))
+    const mk = (): ReturnType<JobTracker['create']> =>
+      tracker.create({
+        providerId: p.info().id,
+        request,
+        requestedBy: { conversationId: 'c', messageIndex: 0 },
+        target: { artifactId: 'a', versionId: 'v' }
+      })
+    // None at all.
+    const a = mk()
+    expect(await tracker.submit(a.id)).toMatchObject({
+      state: 'failed',
+      dispatch: { state: 'not-dispatched', repeat: { risk: 'safe' } }
+    })
+    // One minted for another job.
+    const b = mk()
+    const c = mk()
+    expect((await tracker.submit(c.id, undefined, auth(tracker, b.id))).state).toBe('failed')
+    // A token for a changed request (another prompt).
+    const d = mk()
+    const other = authorizations.mint({
+      ...tracker.submitBinding(d.id),
+      argsSha256: 'changed'
+    })
+    expect((await tracker.submit(d.id, undefined, other)).error).toMatch(/request changed/)
+    expect(p.calls.submit).toHaveLength(0)
+  })
+
+  it('a built-in provider consumes its token once; replay is refused', () => {
+    const t = authorizations.mint({
+      action: 'submit',
+      jobId: 'j',
+      conversationId: 'c',
+      source: { kind: 'image-provider', provider: 'x', model: 'm' },
+      operation: 'image.generate',
+      argsSha256: 'a',
+      references: []
+    })
+    const b = {
+      action: 'submit' as const,
+      jobId: 'j',
+      conversationId: 'c',
+      source: { kind: 'image-provider' as const, provider: 'x', model: 'm' },
+      operation: 'image.generate',
+      argsSha256: 'a',
+      references: []
+    }
+    expect(() => authorizations.consume(t, b)).not.toThrow()
+    expect(() => authorizations.consume(t, b)).toThrow(/no valid approval/)
+    // A changed reference file is refused, and the token is gone after.
+    const t2 = authorizations.mint({ ...b, references: [{ attachmentId: 'r', sha256: '1' }] })
+    expect(() =>
+      authorizations.consume(t2, { ...b, references: [{ attachmentId: 'r', sha256: '2' }] })
+    ).toThrow(/files to send changed/)
+    expect(() =>
+      authorizations.consume(t2, { ...b, references: [{ attachmentId: 'r', sha256: '1' }] })
+    ).toThrow(/no valid approval/)
   })
 
   it('reuses the key only where the provider deduplicates', async () => {
@@ -478,7 +608,7 @@ describe('generation jobs, with the development-only video fixture', () => {
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
-    await tracker.submit(job.id)
+    await tracker.submit(job.id, undefined, auth(tracker, job.id))
     const again = tracker.resubmitJob(job.id, {
       acknowledgeDuplicateRisk: false,
       requestedBy: { conversationId: 'c', messageIndex: 2 },
@@ -531,11 +661,12 @@ describe('generation jobs, with the development-only video fixture', () => {
         target: { artifactId: 'a', versionId: 'v' }
       })
     const a = mk()
-    await tracker.submit(a.id)
+    await tracker.submit(a.id, undefined, auth(tracker, a.id))
     expect(tracker.stopTracking(a.id)).toMatchObject({ state: 'pending', tracking: false })
     expect(p.calls.cancel).toBe(0)
-    expect(await tracker.cancel(a.id)).toMatchObject({ state: 'cancelled' })
-    expect(p.calls.cancel).toBe(1)
+    expect(await tracker.cancel(a.id, authCancel(tracker, a.id))).toMatchObject({
+      state: 'cancelled'
+    })
     const noCancel = slowVideo({ cancel: false })
     const t2 = new JobTracker(deps(noCancel))
     const b = t2.create({
@@ -545,8 +676,8 @@ describe('generation jobs, with the development-only video fixture', () => {
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
-    await t2.submit(b.id)
-    await expect(t2.cancel(b.id)).rejects.toThrow(/can't cancel/)
+    await t2.submit(b.id, undefined, auth(t2, b.id))
+    await expect(t2.cancel(b.id, authCancel(t2, b.id))).rejects.toThrow(/can't cancel/)
   })
 
   it('a disabled provider stops new work but keeps the job record', async () => {
