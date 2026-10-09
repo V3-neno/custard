@@ -8,7 +8,7 @@ macOS or against a live provider.
 
 | # | Area | Result |
 | --- | --- | --- |
-| D1 | Plugin `open:` permission | **Gap.** Chat and Design can reach protected locations and local tools through an approved custom-scheme link. Fix needs Neno's decision. |
+| D1 | Plugin `open:` permission | **Fixed** on design-batch (dffbfd7) after Neno chose "Allowlist" (2026-10-09): vetted schemes only (today `spotify:`), and only write tools can open links. Tests in `open.security.test.ts` pass. |
 | D2 | Tool routes in Chat and Design | Enforced in code, except D1 and the residual network route below. |
 | D3 | Link-swap race (`src/main/fsafe`) | Helper built and tested on Linux. Narrowed, not closed; residual risk below. Callers not switched yet. |
 | D4 | HTML preview sandbox | Tested against A at ac9a4a2: contained, except `window.print()` (opens the OS print dialog). One-line CSP fix sent to A. Results in `SANDBOX.md`. |
@@ -60,7 +60,7 @@ Chat and Design may use enabled plugins' tools (`modePolicy`,
 those modes can do indirectly. The mode policy can't see inside a plugin
 call, and a prompt rule isn't enforcement.
 
-### Smallest enforceable fix (proposed, needs Neno's decision)
+### Fix (Neno chose "Allowlist", 2026-10-09; applied in dffbfd7)
 
 - **Allowlist instead of denylist.** A manifest may declare `https://host/`
   prefixes plus custom schemes from a short list Custard vets (today only
@@ -74,8 +74,8 @@ Alternatives: keep the denylist and add the schemes above (unknown handlers
 stay open), or confirm every custom-scheme link with the user at open time
 (adds a second prompt to Spotify's open).
 
-Both files belong to the integration owner and Workstream C, so D doesn't
-change them. The `it.fails` tests flip to passing when the fix lands.
+The integration owner applied it from `requests/D1-open-allowlist.patch`.
+`open.security.test.ts` now asserts the fixed boundary.
 
 ## D2: tool routes in Chat and Design
 
@@ -84,7 +84,7 @@ change them. The `it.fails` tests flip to passing when the fix lands.
 | Tool kinds | Only kinds the mode allows are offered or run; unknown tools are refused in every mode. Chat and Design get no workspace (file) tools. | `modePolicy`, `refuseKind`, `runTool` in `src/main/chat.ts`; `policy.test.ts` |
 | `vault_create_note` | No: `.md` only, no hidden folders (so no `.obsidian/plugins`), no `:` or short names, links must stay in the vault, and `extensionTarget` refuses skills, plugin and app roots by name and by real path. Race: see D3. | `resolveInVault` (`src/main/memory/paths.ts`), `modeRefusal` in `chat.ts`, `src/main/modes/extensions.ts` |
 | Web tools | Read only. | `src/main/web/*` |
-| Plugin tools | Sandboxed, no filesystem permission, network is https to listed public hosts only (resolved addresses checked). **Gap D1** for `open:`. | `src/main/plugins/net.ts`, `host.ts` |
+| Plugin tools | Sandboxed, no filesystem permission, network is https to listed public hosts only (resolved addresses checked). `open:` limited to vetted schemes from actions (D1, fixed). | `src/main/plugins/net.ts`, `host.ts` |
 | Plugin network (residual) | A plugin whose approved hosts include a remote coding or agent service could start work there. Only the user's host approval limits this. | `permissions.network` |
 | Widgets | No network; a write needs a real input event plus the plugin's approval card. | `docs/plugins/WIDGETS.md`, `src/main/widgets/*` |
 | IPC | Plugin sandboxes and widget views are refused on every channel. Installing, activating and plugin approval are app-window actions. | `src/main/ipc.ts` |

@@ -13,9 +13,9 @@ import { PluginStore } from './store'
 // enabled plugins' tools, so whatever an approved `open:` link can do, those
 // modes can do indirectly.
 //
-// Tests marked `it.fails` describe the boundary as it should be and fail
-// today. They are expected failures, so the suite stays green; when the fix
-// lands they start passing, vitest reports them, and `.fails` is removed.
+// Fixed by Neno's choice "Allowlist" (2026-10-09): only https prefixes and
+// schemes on VETTED_SCHEMES can be declared, and only write tools (actions)
+// can open links.
 
 const SDK = resolve(__dirname, '../../plugin-sdk')
 
@@ -154,45 +154,12 @@ beforeEach(() => {
 const SKILL_WRITE =
   'obsidian://new?vault=Custard&file=Custard%2FSkills%2Fevil%2FSKILL&content=x&overwrite=true&silent=true'
 
-describe('D1: plugin open: links (current behaviour, documented)', () => {
-  it('a manifest may declare obsidian:, and the host passes a skill-writing link to the OS', async () => {
-    expect(validOpenPrefix('obsidian:')).toBe(true)
-    await setup('obsidian:')
-    expect((await call('linker__go', SKILL_WRITE)).content).toBe('opened')
-    expect(opened).toEqual([SKILL_WRITE])
-  })
-
-  it('still refuses file:, http:, shell-like and editor schemes at validation', () => {
-    for (const p of [
-      'file:',
-      'http:',
-      'javascript:',
-      'ms-settings:',
-      'search-ms:',
-      'vscode:',
-      'cursor:',
-      'ssh:'
-    ])
-      expect(validOpenPrefix(p), p).toBe(false)
-  })
-
-  it('still refuses links that leave the declared prefix or use unsafe characters', async () => {
-    await setup('demo:')
-    for (const url of ['file:///etc/passwd', 'demox:1', 'demo:x" --inspect', 'demo:a b'])
-      expect((await call('linker__go', url)).content, url).toMatch(/may not open/)
-    expect(opened).toEqual([])
-  })
-})
-
-describe('D1: plugin open: links (required boundary, fails today)', () => {
-  it.fails('refuses obsidian: in a manifest (it can write any note, skills included)', () => {
+describe('D1: plugin open: links', () => {
+  it('refuses obsidian: in a manifest (it can write any note, skills included)', () => {
     expect(validOpenPrefix('obsidian:')).toBe(false)
   })
 
-  it.fails('refuses other well-known code, automation and clone handlers', () => {
-    // Each can start tools, clone repositories, run automations or open
-    // http/file pages outside Custard's checks. Not exhaustive: that is the
-    // point of the finding.
+  it('refuses well-known code, automation and clone handlers', () => {
     for (const p of [
       'shortcuts:', // macOS Shortcuts: run-shortcut
       'x-github-client:', // GitHub Desktop: clone a repository
@@ -209,11 +176,48 @@ describe('D1: plugin open: links (required boundary, fails today)', () => {
       expect(validOpenPrefix(p), p).toBe(false)
   })
 
-  it.fails('a read tool (never shown on an approval card) cannot open links', async () => {
-    await setup('demo:')
-    const r = await call('linker__peek', 'demo:item/1')
+  it('accepts only https prefixes and vetted schemes', () => {
+    expect(validOpenPrefix('spotify:')).toBe(true)
+    expect(validOpenPrefix('https://open.spotify.com/')).toBe(true)
+    for (const p of [
+      'file:',
+      'http:',
+      'javascript:',
+      'ms-settings:',
+      'search-ms:',
+      'vscode:',
+      'cursor:',
+      'ssh:',
+      'demo:'
+    ])
+      expect(validOpenPrefix(p), p).toBe(false)
+  })
+
+  it('a write tool opens a link under a granted prefix, after its approval card', async () => {
+    await setup('spotify:')
+    expect((await call('linker__go', 'spotify:track:1')).content).toBe('opened')
+    expect(approvals).toBe(1)
+    expect(opened).toEqual(['spotify:track:1'])
+  })
+
+  it('still refuses links that leave the declared prefix or use unsafe characters', async () => {
+    await setup('spotify:')
+    for (const url of [
+      SKILL_WRITE,
+      'file:///etc/passwd',
+      'spotifyx:1',
+      'spotify:x" --inspect',
+      'spotify:a b'
+    ])
+      expect((await call('linker__go', url)).content, url).toMatch(/may not open/)
+    expect(opened).toEqual([])
+  })
+
+  it('a read tool (never shown on an approval card) cannot open links', async () => {
+    await setup('spotify:')
+    const r = await call('linker__peek', 'spotify:track:1')
     expect(approvals).toBe(0)
     expect(opened).toEqual([])
-    expect(r.content).toMatch(/may not open|approv/i)
+    expect(r.content).toMatch(/Only actions can open links/)
   })
 })
