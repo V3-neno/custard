@@ -137,6 +137,12 @@ async function launch() {
       CUSTARD_PLUGIN_DIR: OUT + '/plugin'
     }
   })
+  // The preview has dialogs disabled, so Electron answers a page's alert()
+  // itself. Without a listener Playwright also tries to dismiss it, finds no
+  // dialog and crashes the run; this listener just ignores that.
+  const quiet = (page) => page.on('dialog', (d) => d.dismiss().catch(() => {}))
+  app.windows().forEach(quiet)
+  app.on('window', quiet)
   await app.evaluate(
     ({ safeStorage, dialog }, { vault }) => {
       safeStorage.setUsePlainTextEncryption?.(true)
