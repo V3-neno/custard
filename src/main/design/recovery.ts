@@ -1,50 +1,36 @@
-import type { Job, RemoteStatus } from '../../shared/design'
-import type { JobTracker } from './jobs'
+import type { MediaFile } from '../../shared/design'
 
-// Startup reconciliation (stabilization 2.1). Runs once, after providers are
-// registered, in this order:
+// Local-only restart recovery (stabilization contract S2).
 //
-// 1. Finish interrupted chat deletions. A chat is deleted before its Design
-//    outputs and job records (index.ts, conversations:delete); if Custard
-//    stopped in between, the jobs of a chat that no longer exists are
-//    forgotten now, so nothing below can bring them back.
-// 2. Link results Custard itself stored before it stopped
-//    (JobTracker.reconcileLocal with a local-file lookup). No provider
-//    network request, no plugin tool, no resubmission.
-// 3. Tidy stored results Design no longer needs (images/index.ts), which
-//    keeps anything a surviving job may still need, linked or not.
+// On restart Custard may reconcile its own durable records: a built-in
+// provider that saved a result locally before the job recorded it (a crash
+// in between) can say so, and the job is linked to it. This interface is for
+// Custard's own storage only. It is never offered to plugins, makes no
+// network request, invokes no plugin tool and never resubmits anything.
+// Remote status checks stay in the user-started check and track flow.
 //
-// A chat that can't be read is treated as existing: it is never deleted
-// here by mistake.
+// `correlationId` is Custard's local job id (Job.id), recorded with the
+// result when it was saved. It is not a provider idempotency guarantee.
 
-export type ReconcileDeps = {
-  jobs: Pick<JobTracker, 'list' | 'reconcileLocal'>
-  // Custard's own stored result for a job, read from local files only.
-  localResult: (job: Job) => { remoteId: string; status: RemoteStatus } | null
-  chatExists: (conversationId: string) => boolean
-  // The full deletion of a chat's Design data (designChatDeleted).
-  forgetChat: (conversationId: string) => void
-  prune?: () => string[]
+export interface LocalResultIndex {
+  // The built-in provider whose local store this is.
+  readonly providerId: string
+  // A locally saved result for this job, if one exists and still validates
+  // (type and size checked as when it was saved).
+  find(correlationId: string): { remoteId: string } | null
+  // Its files, read from local storage only.
+  read(remoteId: string): MediaFile[] | null
 }
 
-export function reconcileDesign(d: ReconcileDeps): {
-  forgotten: string[]
-  recovered: Job[]
-  pruned: string[]
-} {
-  const forgotten: string[] = []
-  for (const chat of new Set(d.jobs.list().map((j) => j.requestedBy.conversationId))) {
-    let exists = true
-    try {
-      exists = d.chatExists(chat)
-    } catch {
-      exists = true
-    }
-    if (exists) continue
-    d.forgetChat(chat)
-    forgotten.push(chat)
-  }
-  const recovered = d.jobs.reconcileLocal(d.localResult)
-  const pruned = d.prune?.() ?? []
-  return { forgotten, recovered, pruned }
+const indexes = new Map<string, LocalResultIndex>()
+
+// Built-in code only (registered at startup by the provider's own module).
+export function registerLocalResults(index: LocalResultIndex): void {
+  indexes.set(index.providerId, index)
 }
+
+export const localResults = (providerId: string): LocalResultIndex | null =>
+  indexes.get(providerId) ?? null
+
+// For tests.
+export const clearLocalResults = (): void => indexes.clear()

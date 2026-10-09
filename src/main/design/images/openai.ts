@@ -161,6 +161,9 @@ export class OpenAIImages implements MediaProvider {
     request: MediaRequest,
     options: {
       idempotencyKey: string
+      // Custard's job id (contract S2), recorded with the stored image.
+      // Always set by JobTracker; optional only for direct calls in tests.
+      correlationId?: string
       signal?: AbortSignal
       read: (ref: MediaReference) => Promise<Uint8Array>
     }
@@ -260,9 +263,9 @@ export class OpenAIImages implements MediaProvider {
         file,
         model.id,
         (this.deps.now ?? Date.now)(),
-        // Custard's job id, so a restart can link this image to its job
-        // locally (images/index.ts localImageResult).
-        options.idempotencyKey
+        // Custard's own job id (contract S2), so a restart can link this
+        // image to its job from local files (images/index.ts).
+        options.correlationId
       )
     } catch (err) {
       // Made and probably charged, but not saved: say so rather than fail

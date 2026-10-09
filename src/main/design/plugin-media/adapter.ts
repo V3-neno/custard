@@ -20,6 +20,12 @@ import {
   type BinaryTransport
 } from './results'
 
+// Custard refused before any plugin code ran (contract S1).
+const NOT_DISPATCHED = {
+  state: 'not-dispatched' as const,
+  repeat: { risk: 'safe' as const, basis: 'refused by Custard before the plugin ran' }
+}
+
 // Design's view of a plugin's `media` declaration: a MediaProvider whose
 // every step is one of the plugin's own declared tools, run by the plugin
 // host with its usual checks (enabled, same build, granted permissions,
@@ -170,7 +176,8 @@ export class PluginMediaProvider implements MediaProvider {
       throw new MediaError(
         'unconfigured',
         'Plugin media submissions are waiting on a decision about approval cards, so nothing was sent.',
-        false
+        false,
+        NOT_DISPATCHED
       )
     // References: read and hash-checked by Custard, sent as bytes.
     let total = 0
@@ -185,7 +192,8 @@ export class PluginMediaProvider implements MediaProvider {
         throw new MediaError(
           'rejected',
           `${ref.name} is too large to send to ${this.spec.name}.`,
-          false
+          false,
+          NOT_DISPATCHED
         )
       references.push({
         name: ref.name,
@@ -205,11 +213,15 @@ export class PluginMediaProvider implements MediaProvider {
       ...(request.format ? { format: request.format } : {})
     }
     const r = await this.call('submit', request.operation, input, o.signal, true)
-    if (r.outcome === 'not-run') throw new MediaError('unconfigured', short(r.content), false)
+    // TODO(Thread 1): confirm every 'not-run' here comes from a host check
+    // before plugin code ran, never from the plugin's own result.
+    if (r.outcome === 'not-run')
+      throw new MediaError('unconfigured', short(r.content), false, NOT_DISPATCHED)
     if (r.outcome === 'unknown' || r.interrupted)
       throw new MediaError('temporary', short(r.content) || 'The plugin was cut off.', 'unknown')
     if (r.isError) {
-      // Only the plugin can say its service never got the request.
+      // Only the plugin can say its service never got the request: a claim,
+      // never evidence (contract S1), so the outcome stays unknown.
       const sent = (r.data as { sent?: unknown } | undefined)?.sent === false ? false : 'unknown'
       throw new MediaError('rejected', short(r.content) || 'The plugin reported an error.', sent)
     }

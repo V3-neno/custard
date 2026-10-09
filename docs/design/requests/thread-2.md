@@ -2,21 +2,28 @@
 
 From `claude/stab-2-persistence` (stabilization 2.1–2.3).
 
-1. **Amendment 2: no shared interface change.** The earlier
-   `MediaProvider.recover?` hook is removed; `src/shared/design.ts` is
-   untouched on this branch. Recovery is local: `JobTracker.reconcileLocal(find)`
-   takes a local-file lookup (`images/index.ts localImageResult`), wired in
-   `design/index.ts` before any handler is registered.
-2. **`src/main/design/images/openai.ts`:** only the `results.put` call
-   changed (it passes the job id for local correlation). Nothing else.
-   **`src/main/design/jobs.ts` `put()` (integration-owned lines):** a job of a
-   chat deleted during this run is never saved again (`deletedChats`, filled
-   by `forgetChat`). Without it a submission or collection finishing after a
-   delete wrote the job back (tests 6 and 7 fail without it).
-3. **`src/main/design/images/index.ts` (owned).** `registerImages()` now
-   returns the `ResultStore` and no longer prunes; pruning moved to
-   `pruneImages()`, called from startup reconciliation in `design/index.ts`
-   (Thread 2's wiring section). The old import of `design()` from `..` is gone.
+1. **Contracts S1–S3 (ce41cd5) merged; no shared file changed.**
+   `src/shared/design.ts` and `src/main/design/recovery.ts` are as you
+   published them. The withdrawn `MediaProvider.recover` hook is gone.
+2. **Integration-owned lines I touched, please review:**
+   - `jobs.ts`: `linkLocal()` (called by the constructor's restore) and, in
+     `put()`, a job of a chat deleted during this run is never saved again
+     (`deletedChats`, filled by `forgetChat`). Without it a submission or a
+     check finishing after a delete wrote the job back (tests 6 and 7 fail
+     without it).
+   - `tools.ts`: the version-settling block of `jobAction` moved, unchanged,
+     into exported `settleJobVersion`, so startup reconciliation saves
+     recovered results through the same path.
+   - `design/index.ts`: startup wiring now calls `reconcile.ts` (my new file;
+     your `recovery.ts` stays the registry), and `designChatDeleted` removes
+     the chat's stored OpenAI images.
+   - `images/openai.ts`: `results.put` records `options.correlationId`;
+     the provider's own options type gains `correlationId?` (optional only so
+     Thread 3's direct test calls still compile).
+3. **`src/main/design/images/index.ts` (owned).** `registerImages()` also
+   registers the OpenAI `LocalResultIndex` and returns the `ResultStore`;
+   `pruneImages()` (with the 30-day window for unlinked results) and
+   `forgetImageJobs()` live there.
 4. **Not done, please apply: `src/main/memory/plugins.ts`
    `ensurePluginFolder`.** It still uses `mkdirSync(..., { recursive: true })`
    and `writeFileSync(overview, ..., { flag: 'wx' })`. Suggested change: use

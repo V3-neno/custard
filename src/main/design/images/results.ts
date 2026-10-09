@@ -33,10 +33,10 @@ import type { MediaFile } from '../../../shared/design'
 const REMOTE_ID = /^oai-img-[A-Za-z0-9_-]{1,64}$/
 const STAGING = /^\.staging-(oai-img-[A-Za-z0-9_-]{1,64})-[0-9a-f]{12}$/
 
-// `job` is Custard's own local job id (a correlation id, not an OpenAI
-// idempotency guarantee: OpenAI offers none here), so a stored image can be
-// matched to its job even when the job never recorded a remote id. Entries
-// written before it was added have none.
+// `job` is Custard's own local job id (the correlation id of contract S2,
+// not an OpenAI idempotency guarantee: OpenAI offers none here), so a stored
+// image can be matched to its job even when the job never recorded a remote
+// id. Entries written before it was added have none.
 export type StoredMeta = {
   model: string
   mime: string
@@ -125,29 +125,44 @@ export class ResultStore {
     }
   }
 
-  // After a restart: is a complete image stored for this id (and, when the
-  // entry records one, this job)? A complete staging folder left by a crash
-  // just before its rename is moved into place first. Reads and renames
-  // local files only; never contacts a provider.
-  recoverLocal(remoteId: string, job?: string): boolean {
-    this.dir(remoteId)
-    if (!this.has(remoteId)) {
-      for (const s of this.staging()) {
-        if (s.remoteId !== remoteId) continue
-        const from = join(this.root, s.name)
-        if (!existsSync(join(from, 'meta.json'))) continue
-        try {
-          renameSync(from, this.dir(remoteId))
-          syncDir(this.root)
-        } catch {
-          continue
-        }
-        break
+  // After a restart: the stored entry recorded for this job (its
+  // correlation id), or null. Complete staging folders left by a crash just
+  // before their rename are moved into place first. Reads and renames local
+  // files only; never contacts a provider.
+  findJob(correlationId: string): { remoteId: string; meta: StoredMeta; file: MediaFile } | null {
+    this.finishStaging()
+    for (const id of this.ids()) {
+      const r = this.get(id)
+      if (r && r.meta.job === correlationId) return { remoteId: id, ...r }
+    }
+    return null
+  }
+
+  // Moves each complete staging folder (meta.json present, so both files
+  // were synced) into place, unless its id is already stored.
+  private finishStaging(): void {
+    for (const st of this.staging()) {
+      const from = join(this.root, st.name)
+      if (!existsSync(join(from, 'meta.json')) || existsSync(this.dir(st.remoteId))) continue
+      try {
+        renameSync(from, this.dir(st.remoteId))
+        syncDir(this.root)
+      } catch {
+        // Left for prune.
       }
     }
-    const r = this.get(remoteId)
-    if (!r) return false
-    return !job || !r.meta.job || r.meta.job === job
+  }
+
+  // Stored entries with the job each records, for tidying.
+  entries(): { remoteId: string; job?: string; createdAt: number }[] {
+    return this.ids().flatMap((id) => {
+      try {
+        const meta = JSON.parse(readFileSync(join(this.dir(id), 'meta.json'), 'utf8')) as StoredMeta
+        return [{ remoteId: id, job: meta.job, createdAt: meta.createdAt }]
+      } catch {
+        return [{ remoteId: id, createdAt: 0 }]
+      }
+    })
   }
 
   remove(remoteId: string): void {

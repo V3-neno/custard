@@ -136,6 +136,9 @@ export type MediaReference = {
   mime: string
   bytes: number
   attachmentId: string
+  // The attachment's content hash, recorded when it was attached. Approval
+  // binds to it; a reference whose bytes no longer match is never sent.
+  sha256: string
 }
 
 export type MediaRequest = {
@@ -150,15 +153,52 @@ export type MediaRequest = {
 
 export type MediaFile = { name: string; mime: string; bytes: Uint8Array }
 
-// Errors a provider reports. `sent` says whether the request may have
-// reached the provider: true or unknown makes a failed submission's outcome
-// unknown, because it may still run (and be charged).
+// ---------------------------------------------------------------- dispatch evidence
+// (Stabilization contract S1, docs/design/stabilization-plan.md.)
+//
+// What is known about a submission, kept apart because each is a different
+// fact:
+//   not-dispatched  Custard itself stopped it before any provider or plugin
+//                   code ran (local validation, a refused approval, a host
+//                   check). Only trusted Custard code may say this; nothing a
+//                   plugin returns can produce it.
+//   rejected        A response from the provider establishes that the
+//                   requested operation failed. It was dispatched: whether it
+//                   was charged, or can be repeated without a duplicate, is
+//                   `repeat`, not this.
+//   unknown         It was or may have been dispatched and its outcome isn't
+//                   established. Never resent automatically.
+//   completed       An actual result exists.
+export type DispatchState = 'not-dispatched' | 'rejected' | 'unknown' | 'completed'
+
+// Whether sending the same request again could duplicate its effect or
+// charge. `safe` only for not-dispatched, or where the provider's own
+// documentation guarantees it (cite it in `basis`); otherwise `unknown`,
+// and a repeat warns.
+export type RepeatRisk = { risk: 'safe' | 'may-duplicate' | 'unknown'; basis?: string }
+
+export type DispatchEvidence = {
+  state: DispatchState
+  repeat: RepeatRisk
+  // What a plugin said about its own service (e.g. "not sent"), kept for the
+  // user to read. Never evidence: it changes neither state nor repeat.
+  providerClaim?: string
+}
+
+// Errors a provider reports. `dispatch` is the evidence above for this
+// failure; it replaces `sent`. `sent` is kept only until Threads 1 and 3
+// move every provider to `dispatch` (then it's removed): jobs.ts reads
+// `dispatch` when present and treats a missing one as unknown, except
+// `sent: false` from a built-in provider (see jobs.ts).
 export type MediaErrorKind = 'unsupported' | 'unconfigured' | 'rejected' | 'temporary'
 export class MediaError extends Error {
   constructor(
     readonly kind: MediaErrorKind,
     message: string,
-    readonly sent: boolean | 'unknown'
+    readonly sent: boolean | 'unknown',
+    readonly dispatch?: Omit<DispatchEvidence, 'state'> & {
+      state: Exclude<DispatchState, 'completed'>
+    }
   ) {
     super(message)
   }
@@ -194,14 +234,30 @@ export interface MediaProvider {
   submit(
     request: MediaRequest,
     options: {
+      // Offered to the provider only where its capability declares
+      // `idempotency` (provider-supported deduplication).
       idempotencyKey: string
+      // Custard's own stable local id for this job (= Job.id). Recorded by
+      // built-in providers with anything they save locally (contract S2).
+      // Not a provider guarantee of anything.
+      correlationId: string
+      // Host-issued, single-use authorization for this exact submission
+      // (contract S3). Opaque; only main/design/authorization.ts can check
+      // or consume it.
+      authorization: AuthorizationToken
       signal?: AbortSignal
+      // Reads a reference's bytes, checked against its recorded sha256.
       read: (ref: MediaReference) => Promise<Uint8Array>
     }
   ): Promise<{ remoteId: string; status: RemoteStatus }>
   status(remoteId: string, signal?: AbortSignal): Promise<RemoteStatus>
-  // Resolves 'cancelled' only when the provider confirms it.
-  cancel?(remoteId: string): Promise<'cancelled' | 'not-cancelled'>
+  // Resolves 'cancelled' only when the provider confirms it. Cancelling
+  // changes state at the provider, so it takes its own single-use
+  // authorization (contract S3), minted after the user's explicit intent.
+  cancel?(
+    remoteId: string,
+    authorization: AuthorizationToken
+  ): Promise<'cancelled' | 'not-cancelled'>
   result(remoteId: string, signal?: AbortSignal): Promise<MediaFile[]>
 }
 
@@ -209,6 +265,12 @@ export interface MediaProvider {
 
 export type JobState =
   'not-submitted' | 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
+
+// An opaque, unguessable, single-use authorization minted by the trusted
+// host after the user approved (main/design/authorization.ts). The binding
+// lives only in host memory: the token itself proves nothing, can't be
+// built from fields, and is never saved, so a restart can't dispatch.
+export type AuthorizationToken = { readonly __authorization: unique symbol } & string
 
 export type Job = {
   // Durable, made by Custard before anything is sent.
@@ -228,6 +290,8 @@ export type Job = {
   remoteId?: string
   progress?: number
   error?: string
+  // What is known about the submission (contract S1). Set by submit().
+  dispatch?: DispatchEvidence
   // What kind of error the provider reported, when it said so.
   errorKind?: MediaErrorKind
   // Custard is watching it now. Stopping that never cancels the job.
