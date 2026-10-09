@@ -24,8 +24,11 @@ Code: `src/main/plugins/manifest.ts` (validation), `src/main/plugins/host.ts`
    calls the **status** tool once. When it reports `completed`, the
    **result** tool is called and the files are checked and stored as a new
    version.
-6. Cancel calls the **cancel** tool, and the job is cancelled only when the
-   plugin confirms it.
+6. Cancel calls the **cancel** tool, a write, only on the user's explicit
+   go-ahead for that job: a confirmed "Cancel job" in the workspace, or its
+   own card when the model asks. The job is cancelled only when the plugin
+   confirms it. "Stop tracking" is local: it sends nothing, and the job keeps
+   running (and may be charged) at the provider.
 
 Every call goes through `PluginHost.invoke`: the plugin must be enabled, on
 the same build that declares this provider, with every permission granted,
@@ -41,15 +44,40 @@ automatic retries or follow-up submissions.
 ## Approval: one card
 
 Decided by Neno (2026-10-09): Design's card is the only card for a plugin
-submission. `SUBMIT_APPROVAL` in `plugin-media/index.ts` is `'design-card'`:
-the submit call runs with `preApproved` for that one call only. Design's card
-is asked every time, never "for this chat", and the plugin's "ask every time"
-setting can't remove it. Every other host check still runs. (`'pending'`,
-used before the decision, sent nothing; the adapter still supports it.)
+submission. `SUBMIT_APPROVAL` in `plugin-media/index.ts` is `'design-card'`.
+Design's card is asked every time, never "for this chat", and the plugin's
+"ask every time" setting can't remove it. Every other host check still runs.
+(`'pending'`, used before the decision, sent nothing; the adapter still
+supports it.)
 
-Cancel is the user's own request and can't start or charge for anything, so
-it runs without the plugin's card. Any other card the host would raise for
-these calls is refused, because the adapter has no way to show one.
+The card covers exactly one submission (`src/main/design/approval.ts`):
+
+- When the card is shown, Design records a `SubmissionApproval` on the job:
+  the provider's `Source` (for a plugin: plugin id, **build id** and provider
+  id), the operation, and a SHA-256 digest of what the card shows (prompt,
+  size, duration, format, and each file's name, type and SHA-256).
+- Before sending, the job tracker checks it against the job's request and
+  the provider as it is now. A changed argument or file, an updated or
+  rolled-back plugin, or a changed image model refuses the send, and the
+  job fails as not sent.
+- The adapter checks each file's bytes against the approved SHA-256.
+- The host (`invokeMedia`) gets a `MediaApproval` token, not a yes/no flag.
+  It recomputes the digest from the input it is about to hand the plugin
+  (hashing the file bytes it actually sends), checks the active build, the
+  provider, operation and role, and uses a submission's token **once**. A
+  replay is refused.
+- A job is sent at most once (`attemptedAt` is saved before sending), so an
+  approval can't be reused across restarts either.
+- `PluginHost.invoke` (the assistant's and widgets' route) refuses a media
+  tool by name, even with `preApproved`, so there's no second way in.
+- Status and result never take an approval: one passed with them is refused.
+
+Cancel changes the job at the provider, so it is a write: the manifest
+requires a `write` tool, and the adapter sends a `MediaApproval` (role
+`cancel`, bound to the job reference) only when the job tracker was called
+with the user's go-ahead. The submission card doesn't cover it. Any other
+card the host would raise for these calls is refused, because the adapter
+has no way to show one.
 
 ## What the tools get and return
 
@@ -73,16 +101,22 @@ plugin never gets a path. At most 8 MB in total, and no more than the
 capability's `maxBytes` each.
 
 It returns `data: { remoteId, status }` (`PluginMediaSubmitData`). On a
-failure it returns an error. It may add `data: { sent: false }` only when its
-service certainly never received the request. Without that, a failure counts
-as **outcome unknown**, because the request may still run and be charged.
+failure it returns an error. A failure after the plugin was called counts as
+**outcome unknown**, because the request may still run and be charged. It
+may add `data: { sent: false }` when its service never received the request;
+Custard shows that claim, but can't confirm it, so the job stays unknown and
+a repeat still warns about a second charge. Only a refusal Custard makes
+itself before the plugin runs (no approval, a changed request, a disabled
+plugin, a host check) counts as failed and not sent (`MediaError.confirmed`).
+Nothing is resubmitted on its own.
 
 Status, result and cancel tools receive `{ remoteId }`.
 
 - Status returns `data` as a `RemoteStatus`.
 - Result returns `data: { files }` (`PluginMediaResultData`).
 - Cancel returns `data: { state: 'cancelled' }` when the job is really
-  cancelled. Anything else counts as not cancelled.
+  cancelled. An error or any other answer counts as not cancelled; a call
+  that was cut off counts as unknown, and the user is told to check the job.
 
 ## Untrusted output
 
@@ -134,8 +168,10 @@ return a fresh link). Checks are capped per job (see `JOB_LIMITS`).
 `custard-media://`, which serves only recorded files. It shows the type,
 size and source plugin, plus a "Save a copy" button through `design.export`,
 which Workstream A provides. While the job runs it shows the last reported
-state and progress, with Check now, Cancel job and Stop tracking. It never
-checks on its own.
+state and progress, with Check now, Cancel job and Stop tracking. "Cancel
+job" takes a second click that says the provider must confirm and that
+charging depends on the provider. "Stop tracking" says the job keeps running
+and may be charged. It never checks on its own.
 
 Plugin-specific controls are limited to what the capability declares: a
 listed size, a duration within the declared range, and a listed format.
@@ -150,8 +186,10 @@ plugin can't add its own fields to the request.
   permission allows, including a paid one. Custard can't see the plugin's
   intent. That rests on the plugin's review at activation, not on the host.
 - **`sent: false`.** Only the plugin knows whether its service got the
-  request. A plugin that wrongly reports `sent: false` makes a failure look
-  safe to resend.
+  request, so Custard doesn't rely on it: such a failure stays unknown.
+- **Cancel and status semantics.** Custard can't confirm that a provider
+  stopped billing on cancel, or that a status or result call had no side
+  effect at the provider. Both rest on the plugin's code.
 
 ## Testing
 

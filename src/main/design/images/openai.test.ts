@@ -12,6 +12,7 @@ import {
 } from '../../../shared/design'
 import { discoverCapabilities } from '../capabilities'
 import { JobTracker } from '../jobs'
+import { approveSubmission } from '../approval'
 import { validateCapabilities } from '../media'
 import { ArtifactStore, JobStore } from '../store'
 import { jobAction, runDesignTool, type DesignService } from '../tools'
@@ -372,8 +373,10 @@ describe('OpenAI Images: outcomes', () => {
 
   it('through the job tracker: refused is failed, unknown is never resent', async () => {
     const store = new JobStore(join(root, 'jobs.json'))
+    // An HTTP 4xx stays unknown until Thread 3 establishes from OpenAI's own
+    // docs which rejections are never billed (MediaError `confirmed`).
     for (const [status, expected] of [
-      [400, 'failed'],
+      [400, 'unknown'],
       [503, 'unknown']
     ] as const) {
       const { p, fake } = provider({}, async () => {
@@ -383,6 +386,7 @@ describe('OpenAI Images: outcomes', () => {
       const job = t.create({
         providerId: OPENAI_IMAGES_ID,
         request: gen(),
+        approval: approveSubmission(p.info().source, gen(), 0),
         requestedBy: { conversationId: 'c', messageIndex: 0 },
         target: { artifactId: 'a', versionId: 'v' }
       })
@@ -556,6 +560,7 @@ describe('OpenAI Images: restart', () => {
     const job = before.jobs.create({
       providerId: OPENAI_IMAGES_ID,
       request: gen(),
+      approval: approveSubmission(p.info().source, gen(), 0),
       requestedBy: { conversationId: CHAT, messageIndex: 0 },
       target: { artifactId: artifact.id, versionId: version.id }
     })

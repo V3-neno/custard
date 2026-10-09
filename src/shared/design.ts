@@ -136,6 +136,9 @@ export type MediaReference = {
   mime: string
   bytes: number
   attachmentId: string
+  // The attachment's SHA-256 when the user approved it. The bytes sent must
+  // match it (see main/design/approval.ts).
+  sha256?: string
 }
 
 export type MediaRequest = {
@@ -152,13 +155,17 @@ export type MediaFile = { name: string; mime: string; bytes: Uint8Array }
 
 // Errors a provider reports. `sent` says whether the request may have
 // reached the provider: true or unknown makes a failed submission's outcome
-// unknown, because it may still run (and be charged).
+// unknown, because it may still run (and be charged). `sent: false` counts
+// only when `confirmed`: Custard itself knows the request never left (it
+// refused before calling the provider, or its own client got a definite
+// rejection). A plugin's own claim is never confirmed.
 export type MediaErrorKind = 'unsupported' | 'unconfigured' | 'rejected' | 'temporary'
 export class MediaError extends Error {
   constructor(
     readonly kind: MediaErrorKind,
     message: string,
-    readonly sent: boolean | 'unknown'
+    readonly sent: boolean | 'unknown',
+    readonly confirmed = false
   ) {
     super(message)
   }
@@ -197,15 +204,35 @@ export interface MediaProvider {
       idempotencyKey: string
       signal?: AbortSignal
       read: (ref: MediaReference) => Promise<Uint8Array>
+      // The job and the user's approval of exactly this request, checked
+      // by the job tracker before this is called.
+      jobId?: string
+      approval?: SubmissionApproval
     }
   ): Promise<{ remoteId: string; status: RemoteStatus }>
   status(remoteId: string, signal?: AbortSignal): Promise<RemoteStatus>
-  // Resolves 'cancelled' only when the provider confirms it.
-  cancel?(remoteId: string): Promise<'cancelled' | 'not-cancelled'>
+  // Cancelling changes the job at the provider, so it runs only on the
+  // user's explicit go-ahead for this job. Resolves 'cancelled' only when
+  // the provider confirms it, and 'unknown' when the request may have
+  // reached it but no answer came back.
+  cancel?(
+    remoteId: string,
+    approved: { jobId: string }
+  ): Promise<'cancelled' | 'not-cancelled' | 'unknown'>
   result(remoteId: string, signal?: AbortSignal): Promise<MediaFile[]>
 }
 
 // ---------------------------------------------------------------- jobs
+
+// The user's approval of one submission (Design's card): which provider,
+// down to the plugin build, and a digest of exactly what was shown. It is
+// used once: a job is sent at most once (see main/design/approval.ts).
+export type SubmissionApproval = {
+  source: Source
+  operation: MediaOperation
+  requestSha256: string
+  approvedAt: number
+}
 
 export type JobState =
   'not-submitted' | 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
@@ -223,6 +250,8 @@ export type Job = {
   // The output version the result goes into.
   target: { artifactId: string; versionId: string }
   state: JobState
+  // The approval this job is sent under. A job without one isn't sent.
+  approval?: SubmissionApproval
   // Set just before the request goes out, so a crash in between is known.
   attemptedAt?: number
   remoteId?: string

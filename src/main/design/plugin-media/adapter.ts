@@ -8,9 +8,17 @@ import {
   type PluginMediaJobInput,
   type PluginMediaSpec,
   type PluginMediaSubmitInput,
-  type RemoteStatus
+  type RemoteStatus,
+  type SubmissionApproval
 } from '../../../shared/design'
-import type { ApprovalRequest, MediaEntry, MediaRole, ToolOutcome } from '../../plugins/host'
+import type {
+  ApprovalRequest,
+  MediaApproval,
+  MediaEntry,
+  MediaRole,
+  ToolOutcome
+} from '../../plugins/host'
+import { digestOf, sha256 } from '../approval'
 import {
   checkType,
   decodeInline,
@@ -29,7 +37,8 @@ import {
 //           start (and charge for) work.
 //   status  the declared read tool. Never submits.
 //   result  the declared read tool. Never submits; files are checked here.
-//   cancel  the declared tool, only when the user asks to cancel.
+//   cancel  the declared write tool, only on the user's explicit go-ahead
+//           for that job. Cancelled only when the provider confirms.
 //
 // Everything a plugin returns is untrusted and checked before use.
 
@@ -40,7 +49,7 @@ export type PluginMediaDeps = {
     o: {
       signal: AbortSignal
       approve: (r: ApprovalRequest) => Promise<boolean>
-      preApproved?: boolean
+      approval?: MediaApproval
     }
   ) => Promise<ToolOutcome>
   hosts: (pluginId: string) => string[]
@@ -147,13 +156,17 @@ export class PluginMediaProvider implements MediaProvider {
     op: string,
     input: unknown,
     signal: AbortSignal | undefined,
-    preApproved = false
+    approval?: MediaApproval
   ): Promise<ToolOutcome> {
     return this.deps.invoke(
       { pluginId: this.entry.pluginId, providerId: this.spec.id, operation: op, role, input },
-      // Anything not pre-approved that the host would ask about is refused:
-      // Design has no second card to show here.
-      { signal: signal ?? new AbortController().signal, approve: denyApproval, preApproved }
+      // Anything without the user's approval that the host would ask about
+      // is refused: Design has no second card to show here.
+      {
+        signal: signal ?? new AbortController().signal,
+        approve: denyApproval,
+        ...(approval ? { approval } : {})
+      }
     )
   }
 
@@ -163,30 +176,56 @@ export class PluginMediaProvider implements MediaProvider {
       idempotencyKey: string
       signal?: AbortSignal
       read: (ref: MediaRequest['references'][number]) => Promise<Uint8Array>
+      jobId?: string
+      approval?: SubmissionApproval
     }
   ): Promise<{ remoteId: string; status: RemoteStatus }> {
+    // Every refusal before the plugin is called is Custard's own, so it is
+    // confirmed that nothing was sent.
+    const refuse = (kind: MediaError['kind'], text: string): MediaError =>
+      new MediaError(kind, text, false, true)
     const cap = this.cap(request.operation)
     if (this.deps.submitApproval() !== 'design-card')
-      throw new MediaError(
+      throw refuse(
         'unconfigured',
-        'Plugin media submissions are waiting on a decision about approval cards, so nothing was sent.',
-        false
+        'Plugin media submissions are waiting on a decision about approval cards, so nothing was sent.'
       )
-    // References: read and hash-checked by Custard, sent as bytes.
+    const a = o.approval
+    const src = a?.source
+    if (
+      !a ||
+      !o.jobId ||
+      src?.kind !== 'plugin' ||
+      src.pluginId !== this.entry.pluginId ||
+      src.providerId !== this.spec.id ||
+      a.operation !== request.operation
+    )
+      throw refuse(
+        'unconfigured',
+        "This request wasn't approved for this provider, so nothing was sent."
+      )
+    // References: read and checked by Custard against the fingerprint the
+    // user approved, sent as bytes.
     let total = 0
     const references: { name: string; mime: string; base64: string }[] = []
     for (const ref of request.references) {
-      const bytes = await o.read(ref)
+      let bytes: Uint8Array
+      try {
+        bytes = await o.read(ref)
+      } catch (err) {
+        throw refuse(
+          'rejected',
+          `${err instanceof Error ? err.message : String(err)} Nothing was sent.`
+        )
+      }
+      if (!ref.sha256 || sha256(bytes) !== ref.sha256)
+        throw refuse('rejected', `${ref.name} changed after you approved it, so nothing was sent.`)
       total += bytes.length
       if (
         total > MEDIA_INPUT_LIMITS.referenceBytes ||
         bytes.length > (cap.references?.maxBytes ?? 0)
       )
-        throw new MediaError(
-          'rejected',
-          `${ref.name} is too large to send to ${this.spec.name}.`,
-          false
-        )
+        throw refuse('rejected', `${ref.name} is too large to send to ${this.spec.name}.`)
       references.push({
         name: ref.name,
         mime: ref.mime,
@@ -204,14 +243,34 @@ export class PluginMediaProvider implements MediaProvider {
         : {}),
       ...(request.format ? { format: request.format } : {})
     }
-    const r = await this.call('submit', request.operation, input, o.signal, true)
-    if (r.outcome === 'not-run') throw new MediaError('unconfigured', short(r.content), false)
+    // The host checks this against the active build and the input it sends,
+    // and uses it once (plugins/host.ts invokeMedia).
+    const r = await this.call('submit', request.operation, input, o.signal, {
+      jobId: o.jobId,
+      pluginId: this.entry.pluginId,
+      buildId: src.buildId,
+      providerId: this.spec.id,
+      operation: request.operation,
+      role: 'submit',
+      inputSha256: a.requestSha256
+    })
+    // The host refused before the plugin was called: nothing was sent.
+    if (r.outcome === 'not-run') throw refuse('unconfigured', short(r.content))
     if (r.outcome === 'unknown' || r.interrupted)
       throw new MediaError('temporary', short(r.content) || 'The plugin was cut off.', 'unknown')
     if (r.isError) {
-      // Only the plugin can say its service never got the request.
-      const sent = (r.data as { sent?: unknown } | undefined)?.sent === false ? false : 'unknown'
-      throw new MediaError('rejected', short(r.content) || 'The plugin reported an error.', sent)
+      // Once the plugin ran, its own "not sent" can't be confirmed by
+      // Custard: the outcome stays unknown, so a repeat warns about a second
+      // charge and nothing is sent again on its own.
+      const claimed = (r.data as { sent?: unknown } | undefined)?.sent === false
+      const text = short(r.content) || 'The plugin reported an error.'
+      throw new MediaError(
+        'rejected',
+        claimed
+          ? `${text} (The plugin says it wasn't sent, but Custard can't confirm that.)`
+          : text,
+        'unknown'
+      )
     }
     const d = r.data as Record<string, unknown> | undefined
     const status = readStatus(d?.status)
@@ -236,17 +295,26 @@ export class PluginMediaProvider implements MediaProvider {
     return s
   }
 
-  async cancel(remoteId: string): Promise<'cancelled' | 'not-cancelled'> {
+  // A write at the provider, run only with the user's go-ahead for this job
+  // (Design's job tracker passes it; see tools.ts jobAction).
+  async cancel(
+    remoteId: string,
+    approved: { jobId: string }
+  ): Promise<'cancelled' | 'not-cancelled' | 'unknown'> {
     const { op, id } = unwrapId(remoteId)
     if (!this.cap(op).tools.cancel) return 'not-cancelled'
-    // The user asked for this cancel; it can't start or charge for anything.
-    const r = await this.call(
-      'cancel',
-      op,
-      { remoteId: id } satisfies PluginMediaJobInput,
-      undefined,
-      true
-    )
+    const input = { remoteId: id } satisfies PluginMediaJobInput
+    const r = await this.call('cancel', op, input, undefined, {
+      jobId: approved.jobId,
+      pluginId: this.entry.pluginId,
+      buildId: this.entry.buildId,
+      providerId: this.spec.id,
+      operation: op,
+      role: 'cancel',
+      inputSha256: digestOf(input)
+    })
+    if (r.outcome === 'not-run') return 'not-cancelled'
+    if (r.outcome === 'unknown' || r.interrupted) return 'unknown'
     if (r.isError || r.outcome !== 'completed') return 'not-cancelled'
     return readStatus(r.data)?.state === 'cancelled' ? 'cancelled' : 'not-cancelled'
   }

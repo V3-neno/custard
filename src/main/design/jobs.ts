@@ -10,6 +10,7 @@ import {
   type RemoteStatus
 } from '../../shared/design'
 import { checkRequest } from './media'
+import { approvalMismatch } from './approval'
 
 // Generation jobs: one per user request, tracked only while Custard is open
 // and only when asked. Nothing here runs on a timer, schedules anything,
@@ -122,6 +123,9 @@ export class JobTracker {
     request: MediaRequest
     requestedBy: Job['requestedBy']
     target: Job['target']
+    // The user's approval of this request (Design's card). Without it the
+    // job is never sent.
+    approval?: Job['approval']
   }): Job {
     const provider = this.deps.provider(a.providerId)
     if (!provider) throw new JobError("That provider isn't available.")
@@ -138,6 +142,7 @@ export class JobTracker {
       request: a.request,
       requestedBy: a.requestedBy,
       target: a.target,
+      ...(a.approval ? { approval: a.approval } : {}),
       state: 'not-submitted',
       tracking: false,
       checks: 0,
@@ -152,6 +157,15 @@ export class JobTracker {
     const { job, provider } = this.need(id)
     if (job.state !== 'not-submitted' || job.attemptedAt)
       throw new JobError('This job was already sent.')
+    // Sent only under the user's approval of exactly this request and this
+    // provider (down to the plugin build). Refused here, nothing has left.
+    const mismatch = approvalMismatch(job.approval, job.request, provider.info().source)
+    if (mismatch) {
+      job.state = 'failed'
+      job.errorKind = 'rejected'
+      job.error = mismatch
+      return this.put(job)
+    }
     job.attemptedAt = this.now()
     this.put(job)
     try {
@@ -159,6 +173,8 @@ export class JobTracker {
       const r = await provider.submit(job.request, {
         idempotencyKey: job.idempotencyKey,
         signal,
+        jobId: job.id,
+        approval: job.approval,
         read: (ref) => {
           if (!read || !job.request.references.some((x) => x.attachmentId === ref.attachmentId))
             return Promise.reject(new Error('That file is not part of this request.'))
@@ -169,7 +185,9 @@ export class JobTracker {
       job.tracking = true
       this.apply(job, r.status)
     } catch (err) {
-      const definitelyNotSent = err instanceof MediaError && err.sent === false
+      // Failed only when Custard itself knows nothing left; a provider's or
+      // plugin's own "not sent" isn't enough (see MediaError).
+      const definitelyNotSent = err instanceof MediaError && err.sent === false && err.confirmed
       job.state = definitelyNotSent ? 'failed' : 'unknown'
       if (err instanceof MediaError) job.errorKind = err.kind
       job.error = definitelyNotSent
@@ -264,7 +282,9 @@ export class JobTracker {
     return { job: this.put(job), files }
   }
 
-  // Asks the provider to cancel. Cancelled only when it confirms.
+  // Asks the provider to cancel: a change at the provider, so only called
+  // on the user's explicit go-ahead (see tools.ts jobAction). Cancelled only
+  // when the provider confirms it.
   async cancel(id: string): Promise<Job> {
     const { job, provider, cap } = this.need(id)
     if (!job.remoteId || TERMINAL.has(job.state)) throw new JobError('There is nothing to cancel.')
@@ -272,11 +292,17 @@ export class JobTracker {
       throw new JobError(
         "This provider can't cancel a job. You can stop tracking it, but it will still run."
       )
-    const r = await provider.cancel(job.remoteId)
+    const r = await provider.cancel(job.remoteId, { jobId: job.id })
     if (r === 'cancelled') {
       job.state = 'cancelled'
       job.tracking = false
-    } else job.error = 'The provider did not confirm the cancellation.'
+      job.error = undefined
+    } else if (r === 'unknown')
+      job.error =
+        "It's not known whether the provider got the cancellation. Check the job to see its state; it may still run and be charged."
+    else
+      job.error =
+        'The provider did not confirm the cancellation. The job may still run and be charged.'
     return this.put(job)
   }
 
@@ -304,6 +330,9 @@ export class JobTracker {
       acknowledgeDuplicateRisk: boolean
       requestedBy: Job['requestedBy']
       target: Job['target']
+      // A new approval of this request: an earlier job's approval covered
+      // that job's one submission only.
+      approval: Job['approval']
     }
   ): Job {
     const { job, cap } = this.need(id)
@@ -319,7 +348,8 @@ export class JobTracker {
       providerId: job.providerId,
       request: job.request,
       requestedBy: a.requestedBy,
-      target: a.target
+      target: a.target,
+      approval: a.approval
     })
     // The provider deduplicates by key, so the same key makes it the same job.
     return dedupes ? this.put({ ...fresh, idempotencyKey: job.idempotencyKey }) : fresh

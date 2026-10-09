@@ -445,9 +445,15 @@ function checkMedia(
           errors.push(`${cat}: tools.${role}: "${String(name)}" is not one of this plugin's tools`)
           return null
         }
+        const why: Record<string, string> = {
+          submit: 'it starts work that may be charged',
+          cancel: 'it changes the job at the provider',
+          status: 'it must never start new work',
+          result: 'it must never start new work'
+        }
         if (!effects.includes(spec.effect))
           errors.push(
-            `${cat}: tools.${role}: ${spec.name} must be a ${effects.join(' or ')} tool${role === 'submit' ? ' (it starts work that may be charged)' : ' (it must never start new work)'}`
+            `${cat}: tools.${role}: ${spec.name} must be a ${effects.join(' or ')} tool (${why[role]})`
           )
         if (widgetTools.has(spec.name))
           errors.push(`${cat}: tools.${role}: ${spec.name} can't also be a widget's tool`)
@@ -458,7 +464,7 @@ function checkMedia(
       const submit = tool('submit', ['write'])
       const status = tool('status', ['read'])
       const result = tool('result', ['read'])
-      const cancel = t.cancel === undefined ? null : tool('cancel', ['read', 'write'])
+      const cancel = t.cancel === undefined ? null : tool('cancel', ['write'])
       if (submit) {
         const has = props(submit)
         const needed = [

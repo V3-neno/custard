@@ -77,7 +77,8 @@ export function slowVideo(o: SlowVideoOptions = {}): MediaProvider & {
     info: () => info,
     async submit(request, { idempotencyKey }) {
       calls.submit.push({ request, key: idempotencyKey })
-      if (o.submit === 'rejected') throw new MediaError('rejected', 'Prompt rejected.', false)
+      // Refused by the provider's own client before anything left: confirmed.
+      if (o.submit === 'rejected') throw new MediaError('rejected', 'Prompt rejected.', false, true)
       if (o.submit === 'lost') throw new MediaError('temporary', 'Connection reset.', 'unknown')
       if (o.idempotency && byKey.has(idempotencyKey))
         return { remoteId: byKey.get(idempotencyKey)!, status: { state: 'pending' } }

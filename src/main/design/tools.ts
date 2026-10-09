@@ -19,6 +19,7 @@ import { discoverCapabilities, type Failure } from './capabilities'
 import { checkRequest } from './media'
 import { createArtifact, settleVersion, startVersion, VersionError } from './versions'
 import { JobError, type JobTracker } from './jobs'
+import { approveSubmission } from './approval'
 import type { ArtifactStore } from './store'
 
 // Design mode's tools. Only Design is offered them (modes/policy.ts), and
@@ -136,7 +137,7 @@ export const designToolSchemas: BetaTool[] = [
   {
     name: 'design_jobs',
     description:
-      "Checks a generation job once, cancels it (only if the provider can), or stops tracking it (it keeps running at the provider). Only when the user asks or right after submitting; don't loop.",
+      "Checks a generation job once, asks the provider to cancel it (only if the provider can, and only after the user allows it on a card), or stops tracking it (local only: it keeps running, and may be charged, at the provider). Only when the user asks or right after submitting; don't loop.",
     input_schema: {
       type: 'object',
       properties: {
@@ -247,6 +248,14 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
     throw err
   }
 
+  // What the card shows, bound to this provider (and plugin build): a change
+  // to any of it before sending refuses the send (see approval.ts).
+  let approval: Job['approval']
+  try {
+    approval = approveSubmission(info.source, request, Date.now())
+  } catch (err) {
+    return notRun(err instanceof Error ? err.message : String(err))
+  }
   const allowed = await ctx.approve(
     `${info.name}: ${NAMES[op]}`,
     [
@@ -279,7 +288,8 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
       providerId: info.id,
       request,
       requestedBy: { conversationId: ctx.conversationId, messageIndex: ctx.messageIndex },
-      target: { artifactId: artifact.id, versionId }
+      target: { artifactId: artifact.id, versionId },
+      approval
     })
   } catch (err) {
     artifact = settleVersion(artifact, versionId, { status: 'failed', error: String(err) })
@@ -307,7 +317,9 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
     })
     s.artifacts.save(artifact)
     s.emit({ type: 'artifact', conversationId: ctx.conversationId, artifact })
-    return { content: `${info.name} refused it: ${job.error}`, isError: true, outcome: 'failed' }
+    return job.attemptedAt
+      ? { content: `${info.name} refused it: ${job.error}`, isError: true, outcome: 'failed' }
+      : { content: job.error ?? 'Nothing was sent.', isError: true, outcome: 'not-run' }
   }
   // Finished at submission (a synchronous provider): save the files now.
   if (job.state === 'completed') {
@@ -346,7 +358,10 @@ export async function jobAction(
   conversationId: string,
   action: 'check' | 'cancel' | 'stop',
   jobId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // Cancel only: the user's explicit go-ahead for cancelling this job (the
+  // workspace's confirmed "Cancel job", or a card for the model's request).
+  cancelApproved = false
 ): Promise<{ job: Job; text: string }> {
   const job = s.jobs.get(jobId)
   if (!job || job.requestedBy.conversationId !== conversationId)
@@ -354,8 +369,11 @@ export async function jobAction(
   let next: Job
   let files: Awaited<ReturnType<JobTracker['check']>>['files']
   if (action === 'stop') next = s.jobs.stopTracking(jobId)
-  else if (action === 'cancel') next = await s.jobs.cancel(jobId)
-  else {
+  else if (action === 'cancel') {
+    if (!cancelApproved)
+      throw new JobError("Cancelling a job needs the user's go-ahead, so nothing was done.")
+    next = await s.jobs.cancel(jobId)
+  } else {
     // A completed job whose version is still waiting for its files.
     const waiting =
       job.state === 'completed' &&
@@ -390,7 +408,7 @@ export async function jobAction(
   s.emit({ type: 'job', conversationId, job: next })
   const text =
     action === 'stop'
-      ? `Stopped tracking job ${next.id}. It keeps running at the provider.`
+      ? `Stopped tracking job ${next.id}. Custard won't check it, but it keeps running (and may be charged) at the provider.`
       : files?.length
         ? `${describeJob(next)} The result is saved as a new version.`
         : describeJob(next)
@@ -413,7 +431,34 @@ async function jobs(s: DesignService, input: unknown, ctx: DesignToolContext): P
   if (i.action !== 'check' && i.action !== 'cancel' && i.action !== 'stop')
     return notRun('Unknown action.')
   try {
-    const r = await jobAction(s, ctx.conversationId, i.action, String(i.job), ctx.signal)
+    let approved = false
+    if (i.action === 'cancel') {
+      // Cancelling changes the job at the provider: its own card, every time.
+      const job = s.jobs.get(String(i.job))
+      if (!job || job.requestedBy.conversationId !== ctx.conversationId)
+        return notRun('There is no such job in this chat.')
+      const name = s
+        .providers()
+        .find((p) => p.info().id === job.providerId)
+        ?.info().name
+      approved = await ctx.approve(
+        `${name ?? 'Provider'}: Cancel a job`,
+        [
+          `Provider: ${name ?? job.providerId}`,
+          `Job: ${job.id} (${job.state})`,
+          'Asks the provider to cancel it. It counts as cancelled only when the provider confirms. Whether a cancelled job is still charged depends on the provider.',
+          '',
+          job.request.prompt
+        ].join('\n')
+      )
+      if (!approved)
+        return notRun(
+          ctx.signal.aborted
+            ? 'Stopped before it ran, so nothing was done.'
+            : 'The user declined cancelling this job, so nothing was done.'
+        )
+    }
+    const r = await jobAction(s, ctx.conversationId, i.action, String(i.job), ctx.signal, approved)
     return { content: r.text, isError: false, outcome: 'completed' }
   } catch (err) {
     if (err instanceof JobError) return notRun(err.message)

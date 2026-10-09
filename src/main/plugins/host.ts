@@ -9,7 +9,8 @@ import {
   type PluginStatus,
   type TestReport
 } from '../../shared/plugins'
-import type { PluginMediaSpec } from '../../shared/design'
+import type { PluginMediaSpec, PluginMediaSubmitInput } from '../../shared/design'
+import { approvalDigest, sha256, type ApprovedContent, digestOf } from '../design/approval'
 import { formatLabel } from '../../shared/vault'
 import { WIDGET_LIMITS, type WidgetSpec } from '../../shared/widgets'
 import { resolveInside } from '../workspace/paths'
@@ -131,6 +132,23 @@ export const mediaTools = (m: PluginManifest): Set<string> =>
 
 export type MediaRole = 'submit' | 'status' | 'result' | 'cancel'
 
+// The user's go-ahead for one media write (a submission or a cancel), bound
+// to the job, the plugin build, the provider, the operation and a digest of
+// what was approved. invokeMedia checks it against the active build and the
+// input it is about to send, and a submission's approval is used once.
+// Status and result never take one. See main/design/approval.ts.
+export type MediaApproval = {
+  jobId: string
+  pluginId: string
+  buildId: string
+  providerId: string
+  operation: string
+  role: 'submit' | 'cancel'
+  // submit: the approval digest (approvedContent) of the request.
+  // cancel: digestOf({ remoteId }).
+  inputSha256: string
+}
+
 export type MediaEntry = {
   pluginId: string
   pluginName: string
@@ -140,6 +158,29 @@ export type MediaEntry = {
   // set and, with an account, signed in.
   ready: boolean
   needs?: string
+}
+
+// What a media submission's input amounts to, in the terms the user
+// approved: the files by the SHA-256 of the bytes actually being sent.
+function submittedContent(
+  a: { pluginId: string; providerId: string; operation: string; input: unknown },
+  buildId: string
+): ApprovedContent {
+  const i = (a.input ?? {}) as Partial<PluginMediaSubmitInput>
+  if (typeof i.prompt !== 'string' || i.operation !== a.operation) throw new Error('mismatch')
+  return {
+    source: { kind: 'plugin', pluginId: a.pluginId, buildId, providerId: a.providerId },
+    operation: i.operation,
+    prompt: i.prompt,
+    references: (i.references ?? []).map((r) => ({
+      name: r.name,
+      mime: r.mime,
+      sha256: sha256(Buffer.from(r.base64, 'base64'))
+    })),
+    ...(i.size ? { size: { width: i.size.width, height: i.size.height } } : {}),
+    ...(i.durationSeconds !== undefined ? { durationSeconds: i.durationSeconds } : {}),
+    ...(i.format !== undefined ? { format: i.format } : {})
+  }
 }
 
 // A tool's `data` for widgets: plain JSON, bounded, and dropped if it holds a
@@ -159,6 +200,8 @@ function widgetData(data: unknown, secrets: string[], limit = WIDGET_LIMITS.data
 
 export class PluginHost {
   private runtimes = new Map<string, { handle: RuntimeHandle; buildId: string }>()
+  // Media submissions already sent under their approval, by plugin and job.
+  private usedApprovals = new Set<string>()
   private starting = new Map<string, Promise<RuntimeHandle>>()
   private calls = new Map<
     string,
@@ -883,8 +926,9 @@ export class PluginHost {
   // Runs one of a media provider's declared tools for Design, through the
   // same checks as any tool call (invoke). The tool must be the one the
   // active build declares for this provider, operation and role, so Design
-  // can't reach any other tool this way. `preApproved` is Design's own
-  // approval of this exact call (see docs/design/MEDIA-PLUGINS.md).
+  // can't reach any other tool this way. `approval` is the user's go-ahead
+  // for this exact write (see MediaApproval and docs/design/MEDIA-PLUGINS.md);
+  // without it a write asks through `approve`, which Design refuses.
   async invokeMedia(
     a: {
       pluginId: string
@@ -896,7 +940,7 @@ export class PluginHost {
     o: {
       signal: AbortSignal
       approve: (r: ApprovalRequest) => Promise<boolean>
-      preApproved?: boolean
+      approval?: MediaApproval
     }
   ): Promise<ToolOutcome> {
     const st = this.d.store.state(a.pluginId)
@@ -914,7 +958,52 @@ export class PluginHost {
     const snapshot: ToolSnapshot = new Map([
       [name, { pluginId: a.pluginId, buildId: st.active.buildId }]
     ])
-    return this.invoke(name, a.input, { ...o, snapshot, dataLimit: MEDIA_DATA_BYTES })
+    let preApproved = false
+    if (o.approval) {
+      const refused = this.checkMediaApproval(a, o.approval, st.active.buildId)
+      if (refused) return notRun(refused)
+      if (a.role === 'submit') this.usedApprovals.add(`${a.pluginId}:${o.approval.jobId}`)
+      preApproved = true
+    }
+    return this.run(
+      name,
+      a.input,
+      { signal: o.signal, approve: o.approve, preApproved, snapshot, dataLimit: MEDIA_DATA_BYTES },
+      true
+    )
+  }
+
+  // Why an approval doesn't cover this media call, or null when it does.
+  private checkMediaApproval(
+    a: { pluginId: string; providerId: string; operation: string; role: MediaRole; input: unknown },
+    t: MediaApproval,
+    buildId: string
+  ): string | null {
+    const nothing = 'so nothing was sent.'
+    if (a.role !== 'submit' && a.role !== 'cancel')
+      return `A status or result check can't use an approval, ${nothing}`
+    if (
+      t.role !== a.role ||
+      t.pluginId !== a.pluginId ||
+      t.providerId !== a.providerId ||
+      t.operation !== a.operation
+    )
+      return `That approval was for something else, ${nothing}`
+    if (t.buildId !== buildId)
+      return `The plugin was updated or rolled back after you approved this, ${nothing} Ask again to approve the current version.`
+    if (a.role === 'submit' && this.usedApprovals.has(`${a.pluginId}:${t.jobId}`))
+      return `That approval was already used, ${nothing}`
+    let digest: string
+    try {
+      digest =
+        a.role === 'cancel'
+          ? digestOf({ remoteId: (a.input as { remoteId?: unknown } | null)?.remoteId })
+          : approvalDigest(submittedContent(a, buildId))
+    } catch {
+      return `The request can't be matched to what you approved, ${nothing}`
+    }
+    if (digest !== t.inputSha256) return `The request changed after you approved it, ${nothing}`
+    return null
   }
 
   widgetCode(id: string, buildId: string, widgetId: string): string | null {
@@ -981,6 +1070,9 @@ export class PluginHost {
     return values
   }
 
+  // A tool call from the assistant or a widget. A media provider's tools
+  // aren't reachable this way, whatever the snapshot says: only Design's job
+  // flow runs them, through invokeMedia.
   async invoke(
     name: string,
     input: unknown,
@@ -991,9 +1083,23 @@ export class PluginHost {
       // The user already approved this exact call (a repeat of an action
       // whose outcome was unknown), so don't ask again.
       preApproved?: boolean
+    }
+  ): Promise<ToolOutcome> {
+    return this.run(name, input, o, false)
+  }
+
+  private async run(
+    name: string,
+    input: unknown,
+    o: {
+      snapshot: ToolSnapshot
+      signal: AbortSignal
+      approve: (r: ApprovalRequest) => Promise<boolean>
+      preApproved?: boolean
       // Media calls only (invokeMedia): a larger bound on `data`.
       dataLimit?: number
-    }
+    },
+    media: boolean
   ): Promise<ToolOutcome> {
     const offered = o.snapshot.get(name)
     const split = splitToolName(name)
@@ -1018,6 +1124,8 @@ export class PluginHost {
     if (typeof c === 'string') return notRun(c)
     const tool = c.manifest.tools.find((t) => t.name === split.tool)
     if (!tool) return notRun('This plugin has no such tool.')
+    if (!media && mediaTools(c.manifest).has(tool.name))
+      return notRun("This tool is only run by Design's media jobs, so nothing was done.")
     const errors = validate(tool.inputSchema, input ?? {})
     if (errors.length) return notRun(`Invalid input: ${errors.slice(0, 5).join('; ')}`)
 

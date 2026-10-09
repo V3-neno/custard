@@ -127,7 +127,9 @@ export function registerDesignHandlers(): void {
     if (action !== 'check' && action !== 'cancel' && action !== 'stop')
       throw new Error('Unknown action.')
     try {
-      return await jobAction(design(), chat, action, id)
+      // The workspace's "Cancel job" is confirmed in the UI before it gets
+      // here: that click is the user's explicit go-ahead.
+      return await jobAction(design(), chat, action, id, undefined, action === 'cancel')
     } catch (err) {
       if (err instanceof JobError) return { error: err.message }
       throw err

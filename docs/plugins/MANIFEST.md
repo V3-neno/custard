@@ -124,7 +124,7 @@ Unknown fields are errors, so a typo can't silently drop a restriction.
 
 - At most 4 providers. `id` is lowercase letters, digits or hyphens; `name` is 1 to 60 characters.
 - Each capability is checked by Design's rules (operations, output types, references, sizes, durations, pricing with its source); see [docs/design/CONTRACTS.md](../design/CONTRACTS.md).
-- `tools.submit` must be a `write` tool. `tools.status` and `tools.result` must be `read` tools. `tools.cancel` is a read or write tool, required exactly when `cancel` is true.
+- `tools.submit` must be a `write` tool. `tools.status` and `tools.result` must be `read` tools. `tools.cancel` must be a `write` tool (cancelling changes the job at the provider), required exactly when `cancel` is true. Custard calls it only on the user's explicit go-ahead for that job.
 - The submit tool's `inputSchema` must declare `operation`, `prompt` and `idempotencyKey`, plus `references`, `size`, `durationSeconds` and `format` when the capability takes them (`format` only when it lists more than one). Status, result and cancel tools must require `remoteId`.
 - None of these tools may also be a widget's tool.
 - Each provider needs its own permission, `media:<id>`.

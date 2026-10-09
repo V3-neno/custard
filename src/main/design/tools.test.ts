@@ -221,7 +221,7 @@ describe('design tools', () => {
       submit: async (r, o) => {
         const kind = fail.shift()
         if (kind)
-          throw new MediaError(kind, kind === 'rejected' ? 'Blocked prompt.' : 'Busy.', false)
+          throw new MediaError(kind, kind === 'rejected' ? 'Blocked prompt.' : 'Busy.', false, true)
         return base.submit(r, o)
       }
     }
@@ -257,7 +257,7 @@ describe('design tools', () => {
       ...base,
       info: base.info,
       submit: async () => {
-        throw new MediaError('unconfigured', 'Bad key.', false)
+        throw new MediaError('unconfigured', 'Bad key.', false, true)
       }
     }
     const s = service(p)

@@ -99,7 +99,14 @@ function designReferences(c: Conversation, ids: string[]): MediaReference[] {
     if (!a) throw new Error(`There is no attached file ${id} in this chat, so nothing was sent.`)
     if (a.missing) throw new Error(`${a.name} is no longer available, so nothing was sent.`)
     if (a.kind !== 'image') throw new Error(`${a.name} isn't an image, so it can't be a reference.`)
-    return { kind: 'image', name: a.name, mime: a.mime, bytes: a.bytes, attachmentId: a.id }
+    return {
+      kind: 'image',
+      name: a.name,
+      mime: a.mime,
+      bytes: a.bytes,
+      attachmentId: a.id,
+      sha256: a.sha256
+    }
   })
 }
 
@@ -133,6 +140,11 @@ function widgetTools(keys: string[]): BetaTool[] {
 
 // design_media can start paid work at a provider.
 const CORE_WRITES = /^(vault_create_note|vault_append|fs_write|fs_delete|fs_rename|design_media)$/
+// Cancelling a generation job changes it at the provider, so it is an action
+// like any other write; checking and stop tracking (local) are not.
+const coreWrite = (name: string, input: unknown): boolean =>
+  CORE_WRITES.test(name) ||
+  (name === 'design_jobs' && (input as { action?: unknown } | null)?.action === 'cancel')
 
 const systemPrompt = (model: (typeof chatModels)[number]): string =>
   `${model.provider === 'claude' ? 'You are Claude' : `You are ${model.label}, an OpenAI model`}, ` +
@@ -467,7 +479,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       name,
       input,
       label: described?.label ?? toolLabel(name, input),
-      write: described?.write ?? CORE_WRITES.test(name)
+      write: described?.write ?? coreWrite(name, input)
     }
   }
 

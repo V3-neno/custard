@@ -167,23 +167,30 @@ export class OpenAIImages implements MediaProvider {
   ): Promise<{ remoteId: string; status: RemoteStatus }> {
     const model = this.chosen()
     const key = this.deps.apiKey()
-    if (!key) throw new MediaError('unconfigured', 'Add your OpenAI API key in Settings.', false)
+    if (!key)
+      throw new MediaError('unconfigured', 'Add your OpenAI API key in Settings.', false, true)
     if (!model)
-      throw new MediaError('unconfigured', 'Choose an image model in Design settings.', false)
+      throw new MediaError('unconfigured', 'Choose an image model in Design settings.', false, true)
     if (request.operation !== 'image.generate' && request.operation !== 'image.edit')
-      throw new MediaError('unsupported', `OpenAI Images can't do ${request.operation}.`, false)
+      throw new MediaError(
+        'unsupported',
+        `OpenAI Images can't do ${request.operation}.`,
+        false,
+        true
+      )
     const remoteId = remoteIdFor(options.idempotencyKey)
     if (this.deps.results.has(remoteId))
-      throw new MediaError('rejected', 'This request was already made.', false)
+      throw new MediaError('rejected', 'This request was already made.', false, true)
     const format = EXT[request.format ?? 'image/png']
-    if (!format) throw new MediaError('unsupported', `${request.format} isn't offered.`, false)
+    if (!format)
+      throw new MediaError('unsupported', `${request.format} isn't offered.`, false, true)
 
     // Everything that can fail before sending happens here, so a failure
     // is certain not to have reached OpenAI.
     let images: Awaited<ReturnType<typeof toFile>>[] = []
     if (request.operation === 'image.edit') {
       if (!request.references.length)
-        throw new MediaError('rejected', 'An edit needs an image to work from.', false)
+        throw new MediaError('rejected', 'An edit needs an image to work from.', false, true)
       try {
         images = await Promise.all(
           request.references.map(async (r) => {
@@ -194,11 +201,16 @@ export class OpenAIImages implements MediaProvider {
           })
         )
       } catch (err) {
-        throw new MediaError('rejected', err instanceof Error ? err.message : String(err), false)
+        throw new MediaError(
+          'rejected',
+          err instanceof Error ? err.message : String(err),
+          false,
+          true
+        )
       }
     }
     if (options.signal?.aborted)
-      throw new MediaError('rejected', 'Stopped before it was sent.', false)
+      throw new MediaError('rejected', 'Stopped before it was sent.', false, true)
 
     const { baseURL } = this.deps.endpoint()
     const client = this.deps.client
