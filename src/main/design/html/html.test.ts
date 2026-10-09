@@ -342,6 +342,8 @@ describe('preview serving', () => {
     const index = get('https://abc.preview.invalid/')
     expect(index.status).toBe(200)
     expect(index.headers.get('content-security-policy')).toBe(PREVIEW_CSP)
+    expect(PREVIEW_CSP).toMatch(/sandbox allow-scripts allow-same-origin$/)
+    expect(PREVIEW_CSP).not.toMatch(/allow-(modals|popups|downloads|top-navigation)/)
     expect(index.headers.get('x-content-type-options')).toBe('nosniff')
     expect(await index.text()).toContain('Hello')
     expect(get('https://abc.preview.invalid/js/app.js').headers.get('content-type')).toMatch(
