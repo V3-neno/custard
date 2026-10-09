@@ -70,7 +70,7 @@ against A's preview at ac9a4a2.
 | An `obsidian://` link click, `location = 'spotify:…'`, a `data:` navigation, `location =` to the mock server | No navigation; `shell.openExternal` never called |
 | Storage and cookies between the hidden check run and the visible preview | Not shared |
 | localStorage and IndexedDB between two previews | Not shared; one preview alive at a time |
-| **`window.print()`** | **Fails at ac9a4a2:** opens the system print dialog (GTK under xvfb) and freezes the preview; it isn't stopped or reported. Custard's main process and window keep answering, and choosing another output replaces the frozen preview. With `sandbox allow-scripts allow-same-origin` added to `PREVIEW_CSP` (no `allow-modals`), print is refused, and this suite (34 checks) and A's (67) pass. Sent to A. |
+| `window.print()` | **Fixed in A at 90b1dde** (re-run: 40/40). At ac9a4a2 it opens the system print dialog (GTK under xvfb) and freezes the preview; it isn't stopped or reported. Custard's main process and window keep answering, and choosing another output replaces the frozen preview. A added `sandbox allow-scripts allow-same-origin` to `PREVIEW_CSP` (no `allow-modals`), so print is now refused. |
 
 Not tested: WebRTC (UDP isn't visible to the mock server), drag and drop out
 of the preview, and anything on Windows or macOS.

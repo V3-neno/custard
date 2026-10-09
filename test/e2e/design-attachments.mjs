@@ -171,7 +171,9 @@ try {
     `the approval card lists the file it sends (${(cardText ?? '').slice(0, 120)})`
   )
   check(!(cardText ?? '').includes(KEPT), 'and not the other image')
-  const calls = openaiCalls().slice(openaiBefore)
+  // The mock rewrites its whole log on each request, and a restarted mock
+  // starts a new one, so look at the newest entry.
+  const calls = openaiCalls().slice(Math.min(openaiBefore, openaiCalls().length - 1))
   const files = calls.at(-1)?.files ?? []
   check(
     calls.length === 1 && files.length === 1 && files[0].name === SENT,

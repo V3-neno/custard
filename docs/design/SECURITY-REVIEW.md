@@ -11,7 +11,7 @@ macOS or against a live provider.
 | D1 | Plugin `open:` permission | **Fixed** on design-batch (dffbfd7) after Neno chose "Allowlist" (2026-10-09): vetted schemes only (today `spotify:`), and only write tools can open links. Tests in `open.security.test.ts` pass. |
 | D2 | Tool routes in Chat and Design | Enforced in code, except D1 and the residual network route below. |
 | D3 | Link-swap race (`src/main/fsafe`) | Helper built and tested on Linux. Narrowed, not closed; residual risk below. Callers not switched yet. |
-| D4 | HTML preview sandbox | Tested against A at ac9a4a2: contained, except `window.print()` (opens the OS print dialog). One-line CSP fix sent to A. Results in `SANDBOX.md`. |
+| D4 | HTML preview sandbox | Contained. `window.print()` opened the OS print dialog at ac9a4a2; A fixed it with a CSP sandbox directive (90b1dde). `design-security.mjs` 40/40 on design-integration plus A's fix. Results in `SANDBOX.md`. |
 | D5 | Reliability and privacy flows | Tested across A, B and C (below). One finding (D5a) sent to integration. |
 
 ## D1: plugin "open links on this computer" (`open:`)
