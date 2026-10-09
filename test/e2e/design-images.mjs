@@ -182,7 +182,7 @@ try {
   check(imageRequests().length === 0, 'nothing is sent while the card waits')
   check(
     /OpenAI Images: Generate an image/.test(asked ?? '') &&
-      /Price: Per token.*\(from OpenAI API pricing page/.test(asked ?? '') &&
+      /Pricing, not a quote for this request: image output \$30\.00,.*per 1M tokens.*\(from OpenAI API pricing page/.test(asked ?? '') &&
       /can't be cancelled/.test(asked ?? '') &&
       /No files are sent/.test(asked ?? ''),
     'the card names OpenAI, the operation, the price with its source and no files'

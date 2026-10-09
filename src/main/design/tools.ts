@@ -255,8 +255,9 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
       references.length
         ? `Files sent to ${info.name}: ${references.map((r) => `${r.name} (${kb(r.bytes)})`).join(', ')}`
         : 'No files are sent.',
+      // A published rate is never shown as the price of this request.
       cap.pricing
-        ? `Price: ${cap.pricing.text} (from ${cap.pricing.source})`
+        ? `Pricing, not a quote for this request: ${cap.pricing.text} (from ${cap.pricing.source}). Custard doesn't know the total before it runs.`
         : 'No price information from the provider.',
       ...(cap.cancel ? [] : ["It can't be cancelled once submitted."]),
       ...(a.status === 'quality-uncertain' ? [`Note: ${a.uncertainty}`] : []),
