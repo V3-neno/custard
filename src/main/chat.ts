@@ -99,7 +99,14 @@ function designReferences(c: Conversation, ids: string[]): MediaReference[] {
     if (!a) throw new Error(`There is no attached file ${id} in this chat, so nothing was sent.`)
     if (a.missing) throw new Error(`${a.name} is no longer available, so nothing was sent.`)
     if (a.kind !== 'image') throw new Error(`${a.name} isn't an image, so it can't be a reference.`)
-    return { kind: 'image', name: a.name, mime: a.mime, bytes: a.bytes, attachmentId: a.id }
+    return {
+      kind: 'image',
+      name: a.name,
+      mime: a.mime,
+      bytes: a.bytes,
+      attachmentId: a.id,
+      sha256: a.sha256
+    }
   })
 }
 

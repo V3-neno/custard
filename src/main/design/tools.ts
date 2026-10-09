@@ -19,6 +19,7 @@ import { discoverCapabilities, type Failure } from './capabilities'
 import { checkRequest } from './media'
 import { createArtifact, settleVersion, startVersion, VersionError } from './versions'
 import { JobError, type JobTracker } from './jobs'
+import { authorizations, bindingFor } from './authorization'
 import type { ArtifactStore } from './store'
 
 // Design mode's tools. Only Design is offered them (modes/policy.ts), and
@@ -288,7 +289,17 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
     s.emit({ type: 'artifact', conversationId: ctx.conversationId, artifact })
     return notRun(err instanceof Error ? err.message : String(err))
   }
-  job = await s.jobs.submit(job.id, ctx.signal)
+  // The user approved this request above: mint its single-use authorization
+  // (contract S3), bound to this job, provider (build) and exact request.
+  const token = authorizations.mint(
+    bindingFor('submit', {
+      jobId: job.id,
+      conversationId: ctx.conversationId,
+      source: info.source,
+      request
+    })
+  )
+  job = await s.jobs.submit(job.id, ctx.signal, token)
   s.emit({ type: 'job', conversationId: ctx.conversationId, job })
   // Only failures that say something about the provider are kept for the
   // session. A refused prompt (rejected) says nothing about the next one, so
@@ -347,7 +358,11 @@ export async function jobAction(
   conversationId: string,
   action: 'check' | 'cancel' | 'stop',
   jobId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // cancel only: the user's explicit go-ahead (an approval card for the
+  // model, the workspace's confirmation for the user). Without it nothing
+  // is cancelled.
+  confirmCancel?: (label: string, detail: string) => Promise<boolean>
 ): Promise<{ job: Job; text: string }> {
   const job = s.jobs.get(jobId)
   if (!job || job.requestedBy.conversationId !== conversationId)
@@ -355,8 +370,21 @@ export async function jobAction(
   let next: Job
   let files: Awaited<ReturnType<JobTracker['check']>>['files']
   if (action === 'stop') next = s.jobs.stopTracking(jobId)
-  else if (action === 'cancel') next = await s.jobs.cancel(jobId)
-  else {
+  else if (action === 'cancel') {
+    // Cancelling changes state at the provider (contract S3).
+    const name = s
+      .providers()
+      .find((p) => p.info().id === job.providerId)
+      ?.info().name
+    const ok =
+      !!confirmCancel &&
+      (await confirmCancel(
+        `${name ?? 'Provider'}: cancel a job`,
+        `Asks ${name ?? 'the provider'} to cancel job ${job.id}. It counts as cancelled only if the provider confirms; whether anything was already charged is up to the provider.`
+      ))
+    if (!ok) throw new JobError('Cancelling was not confirmed, so nothing was cancelled.')
+    next = await s.jobs.cancel(jobId, authorizations.mint(s.jobs.cancelBinding(jobId)))
+  } else {
     // A completed job whose version is still waiting for its files.
     const waiting =
       job.state === 'completed' &&
@@ -414,7 +442,14 @@ async function jobs(s: DesignService, input: unknown, ctx: DesignToolContext): P
   if (i.action !== 'check' && i.action !== 'cancel' && i.action !== 'stop')
     return notRun('Unknown action.')
   try {
-    const r = await jobAction(s, ctx.conversationId, i.action, String(i.job), ctx.signal)
+    const r = await jobAction(
+      s,
+      ctx.conversationId,
+      i.action,
+      String(i.job),
+      ctx.signal,
+      ctx.approve
+    )
     return { content: r.text, isError: false, outcome: 'completed' }
   } catch (err) {
     if (err instanceof JobError) return notRun(err.message)
