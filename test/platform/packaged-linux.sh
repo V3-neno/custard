@@ -3,7 +3,7 @@
 # sandbox ON (no --no-sandbox), as a non-root user. See test/platform/README.md.
 #   sudo [FRONT_ROUTES="api.openai.com=8898"] test/platform/packaged-linux.sh <test .mjs> [user=ctest]
 # Needs: root (to switch user and give the test its own hosts file), Linux
-# mount namespaces (unshare), xvfb-run, openssl, `npm run build:unpack` done,
+# mount namespaces (unshare), xvfb-run, openssl, `npm run build:unpack:test` done,
 # and `npm i --no-save playwright`.
 #
 # Packaged builds pin api.anthropic.com and api.openai.com (L13); that stays

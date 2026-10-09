@@ -143,6 +143,17 @@ function Preview({
             {s.errors.length} {s.errors.length === 1 ? 'error' : 'errors'}
           </button>
         )}
+        {/* Tab can't leave the preview on its own; F6 hands focus back (preview.ts). */}
+        <span
+          className="ml-auto"
+          title="Tab moves within the preview. Press F6 to return to Custard."
+          data-preview-f6-hint
+        >
+          <kbd className="rounded border border-forge-700 px-1 font-mono text-[10px] text-ash-400">
+            F6
+          </kbd>{' '}
+          leaves the preview
+        </span>
       </div>
       {showErrors && s && s.errors.length > 0 && (
         <ul

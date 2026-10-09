@@ -22,7 +22,7 @@ unprivileged user namespaces (or a setuid `chrome-sandbox`):
 
 ```sh
 npm ci && npm i --no-save playwright
-npm run build:unpack
+npm run build:unpack:test   # fuses left as they are; never ship this build
 sudo test/platform/packaged-linux.sh test/platform/sandbox-evidence.mjs
 sudo FRONT_ROUTES="api.openai.com=8898" test/platform/packaged-linux.sh test/e2e/design-security.mjs
 sudo test/platform/packaged-linux.sh test/e2e/widgets.mjs

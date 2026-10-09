@@ -266,6 +266,15 @@ try {
     `the preview shows version 1 (${p?.text?.slice(0, 40)})`
   )
   check(p && p.preload === 0, 'the preview session has no preload')
+  check(
+    /F6\s*leaves the preview/.test(
+      (await w
+        .locator('[data-preview-f6-hint]')
+        .innerText()
+        .catch(() => '')) ?? ''
+    ),
+    'the preview footer mentions F6'
+  )
   const box = await w.locator('[data-preview-box]').boundingBox()
   check(
     p?.bounds && Math.abs(p.bounds.x - box.x) < 2 && Math.abs(p.bounds.width - box.width) < 2,

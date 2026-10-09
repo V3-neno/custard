@@ -131,6 +131,16 @@ run). The growth is the in-memory sessions Electron keeps. Options are in the
 stabilization report; none is applied here, because reusing sessions changes
 the isolation model above.
 
+**Accepted behaviour (Neno, 2026-10-09).** Each preview shown, and each
+`design_html` check run, gets its own in-memory session, and Electron keeps
+that session until Custard quits, about 0.7 MB each. The preview's page,
+renderer process and webContents do go away when it closes; the session's
+storage is cleared but the session object stays. Closing a preview, switching
+versions or deleting the version doesn't free it. Restarting Custard frees all
+of them. This is accepted: a long Design session uses a little more memory
+until the next restart, and the isolation model (a fresh session per preview)
+is kept.
+
 A page that fills its memory is stopped by Chromium's heap limit in about
 30 s and reported as stopped; a page that never yields is stopped by the
 watchdog. The app keeps answering in both.
@@ -141,6 +151,28 @@ Tab moves from the composer into the preview, and through the page's own
 controls in order, but never back out: the page keeps focus. **F6** returns
 focus to the app; it is handled before the page sees the key, so a page can't
 block it.
+The preview's footer says so in small text ("F6 leaves the preview", with a
+tooltip), so it can be found without getting in the way.
+
+## Release fuses
+
+Release builds made with `electron-builder.yml` (`build:unpack`, `build:win`,
+`build:mac`, `build:linux`) flip these Electron fuses in the binary:
+`RunAsNode` off, `EnableNodeOptionsEnvironmentVariable` off (this also
+ignores `NODE_EXTRA_CA_CERTS`), `EnableNodeCliInspectArguments` off,
+`EnableEmbeddedAsarIntegrityValidation` on and `OnlyLoadAppFromAsar` on.
+Asar integrity is enforced by Electron on macOS and Windows only; on Linux
+the fuse is set but has no effect. Packaged test builds
+(`npm run build:unpack:test`, `electron-builder.test.yml`) keep Electron's
+defaults so Playwright can drive them through `--inspect`; they must never
+be shipped.
+
+Checked 2026-10-09 on Linux (`npx @electron/fuses read`, then the packaged
+app run as a non-root user with the sandbox on): the release build starts,
+`--inspect=9333` opens no debugger and `ELECTRON_RUN_AS_NODE=1` runs the app
+instead of Node. The test build, as a control, answers on 9333 and runs as
+Node. `NODE_OPTIONS` is covered by the fuse read only. Windows and macOS
+release builds, and asar integrity there, are unverified.
 
 ## Main window (sandboxed since this change)
 

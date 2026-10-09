@@ -53,6 +53,18 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
+# Release builds: Electron fuses flipped in the binary (docs/design/SANDBOX.md,
+# "Release fuses"). ELECTRON_RUN_AS_NODE, NODE_OPTIONS / NODE_EXTRA_CA_CERTS
+# and --inspect are ignored; only app.asar is loaded, and its integrity is
+# checked where Electron supports it (macOS, Windows). Packaged test builds
+# (electron-builder.test.yml, npm run build:unpack:test) leave them as they
+# are, because the e2e harness drives the app through --inspect.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
 publish:
   provider: generic
   url: https://example.com/auto-updates
