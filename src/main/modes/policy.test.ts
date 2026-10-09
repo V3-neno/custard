@@ -23,6 +23,9 @@ describe('mode policy', () => {
       ['web_search', 'web'],
       ['widget_show', 'widget'],
       ['spotify__pause_playback', 'plugin'],
+      ['design_html', 'design'],
+      ['design_media', 'design'],
+      ['design_export', 'unknown'],
       ['send_to_code', 'unknown'],
       ['switch_mode', 'unknown'],
       ['plugins_install', 'unknown'],
@@ -36,7 +39,8 @@ describe('mode policy', () => {
       const p = modePolicy(mode)
       expect(p.authorSkills).toBe(false)
       expect(p.authorPlugins).toBe(false)
-      expect([...p.tools].sort()).toEqual(['plugin', 'vault-read', 'vault-write', 'web', 'widget'])
+      const use = ['plugin', 'vault-read', 'vault-write', 'web', 'widget']
+      expect([...p.tools].sort()).toEqual(mode === 'design' ? ['design', ...use].sort() : use)
       expect(refuseKind(p, 'fs_write', 'workspace')).toMatch(/can't be used in/)
       expect(refuseKind(p, 'send_to_code', 'unknown')).toMatch(/can't be used in/)
     }
@@ -59,8 +63,11 @@ describe('mode policy', () => {
     expect(internal.authorPlugins).toBe(true)
   })
 
-  it('no mode allows an unknown tool', () => {
-    for (const m of modes) expect(modePolicy(m.id).tools.has('unknown')).toBe(false)
+  it('no mode allows an unknown tool; only Design has design tools', () => {
+    for (const m of modes) {
+      expect(modePolicy(m.id).tools.has('unknown')).toBe(false)
+      expect(modePolicy(m.id).tools.has('design')).toBe(m.id === 'design')
+    }
   })
 })
 

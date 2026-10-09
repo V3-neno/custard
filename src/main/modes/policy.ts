@@ -1,5 +1,6 @@
 import type { Mode } from '../../shared/chat'
 import type { Workspace } from '../../shared/plugins'
+import { DESIGN_TOOLS } from '../../shared/design'
 
 // What each mode may do, enforced by the app rather than asked of the model.
 // Every tool the model is offered, and every call it makes, goes through
@@ -16,6 +17,7 @@ export type ToolKind =
   | 'plugin' // an enabled plugin's tool, <plugin>__<tool>
   | 'widget' // widget_show, widget_hide
   | 'workspace' // Code mode's file tools
+  | 'design' // design_html, design_media, design_jobs: Design's outputs
   | 'unknown' // anything else: never allowed
 
 // Extensions are plugins (code that adds capabilities) and skills
@@ -36,8 +38,14 @@ export function modePolicy(mode: Mode, workspace?: Workspace): ModePolicy {
   switch (mode) {
     // Chat and Design use extensions; they never make or change them.
     case 'chat':
-    case 'design':
       return { mode, tools: new Set(USE), authorSkills: false, authorPlugins: false }
+    case 'design':
+      return {
+        mode,
+        tools: new Set<ToolKind>([...USE, 'design']),
+        authorSkills: false,
+        authorPlugins: false
+      }
     case 'skills':
       return { mode, tools: new Set(USE), authorSkills: true, authorPlugins: false }
     case 'code': {
@@ -61,6 +69,7 @@ export function toolKind(name: string, sources: ToolSources): ToolKind {
   if (sources.isWorkspace(name)) return 'workspace'
   if (sources.isWeb(name)) return 'web'
   if (name === 'widget_show' || name === 'widget_hide') return 'widget'
+  if ((DESIGN_TOOLS as readonly string[]).includes(name)) return 'design'
   if (/^[a-z][a-z0-9-]{1,30}__[a-z][a-z0-9_]{0,40}$/.test(name)) return 'plugin'
   return 'unknown'
 }

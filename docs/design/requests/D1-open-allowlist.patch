@@ -1,0 +1,165 @@
+diff --git a/src/main/plugins/host.test.ts b/src/main/plugins/host.test.ts
+index ea0b172..7847d27 100644
+--- a/src/main/plugins/host.test.ts
++++ b/src/main/plugins/host.test.ts
+@@ -116,7 +116,7 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
+     instructions: 'instructions.md',
+     permissions: {
+       network: ['api.example.com', 'auth.example.com'],
+-      openExternal: ['demo:'],
++      openExternal: ['spotify:'],
+       storage: true
+     },
+     config: {
+@@ -170,7 +170,7 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
+       {
+         name: 'open',
+         description: 'Open',
+-        effect: 'read',
++        effect: 'write',
+         inputSchema: { type: 'object', properties: { url: { type: 'string' } } }
+       },
+       {
+@@ -268,13 +268,14 @@ beforeEach(() => {
+ const ALL = [
+   'network:api.example.com',
+   'network:auth.example.com',
+-  'open:demo:',
++  'open:spotify:',
+   'storage',
+   'account:auth.example.com',
+   'account-token:auth.example.com',
+   'account-api:api.example.com',
+   'account-scope:read',
+-  'action:act'
++  'action:act',
++  'action:open'
+ ]
+ 
+ async function activate(approved = ALL): Promise<string> {
+@@ -670,31 +671,31 @@ describe('capabilities', () => {
+   it('opens only declared link prefixes', async () => {
+     writePlugin({})
+     await activate()
+-    expect((await invoke('demo__open', { url: 'demo:item/1' })).content).toBe('opened')
++    expect((await invoke('demo__open', { url: 'spotify:item/1' })).content).toBe('opened')
+     expect((await invoke('demo__open', { url: 'file:///etc/passwd' })).content).toMatch(
+       /may not open/
+     )
+-    expect(opened).toEqual(['demo:item/1'])
++    expect(opened).toEqual(['spotify:item/1'])
+   })
+ 
+   it('opens only links made of plain URL characters (L20)', async () => {
+     writePlugin({})
+     await activate()
+     for (const url of [
+-      'demo:x" --inspect',
+-      "demo:x'y",
+-      'demo:x\\..\\y',
+-      'demo:x<y>',
+-      'demo:x`y`',
+-      'demo:x|y',
+-      'demo:caf\u00e9',
+-      'demo:x^y'
++      'spotify:x" --inspect',
++      "spotify:x'y",
++      'spotify:x\\..\\y',
++      'spotify:x<y>',
++      'spotify:x`y`',
++      'spotify:x|y',
++      'spotify:caf\u00e9',
++      'spotify:x^y'
+     ])
+       expect((await invoke('demo__open', { url })).content, url).toMatch(/may not open/)
+     expect(
+-      (await invoke('demo__open', { url: 'demo:track/4uLU6hMC?si=a%20b&x=1#t' })).content
++      (await invoke('demo__open', { url: 'spotify:track/4uLU6hMC?si=a%20b&x=1#t' })).content
+     ).toBe('opened')
+-    expect(opened).toEqual(['demo:track/4uLU6hMC?si=a%20b&x=1#t'])
++    expect(opened).toEqual(['spotify:track/4uLU6hMC?si=a%20b&x=1#t'])
+   })
+ 
+   it('refuses capabilities outside an active call', async () => {
+diff --git a/src/main/plugins/host.ts b/src/main/plugins/host.ts
+index b7142b3..fc62c20 100644
+--- a/src/main/plugins/host.ts
++++ b/src/main/plugins/host.ts
+@@ -134,7 +134,7 @@ export class PluginHost {
+   private starting = new Map<string, Promise<RuntimeHandle>>()
+   private calls = new Map<
+     string,
+-    { pluginId: string; buildId: string; controller: AbortController }
++    { pluginId: string; buildId: string; controller: AbortController; write: boolean }
+   >()
+   private logs = new Map<string, string[]>()
+   private refreshing = new Map<string, Promise<string>>()
+@@ -926,9 +926,9 @@ export class PluginHost {
+     const controller = new AbortController()
+     const onAbort = (): void => controller.abort()
+     o.signal.addEventListener('abort', onAbort)
+-    this.calls.set(callId, { pluginId: id, buildId: offered.buildId, controller })
+-    const secrets = this.secretValues(id)
+     const write = tool.effect === 'write'
++    this.calls.set(callId, { pluginId: id, buildId: offered.buildId, controller, write })
++    const secrets = this.secretValues(id)
+     // Once the call may have reached the plugin, a write cut short might
+     // still have happened.
+     let sent = false
+@@ -1026,6 +1026,9 @@ export class PluginHost {
+           return { ok: true, value: null }
+         }
+         case 'openExternal': {
++          // Only during an action (a write tool), which the user can be
++          // asked about; a read tool never shows an approval card.
++          if (!call.write) throw new Error('Only actions can open links, so nothing was opened.')
+           const url = String(a.url ?? '')
+           const prefixes = manifest.permissions.openExternal.filter((p) =>
+             granted.includes(`open:${p}`)
+diff --git a/src/main/plugins/manifest.test.ts b/src/main/plugins/manifest.test.ts
+index aa05db7..7e3cc77 100644
+--- a/src/main/plugins/manifest.test.ts
++++ b/src/main/plugins/manifest.test.ts
+@@ -18,7 +18,7 @@ export const goodManifest = (): Record<string, unknown> => ({
+   entry: 'src/index.ts',
+   permissions: {
+     network: ['api.example.com', 'auth.example.com'],
+-    openExternal: ['demo:'],
++    openExternal: ['spotify:'],
+     storage: true
+   },
+   config: {
+@@ -167,7 +167,7 @@ describe('manifest', () => {
+     expect(permissionsOf(m)).toEqual([
+       'network:api.example.com',
+       'network:auth.example.com',
+-      'open:demo:',
++      'open:spotify:',
+       'storage',
+       'account:auth.example.com',
+       'account-token:auth.example.com',
+diff --git a/src/main/plugins/manifest.ts b/src/main/plugins/manifest.ts
+index 074cf19..be141e8 100644
+--- a/src/main/plugins/manifest.ts
++++ b/src/main/plugins/manifest.ts
+@@ -87,6 +87,11 @@ const isRelativePath = (p: unknown): p is string =>
+   !p.split(/[\\/]/).some((s) => s === '..' || s === '' || s.startsWith('.')) &&
+   !/[:\0]/.test(p)
+ 
++// Custom schemes a plugin may open: an allowlist, because any app can
++// register a scheme and some can write files (obsidian://new), start tools
++// or run automations. Add one only after checking what its handler does.
++export const VETTED_SCHEMES = new Set(['spotify'])
++
+ export function validOpenPrefix(p: unknown): p is string {
+   if (typeof p !== 'string' || p.length > 200) return false
+   const scheme = /^([a-z][a-z0-9+.-]*):/.exec(p)?.[1]
+@@ -99,7 +104,7 @@ export function validOpenPrefix(p: unknown): p is string {
+       return false
+     }
+   }
+-  return p === `${scheme}:`
++  return VETTED_SCHEMES.has(scheme) && p === `${scheme}:`
+ }
+ 
+ const httpsUrl = (u: unknown): boolean => {

@@ -15,8 +15,9 @@ asarUnpack:
   # esbuild runs a native binary to build plugins.
   - node_modules/esbuild/**
   - node_modules/@esbuild/**
-# Plugin sources, the SDK and its docs, read by the plugin host. Not tested in
-# a packaged build yet; development (npm run dev) is the supported setup.
+# Plugin sources, the SDK and its docs, read by the plugin host. Plugin
+# build and activation were tested in the packaged Linux build on 2026-10-09
+# (test/platform/README.md); Windows and macOS packaged builds are not.
 extraResources:
   - from: plugin
     to: plugin
@@ -52,6 +53,18 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
+# Release builds: Electron fuses flipped in the binary (docs/design/SANDBOX.md,
+# "Release fuses"). ELECTRON_RUN_AS_NODE, NODE_OPTIONS / NODE_EXTRA_CA_CERTS
+# and --inspect are ignored; only app.asar is loaded, and its integrity is
+# checked where Electron supports it (macOS, Windows). Packaged test builds
+# (electron-builder.test.yml, npm run build:unpack:test) leave them as they
+# are, because the e2e harness drives the app through --inspect.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
 publish:
   provider: generic
   url: https://example.com/auto-updates

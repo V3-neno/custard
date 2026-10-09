@@ -1,0 +1,6 @@
+# Packaged builds for the e2e harness only (test/platform/README.md): the
+# release configuration without its fuses, since Playwright drives the app
+# through --inspect and the TLS test front needs NODE_EXTRA_CA_CERTS. Never
+# ship a build made with this file.
+extends: electron-builder.yml
+electronFuses: null

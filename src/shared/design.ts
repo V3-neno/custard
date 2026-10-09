@@ -127,12 +127,18 @@ export type MediaProviderInfo = {
   capabilities: MediaCapability[]
 }
 
+// A file the user attached in the same chat. Only its record travels;
+// the bytes are read (and hash-checked) by Custard at submission and handed
+// to the provider, which never gets a path.
 export type MediaReference = {
   kind: ReferenceKind
   name: string
   mime: string
   bytes: number
-  path: string
+  attachmentId: string
+  // The attachment's content hash, recorded when it was attached. Approval
+  // binds to it; a reference whose bytes no longer match is never sent.
+  sha256: string
 }
 
 export type MediaRequest = {
@@ -147,15 +153,52 @@ export type MediaRequest = {
 
 export type MediaFile = { name: string; mime: string; bytes: Uint8Array }
 
-// Errors a provider reports. `sent` says whether the request may have
-// reached the provider: true or unknown makes a failed submission's outcome
-// unknown, because it may still run (and be charged).
+// ---------------------------------------------------------------- dispatch evidence
+// (Stabilization contract S1, docs/design/stabilization-plan.md.)
+//
+// What is known about a submission, kept apart because each is a different
+// fact:
+//   not-dispatched  Custard itself stopped it before any provider or plugin
+//                   code ran (local validation, a refused approval, a host
+//                   check). Only trusted Custard code may say this; nothing a
+//                   plugin returns can produce it.
+//   rejected        A response from the provider establishes that the
+//                   requested operation failed. It was dispatched: whether it
+//                   was charged, or can be repeated without a duplicate, is
+//                   `repeat`, not this.
+//   unknown         It was or may have been dispatched and its outcome isn't
+//                   established. Never resent automatically.
+//   completed       An actual result exists.
+export type DispatchState = 'not-dispatched' | 'rejected' | 'unknown' | 'completed'
+
+// Whether sending the same request again could duplicate its effect or
+// charge. `safe` only for not-dispatched, or where the provider's own
+// documentation guarantees it (cite it in `basis`); otherwise `unknown`,
+// and a repeat warns.
+export type RepeatRisk = { risk: 'safe' | 'may-duplicate' | 'unknown'; basis?: string }
+
+export type DispatchEvidence = {
+  state: DispatchState
+  repeat: RepeatRisk
+  // What a plugin said about its own service (e.g. "not sent"), kept for the
+  // user to read. Never evidence: it changes neither state nor repeat.
+  providerClaim?: string
+}
+
+// Errors a provider reports. `dispatch` is the evidence above for this
+// failure; it replaces `sent`. `sent` is kept only until Threads 1 and 3
+// move every provider to `dispatch` (then it's removed): jobs.ts reads
+// `dispatch` when present and treats a missing one as unknown, except
+// `sent: false` from a built-in provider (see jobs.ts).
 export type MediaErrorKind = 'unsupported' | 'unconfigured' | 'rejected' | 'temporary'
 export class MediaError extends Error {
   constructor(
     readonly kind: MediaErrorKind,
     message: string,
-    readonly sent: boolean | 'unknown'
+    readonly sent: boolean | 'unknown',
+    readonly dispatch?: Omit<DispatchEvidence, 'state'> & {
+      state: Exclude<DispatchState, 'completed'>
+    }
   ) {
     super(message)
   }
@@ -169,15 +212,52 @@ export type RemoteStatus =
 
 // The common interface Design talks to. Built-in image providers and plugin
 // providers implement the same one, so Design has no provider-specific code.
+// A model a provider offers, for Design settings. `note` is the provider's
+// own short description; never a guessed quality or price.
+export type MediaModel = { id: string; name: string; note?: string }
+
+// One registered provider as the Design settings tab lists it.
+export type ProviderListing = {
+  id: string
+  name: string
+  source: Source
+  state: MediaProviderState
+  needs?: string
+  operations: MediaOperation[]
+  models?: MediaModel[]
+}
+
 export interface MediaProvider {
   info(): MediaProviderInfo
+  // Models to choose from in Design settings, when the provider has several.
+  models?(): MediaModel[]
   submit(
     request: MediaRequest,
-    options: { idempotencyKey: string; signal?: AbortSignal }
+    options: {
+      // Offered to the provider only where its capability declares
+      // `idempotency` (provider-supported deduplication).
+      idempotencyKey: string
+      // Custard's own stable local id for this job (= Job.id). Recorded by
+      // built-in providers with anything they save locally (contract S2).
+      // Not a provider guarantee of anything.
+      correlationId: string
+      // Host-issued, single-use authorization for this exact submission
+      // (contract S3). Opaque; only main/design/authorization.ts can check
+      // or consume it.
+      authorization: AuthorizationToken
+      signal?: AbortSignal
+      // Reads a reference's bytes, checked against its recorded sha256.
+      read: (ref: MediaReference) => Promise<Uint8Array>
+    }
   ): Promise<{ remoteId: string; status: RemoteStatus }>
   status(remoteId: string, signal?: AbortSignal): Promise<RemoteStatus>
-  // Resolves 'cancelled' only when the provider confirms it.
-  cancel?(remoteId: string): Promise<'cancelled' | 'not-cancelled'>
+  // Resolves 'cancelled' only when the provider confirms it. Cancelling
+  // changes state at the provider, so it takes its own single-use
+  // authorization (contract S3), minted after the user's explicit intent.
+  cancel?(
+    remoteId: string,
+    authorization: AuthorizationToken
+  ): Promise<'cancelled' | 'not-cancelled'>
   result(remoteId: string, signal?: AbortSignal): Promise<MediaFile[]>
 }
 
@@ -185,6 +265,12 @@ export interface MediaProvider {
 
 export type JobState =
   'not-submitted' | 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
+
+// An opaque, unguessable, single-use authorization minted by the trusted
+// host after the user approved (main/design/authorization.ts). The binding
+// lives only in host memory: the token itself proves nothing, can't be
+// built from fields, and is never saved, so a restart can't dispatch.
+export type AuthorizationToken = { readonly __authorization: unique symbol } & string
 
 export type Job = {
   // Durable, made by Custard before anything is sent.
@@ -204,6 +290,10 @@ export type Job = {
   remoteId?: string
   progress?: number
   error?: string
+  // What is known about the submission (contract S1). Set by submit().
+  dispatch?: DispatchEvidence
+  // What kind of error the provider reported, when it said so.
+  errorKind?: MediaErrorKind
   // Custard is watching it now. Stopping that never cancels the job.
   tracking: boolean
   checks: number
@@ -259,3 +349,93 @@ export type Artifact = {
   selected: string
   createdAt: number
 }
+
+// ---------------------------------------------------------------- plugin media
+// (Batch contract. Validation lives in main/plugins/manifest.ts, Workstream C.)
+
+// One provider a plugin offers. Each capability names the plugin's own
+// declared tools that do the work; they run through the plugin host like any
+// other tool call (permissions, approvals, sandbox). No other route exists.
+export type PluginMediaSpec = {
+  // Unique within the plugin, like its tools: [a-z][a-z0-9-]{0,30}.
+  id: string
+  name: string
+  capabilities: (MediaCapability & {
+    tools: {
+      // A write tool: the only one that can start (and charge for) work.
+      submit: string
+      // Read tools: they must never submit anything.
+      status: string
+      result: string
+      cancel?: string
+    }
+  })[]
+}
+
+// What those tools return in their result `data` (validated by the host;
+// anything else is an error). Plugin output is untrusted.
+// What those tools receive (docs/design/MEDIA-PLUGINS.md). References come
+// inline; the plugin never gets a path.
+export type PluginMediaSubmitInput = {
+  operation: MediaOperation
+  prompt: string
+  idempotencyKey: string
+  references?: { name: string; mime: string; base64: string }[]
+  size?: { width: number; height: number }
+  durationSeconds?: number
+  format?: string
+}
+// status, result and cancel.
+export type PluginMediaJobInput = { remoteId: string }
+// A submit error's data may say `sent: false` when the plugin's service never
+// got the request; otherwise the outcome is unknown. Cancel returns
+// { state: 'cancelled' } only when the service confirms it.
+
+export type PluginMediaSubmitData = { remoteId: string; status: RemoteStatus }
+export type PluginMediaStatusData = RemoteStatus
+// Files come back inline (base64) or as an https URL on a host the plugin's
+// network permission already allows; sizes and types are capped by the host.
+export type PluginMediaResultData = {
+  files: (
+    { name: string; mime: string; base64: string } | { name: string; mime: string; url: string }
+  )[]
+}
+
+// ---------------------------------------------------------------- tools
+
+// Design-only tools the model is offered (see main/design/tools.ts). Only
+// Design mode allows the 'design' tool kind (main/modes/policy.ts).
+export const DESIGN_TOOLS = ['design_html', 'design_media', 'design_jobs'] as const
+export type DesignToolName = (typeof DESIGN_TOOLS)[number]
+
+// ---------------------------------------------------------------- workspace IPC
+
+export type ArtifactSummary = {
+  id: string
+  name: string
+  kind: ArtifactKind
+  selected: string
+  versions: number
+  // The newest version's status, for the tab badge.
+  latest: VersionStatus
+  updatedAt: number
+}
+
+// Pushed to the app window on 'design:event' as outputs and jobs change.
+export type DesignEvent =
+  | { type: 'artifact'; conversationId: string; artifact: Artifact }
+  | { type: 'job'; conversationId: string; job: Job }
+
+export type ExportResult =
+  | { ok: true; path: string; files: number }
+  | { ok: false; canceled: true }
+  | { ok: false; canceled?: false; error: string }
+
+// URL scheme the app window uses to show stored images and video
+// (custard-media://<conversation>/<artifact>/<version>/<file>). Read-only,
+// serves only files recorded on a version. Never used by the HTML preview,
+// which has its own scheme and session (docs/design/SANDBOX.md).
+export const MEDIA_SCHEME = 'custard-media'
+
+// Whether a skill behind a version is as it was (main/design/skills.ts).
+export type SkillChange = { path: string; name: string; state: 'same' | 'changed' | 'missing' }

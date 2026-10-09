@@ -6,6 +6,8 @@ import {
   type ToolSpec
 } from '../../shared/plugins'
 import { checkSchema } from './schema'
+import type { PluginMediaSpec } from '../../shared/design'
+import { validateCapabilities } from '../design/media'
 import {
   SUPPORTED_WIDGET_API_VERSIONS,
   WIDGET_LIMITS,
@@ -87,6 +89,11 @@ const isRelativePath = (p: unknown): p is string =>
   !p.split(/[\\/]/).some((s) => s === '..' || s === '' || s.startsWith('.')) &&
   !/[:\0]/.test(p)
 
+// Custom schemes a plugin may open: an allowlist, because any app can
+// register a scheme and some can write files (obsidian://new), start tools
+// or run automations. Add one only after checking what its handler does.
+export const VETTED_SCHEMES = new Set(['spotify'])
+
 export function validOpenPrefix(p: unknown): p is string {
   if (typeof p !== 'string' || p.length > 200) return false
   const scheme = /^([a-z][a-z0-9+.-]*):/.exec(p)?.[1]
@@ -99,7 +106,7 @@ export function validOpenPrefix(p: unknown): p is string {
       return false
     }
   }
-  return p === `${scheme}:`
+  return VETTED_SCHEMES.has(scheme) && p === `${scheme}:`
 }
 
 const httpsUrl = (u: unknown): boolean => {
@@ -358,6 +365,150 @@ function checkWidgets(widgets: unknown, tools: ToolSpec[], errors: string[]): Wi
   }))
 }
 
+export const MEDIA_ID = /^[a-z][a-z0-9-]{0,30}$/
+export const MEDIA_MAX_PROVIDERS = 4
+
+// The fields Custard puts in each media tool's input, so a plugin's own
+// schema can't make a valid request fail at the moment it's sent. Optional
+// fields are sent only when the request has them.
+const SUBMIT_FIELDS = ['operation', 'prompt', 'idempotencyKey'] as const
+
+// `media`: image or video generation offered to Design. Each capability names
+// the plugin's own tools; they still run through the normal host checks and
+// approvals. Status, result and cancel tools take { remoteId }. See
+// docs/design/MEDIA-PLUGINS.md.
+function checkMedia(
+  media: unknown,
+  tools: ToolSpec[],
+  widgets: WidgetSpec[],
+  errors: string[]
+): PluginMediaSpec[] {
+  if (media === undefined) return []
+  if (!Array.isArray(media) || !media.length || media.length > MEDIA_MAX_PROVIDERS) {
+    errors.push(`media must be a list of 1 to ${MEDIA_MAX_PROVIDERS} providers`)
+    return []
+  }
+  const byName = new Map(tools.filter((t) => t && typeof t === 'object').map((t) => [t.name, t]))
+  // A widget calling these would be a second way to start paid work.
+  const widgetTools = new Set(widgets.flatMap((w) => (Array.isArray(w.tools) ? w.tools : [])))
+  const ids = new Set<string>()
+  const out: PluginMediaSpec[] = []
+  for (const [i, raw] of (media as unknown[]).entries()) {
+    const p = (raw ?? {}) as Record<string, unknown>
+    const at = `media[${i}]${typeof p.id === 'string' ? ` (${p.id})` : ''}`
+    const before = errors.length
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      errors.push(`${at}: must be an object`)
+      continue
+    }
+    for (const k of Object.keys(p))
+      if (!['id', 'name', 'capabilities'].includes(k)) errors.push(`${at}: "${k}" is not supported`)
+    if (typeof p.id !== 'string' || !MEDIA_ID.test(p.id))
+      errors.push(`${at}: id must be lowercase letters, digits or hyphens, starting with a letter`)
+    else if (ids.has(p.id)) errors.push(`${at}: duplicate media id`)
+    else ids.add(p.id)
+    if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 60)
+      errors.push(`${at}: name must be 1 to 60 characters`)
+    const caps = Array.isArray(p.capabilities) ? (p.capabilities as unknown[]) : null
+    if (!caps || !caps.length) {
+      errors.push(`${at}: capabilities must list at least one operation`)
+      continue
+    }
+    // The capability itself (operation, formats, limits...) is checked by
+    // Design's own rules; `tools` is checked here against this manifest.
+    const stripped = caps.map((c) => {
+      if (!c || typeof c !== 'object' || Array.isArray(c)) return c
+      const rest = { ...(c as Record<string, unknown>) }
+      delete rest.tools
+      return rest
+    })
+    const v = validateCapabilities(stripped)
+    errors.push(...v.errors.map((e) => `${at}: ${e}`))
+    const capabilities: PluginMediaSpec['capabilities'] = []
+    for (const [j, c] of caps.entries()) {
+      const cat = `${at}: capabilities[${j}]`
+      const t = (c as Record<string, unknown> | null)?.tools as Record<string, unknown> | undefined
+      if (!t || typeof t !== 'object' || Array.isArray(t)) {
+        errors.push(`${cat}: tools must name submit, status and result tools`)
+        continue
+      }
+      for (const k of Object.keys(t))
+        if (!['submit', 'status', 'result', 'cancel'].includes(k))
+          errors.push(`${cat}: tools.${k} is not supported`)
+      const declared = v.capabilities.find(
+        (x) => x.operation === (c as Record<string, unknown>).operation
+      )
+      const tool = (role: string, effects: ToolSpec['effect'][]): ToolSpec | null => {
+        const name = t[role]
+        const spec = typeof name === 'string' ? byName.get(name) : undefined
+        if (!spec) {
+          errors.push(`${cat}: tools.${role}: "${String(name)}" is not one of this plugin's tools`)
+          return null
+        }
+        const why: Record<string, string> = {
+          submit: 'it starts work that may be charged',
+          cancel: 'it changes the job at the provider',
+          status: 'it must never start new work',
+          result: 'it must never start new work'
+        }
+        if (!effects.includes(spec.effect))
+          errors.push(
+            `${cat}: tools.${role}: ${spec.name} must be a ${effects.join(' or ')} tool (${why[role]})`
+          )
+        if (widgetTools.has(spec.name))
+          errors.push(`${cat}: tools.${role}: ${spec.name} can't also be a widget's tool`)
+        return spec
+      }
+      const props = (s: ToolSpec): Record<string, unknown> =>
+        (s.inputSchema?.properties as Record<string, unknown> | undefined) ?? {}
+      const submit = tool('submit', ['write'])
+      const status = tool('status', ['read'])
+      const result = tool('result', ['read'])
+      const cancel = t.cancel === undefined ? null : tool('cancel', ['write'])
+      if (submit) {
+        const has = props(submit)
+        const needed = [
+          ...SUBMIT_FIELDS,
+          ...(declared?.references ? ['references'] : []),
+          ...(declared?.sizes ? ['size'] : []),
+          ...(declared?.durations ? ['durationSeconds'] : []),
+          ...((declared?.formats.length ?? 0) > 1 ? ['format'] : [])
+        ]
+        const missing = needed.filter((f) => !(f in has))
+        if (missing.length)
+          errors.push(`${cat}: ${submit.name}'s inputSchema must declare ${missing.join(', ')}`)
+      }
+      for (const s of [status, result, cancel])
+        if (s && (!('remoteId' in props(s)) || !s.inputSchema.required?.includes('remoteId')))
+          errors.push(`${cat}: ${s.name}'s inputSchema must require remoteId`)
+      for (const [role, s] of [
+        ['status', status],
+        ['result', result],
+        ['cancel', cancel]
+      ] as const)
+        if (s && submit && s.name === submit.name)
+          errors.push(`${cat}: tools.${role} can't be the submit tool`)
+      if (declared?.cancel && t.cancel === undefined)
+        errors.push(`${cat}: cancel is true, so tools.cancel must name a tool`)
+      if (declared && !declared.cancel && t.cancel !== undefined)
+        errors.push(`${cat}: tools.cancel is named but cancel is false`)
+      if (declared && submit && status && result)
+        capabilities.push({
+          ...declared,
+          tools: {
+            submit: submit.name,
+            status: status.name,
+            result: result.name,
+            ...(cancel ? { cancel: cancel.name } : {})
+          }
+        })
+    }
+    if (errors.length === before)
+      out.push({ id: p.id as string, name: (p.name as string).trim(), capabilities })
+  }
+  return out
+}
+
 export type ManifestResult =
   | { ok: true; manifest: PluginManifest; errors: [] }
   | { ok: false; manifest: null; errors: string[] }
@@ -381,7 +532,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
     'config',
     'auth',
     'instructions',
-    'widgets'
+    'widgets',
+    'media'
   ])
   for (const k of Object.keys(m)) if (!allowed.has(k)) errors.push(`"${k}" is not a manifest field`)
   if (m.manifestVersion !== 1) errors.push('manifestVersion must be 1')
@@ -437,6 +589,7 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
   const tools = checkTools(typeof id === 'string' ? id : 'x', m.tools, errors)
   const auth = checkAuth(m.auth, network as string[], config, errors)
   const widgets = checkWidgets(m.widgets, tools, errors)
+  const media = checkMedia(m.media, tools, widgets, errors)
 
   if (errors.length) return { ok: false, manifest: null, errors }
   return {
@@ -459,7 +612,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
       config,
       ...(auth ? { auth } : {}),
       ...(m.instructions ? { instructions: m.instructions as string } : {}),
-      ...(widgets.length ? { widgets } : {})
+      ...(widgets.length ? { widgets } : {}),
+      ...(media.length ? { media } : {})
     }
   }
 }
@@ -499,6 +653,9 @@ export function permissionsOf(m: PluginManifest): string[] {
       : []),
     ...m.tools.filter((t) => t.effect === 'write').map((t) => `action:${t.name}`),
     // Each widget is approved on its own; a new or renamed one asks again.
-    ...(m.widgets ?? []).map((w) => `widget:${w.id}`)
+    ...(m.widgets ?? []).map((w) => `widget:${w.id}`),
+    // Offering media to Design is approved per provider, like widgets. Each
+    // submission still asks (see docs/design/MEDIA-PLUGINS.md).
+    ...(m.media ?? []).map((p) => `media:${p.id}`)
   ]
 }

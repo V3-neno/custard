@@ -38,6 +38,21 @@ const textOf = (m) =>
         .map((c) => c.text)
         .join('')
 const isResults = (m) => Array.isArray(m.content) && m.content.some((c) => c.type === 'tool_result')
+// Mock additions, one file per workstream in test/e2e/mocks/ (each owned by
+// its workstream, so nobody edits this file to add a script). A module may
+// export route({ req, res, url, body, j, OUT }) returning true when it
+// answered, trigger(ask) returning a script key (prefix keys with the
+// workstream), and scripts({ tool, text, b, step }) returning more scripts.
+const mocksDir = new URL('./mocks/', import.meta.url)
+const extras = fs.existsSync(mocksDir)
+  ? await Promise.all(
+      fs
+        .readdirSync(mocksDir)
+        .filter((f) => f.endsWith('.mjs'))
+        .sort()
+        .map((f) => import(new URL(f, mocksDir)))
+    )
+  : []
 let msg = 0
 http
   .createServer((req, res) => {
@@ -49,6 +64,7 @@ http
         res.writeHead(status, { 'content-type': 'application/json' })
         res.end(JSON.stringify(data))
       }
+      for (const x of extras) if (x.route?.({ req, res, url, body, j, OUT })) return
       // Token counting: a fixed figure, larger for a message meant to be over.
       if (url.pathname === '/v1/messages/count_tokens') {
         const b = JSON.parse(body)
@@ -309,10 +325,12 @@ http
         [/mode link test/, 'mlink'],
         [/mode fs test/, 'mfs']
       ].find(([r]) => r.test(ask))?.[1]
+      const extra = extras.map((x) => x.trigger?.(ask)).find(Boolean)
       const key =
         hardening ??
         widget ??
         boundary ??
+        extra ??
         (/stop test/.test(ask)
           ? 'stop'
           : /try again/.test(ask)
@@ -609,6 +627,7 @@ http
         ],
         plain: ['OK.']
       }
+      for (const x of extras) Object.assign(scripts, x.scripts?.({ tool, text, b, step }) ?? {})
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]
       let stop = 'tool_use'
       if (key === 'compact' || key === 'quote') {

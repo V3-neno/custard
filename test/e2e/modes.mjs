@@ -5,7 +5,7 @@
 //   - Chat and Design aren't offered Code's file tools, and a call to one
 //     does nothing
 //   - a skill whose frontmatter and text claim permissions changes nothing
-//     about the tools Design is offered
+//     about the tools Design is offered (Chat's, plus its own design_ tools)
 //   - Skills mode can still propose a skill (it asks first, as before)
 // Usage, from the repo root after `npx electron-vite build`:
 //   node test/e2e/interrupt-mock.mjs <out> &   (with <out>/vault and <out>/plugin as for widgets.mjs)
@@ -164,9 +164,11 @@ try {
   step("A skill can't raise Design's permissions")
   const designSys = (chatRequests().at(-1)?.system ?? []).map((b) => b.text).join('\n')
   check(designSys.includes('escalate'), 'the escalating skill is listed in Design')
+  // Design adds only its own output tools.
+  const own = toolsBy.Design.filter((n) => !n.startsWith('design_'))
   check(
-    JSON.stringify([...toolsBy.Design].sort()) === JSON.stringify([...toolsBy.Chat].sort()),
-    'Design is offered exactly the tools Chat is'
+    JSON.stringify(own.sort()) === JSON.stringify([...toolsBy.Chat].sort()),
+    `Design is offered Chat's tools plus its own design_ tools (${toolsBy.Design.filter((n) => n.startsWith('design_')).join(', ')})`
   )
 
   step('Skills mode can still propose a skill, asking first')

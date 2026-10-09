@@ -24,6 +24,11 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/src')
       }
     },
-    plugins: [react(), tailwindcss()]
+    plugins: [react(), tailwindcss()],
+    build: {
+      // Fonts are never inlined as data: URLs, which the main window's CSP
+      // (default-src 'self', no font-src) blocks; they ship as files.
+      assetsInlineLimit: (file: string) => (/\.(woff2?|ttf|otf)$/i.test(file) ? false : undefined)
+    }
   }
 })

@@ -511,6 +511,34 @@ function Detail({
       <ConfigForm key={p.id} p={p} onSaved={onChange} />
       {p.active && <PluginMemory p={p} />}
 
+      {p.active && (
+        <section className="mb-5">
+          <h4 className="mb-1 text-sm font-medium">Use in Chat and Design</h4>
+          <p className="mb-2 text-xs text-ash-500">
+            Chat, Design and Skills only use extensions; they don&apos;t build anything. Turn this
+            on only for plugins you trust not to create plugins or skills, send prompts to coding or
+            agent services, or start implementation work. Custard can&apos;t check that for you.
+            Code&apos;s Plugins workspace doesn&apos;t need it.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-ash-300">
+            <input
+              type="checkbox"
+              checked={p.chatDesign === 'on'}
+              onChange={(e) =>
+                run('Saving…', () => window.custard.plugins.setChatDesign(p.id, e.target.checked))
+              }
+            />
+            Use {p.name} in Chat, Design and Skills
+          </label>
+          {p.chatDesign === 'changed' && (
+            <p className="mt-1 text-xs text-molten-300">
+              This version can reach more than when you turned this on, so it&apos;s off until you
+              turn it on again.
+            </p>
+          )}
+        </section>
+      )}
+
       {writeTools.length > 0 && (
         <section className="mb-5">
           <h4 className="mb-1 text-sm font-medium">Actions</h4>

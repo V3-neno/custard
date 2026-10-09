@@ -20,7 +20,7 @@ type Props = {
   onStop: () => void
   draft: string
   setDraft: (text: string) => void
-  // Chat mode only: files to send with the message.
+  // Chat and Design only: files to send with the message.
   files?: {
     items: DraftAttachment[]
     errors: { name: string; error: string }[]
