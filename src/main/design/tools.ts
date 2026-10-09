@@ -298,7 +298,18 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
       request
     })
   )
-  job = await s.jobs.submit(job.id, ctx.signal, token)
+  try {
+    job = await s.jobs.submit(job.id, ctx.signal, token)
+  } catch (err) {
+    // Refused before sending (e.g. the provider stopped being ready after
+    // the card): nothing was sent; settle the version rather than leave it
+    // pending.
+    if (!(err instanceof JobError)) throw err
+    artifact = settleVersion(artifact, versionId, { status: 'failed', error: err.message })
+    s.artifacts.save(artifact)
+    s.emit({ type: 'artifact', conversationId: ctx.conversationId, artifact })
+    return notRun(`${err.message} Nothing was sent.`)
+  }
   s.emit({ type: 'job', conversationId: ctx.conversationId, job })
   // Only failures that say something about the provider are kept for the
   // session. A refused prompt (rejected) says nothing about the next one, so

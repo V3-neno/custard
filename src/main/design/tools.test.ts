@@ -319,6 +319,30 @@ describe('design tools', () => {
     await expect(t.check('j')).rejects.toThrow(/removed or turned off/)
   })
 
+  it('a provider that stops being ready after the card leaves no pending version', async () => {
+    const base = slowVideo()
+    let ready = true
+    const p: MediaProvider = {
+      ...base,
+      info: () => ({ ...base.info(), state: ready ? 'ready' : 'disabled' })
+    }
+    const s = service(p)
+    const r = await runDesignTool(
+      s,
+      'design_media',
+      { operation: 'video.text-to-video', prompt: 'waves', durationSeconds: 5 },
+      ctx({
+        approve: async () => {
+          ready = false
+          return true
+        }
+      })
+    )
+    expect(r.outcome).toBe('not-run')
+    expect(base.calls.submit).toHaveLength(0)
+    expect(s.artifacts.list(CHAT)[0]?.versions[0].status ?? 'none').not.toBe('pending')
+  })
+
   it('declined: nothing is sent or saved', async () => {
     const p = slowVideo()
     const s = service(p)
