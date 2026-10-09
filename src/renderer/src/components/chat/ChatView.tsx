@@ -36,6 +36,8 @@ import {
   type HandoffState
 } from './LongChat'
 import type { Workspace } from '../../../../shared/plugins'
+import DesignWorkspace from '../design/Workspace'
+import { useOutputs } from '../design/useOutputs'
 type Live = {
   requestId: string
   userText: string
@@ -98,6 +100,39 @@ type Props = {
 }
 
 const unsent = new Map<Mode, { text: string; draftId: string; files: DraftAttachment[] }>()
+
+const NARROW = 900
+const PANE_MIN = 320
+const CHAT_MIN = 360
+const PANE_KEY = 'custard.design.paneWidth'
+
+// Narrow windows: the conversation and Design's outputs take turns.
+function SideSwitch({
+  side,
+  onSide,
+  count
+}: {
+  side: 'chat' | 'outputs'
+  onSide: (s: 'chat' | 'outputs') => void
+  count: number
+}): React.JSX.Element {
+  const cls = (on: boolean): string =>
+    `rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+      on
+        ? 'molten-fill text-forge-950'
+        : 'border border-forge-700 text-ash-300 hover:text-molten-200'
+    }`
+  return (
+    <div className="flex shrink-0 justify-center gap-1 pt-2" role="group" aria-label="Show">
+      <button className={cls(side === 'chat')} onClick={() => onSide('chat')}>
+        Conversation
+      </button>
+      <button className={cls(side === 'outputs')} onClick={() => onSide('outputs')}>
+        Outputs ({count})
+      </button>
+    </div>
+  )
+}
 
 function ChatView(props: Props): React.JSX.Element {
   const { mode, onModeChange, hasKey, settings, onSettings, onOpenSettings } = props
@@ -433,147 +468,235 @@ function ChatView(props: Props): React.JSX.Element {
     !!current && !live && !continuedIn.length && (tooLong || !!current.context?.warn)
 
   const empty = !current && !live
+
+  // Design: the output workspace beside the conversation, once the chat has
+  // outputs. Its width is the user's, kept across chats; in a narrow window
+  // the conversation and the outputs take turns.
+  const { outputs, latest } = useOutputs(mode === 'design' ? (current?.id ?? null) : null)
+  const showPane = mode === 'design' && !!current && outputs.length > 0
+  const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW)
+  const [side, setSide] = useState<'chat' | 'outputs'>('chat')
+  const [paneWidth, setPaneWidth] = useState(() => {
+    const w = Number(localStorage.getItem(PANE_KEY))
+    return Number.isFinite(w) && w > 0 ? w : Math.round(window.innerWidth * 0.5)
+  })
+  useEffect(() => {
+    const onResize = (): void => setNarrow(window.innerWidth < NARROW)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  // A new or changed output is shown, on a narrow window too.
+  const [seenOutput, setSeenOutput] = useState(latest?.seq ?? 0)
+  if (latest && latest.seq !== seenOutput) {
+    setSeenOutput(latest.seq)
+    setSide('outputs')
+  }
+  const clampPane = (w: number): number =>
+    Math.round(Math.max(PANE_MIN, Math.min(w, window.innerWidth - CHAT_MIN)))
+  const dragPane = (e: React.PointerEvent<HTMLDivElement>): void => {
+    const el = e.currentTarget
+    el.setPointerCapture(e.pointerId)
+    const move = (m: PointerEvent): void => setPaneWidth(clampPane(window.innerWidth - m.clientX))
+    const up = (): void => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+      setPaneWidth((w) => {
+        localStorage.setItem(PANE_KEY, String(w))
+        return w
+      })
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+  }
+  const nudgePane = (e: React.KeyboardEvent): void => {
+    const step = e.key === 'ArrowLeft' ? 40 : e.key === 'ArrowRight' ? -40 : 0
+    if (!step) return
+    e.preventDefault()
+    setPaneWidth((w) => {
+      const next = clampPane(w + step)
+      localStorage.setItem(PANE_KEY, String(next))
+      return next
+    })
+  }
+  const split = showPane && !narrow
+  const chatHidden = showPane && narrow && side === 'outputs'
   const modeLabel = modes.find((m) => m.id === mode)?.label ?? 'Chat'
   const providerName = providerNames[providerOf(settings.model)]
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="flex-1 overflow-y-auto">
-        {empty ? (
-          <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
-            <Orb size={128} state={copy[mode].orb} />
-            <div className="text-center">
-              <h1 className="text-3xl font-semibold tracking-tight text-molten-200">
-                {copy[mode].headline}
-              </h1>
-              <p className="mt-2 text-sm text-ash-400">
-                {hasKey ? (
-                  modes.find((m) => m.id === mode)?.hint
-                ) : (
-                  <button onClick={onOpenSettings} className="text-molten-300 hover:underline">
-                    Add your {providerName} API key to get started
-                  </button>
-                )}
-              </p>
+    <div className="relative flex min-h-0 flex-1">
+      <div className={`min-h-0 min-w-0 flex-1 flex-col ${chatHidden ? 'hidden' : 'flex'}`}>
+        {showPane && narrow && <SideSwitch side={side} onSide={setSide} count={outputs.length} />}
+        <div className="flex-1 overflow-y-auto">
+          {empty ? (
+            <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
+              <Orb size={128} state={copy[mode].orb} />
+              <div className="text-center">
+                <h1 className="text-3xl font-semibold tracking-tight text-molten-200">
+                  {copy[mode].headline}
+                </h1>
+                <p className="mt-2 text-sm text-ash-400">
+                  {hasKey ? (
+                    modes.find((m) => m.id === mode)?.hint
+                  ) : (
+                    <button onClick={onOpenSettings} className="text-molten-300 hover:underline">
+                      Add your {providerName} API key to get started
+                    </button>
+                  )}
+                </p>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 pt-8 pb-6">
-            {current?.continuedFrom && <HandoffCard k={current.continuedFrom} onOpen={open} />}
-            {current?.messages.map((m, i) => (
-              <Fragment key={i}>
-                {(current.compactions ?? [])
-                  .filter((k) => k.after === i)
-                  .slice(-1)
-                  .map((k) => (
-                    <CompactionLine key={`k${i}`} k={k} />
-                  ))}
-                {!isToolResults(m) && (
-                  // A reply that continues after vault actions sits flush with the part before it.
-                  <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
-                    <MessageView message={m} actions={actions} />
-                    <SentFiles
-                      chat={current.id}
-                      files={(current.attachments ?? []).filter((a) => a.message === i)}
+          ) : (
+            <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 pt-8 pb-6">
+              {current?.continuedFrom && <HandoffCard k={current.continuedFrom} onOpen={open} />}
+              {current?.messages.map((m, i) => (
+                <Fragment key={i}>
+                  {(current.compactions ?? [])
+                    .filter((k) => k.after === i)
+                    .slice(-1)
+                    .map((k) => (
+                      <CompactionLine key={`k${i}`} k={k} />
+                    ))}
+                  {!isToolResults(m) && (
+                    // A reply that continues after vault actions sits flush with the part before it.
+                    <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
+                      <MessageView message={m} actions={actions} />
+                      <SentFiles
+                        chat={current.id}
+                        files={(current.attachments ?? []).filter((a) => a.message === i)}
+                      />
+                    </div>
+                  )}
+                  {turnSources.has(i) && (
+                    <SourcesList
+                      sources={turnSources.get(i)!.sources}
+                      answer={turnSources.get(i)!.answer}
                     />
-                  </div>
-                )}
-                {turnSources.has(i) && (
-                  <SourcesList
-                    sources={turnSources.get(i)!.sources}
-                    answer={turnSources.get(i)!.answer}
-                  />
-                )}
-                {notices
-                  // The length notice below says it, with the way on.
-                  .filter((n) => n.after === i + 1 && !(showLength && n === lastNotice && tooLong))
-                  .map((n, j) => (
-                    <NoticeLine
-                      key={j}
-                      notice={n}
-                      onContinue={
-                        canContinue && n === lastNotice ? () => send(CONTINUE) : undefined
-                      }
-                    />
-                  ))}
-              </Fragment>
-            ))}
-            {showLength && !handoff && (
-              <LengthNotice
-                use={current.context}
-                tooLong={tooLong}
-                busy={!!handoff}
-                onContinue={() => continueNew()}
-              />
-            )}
-            {handoff && (
-              <HandoffProgress
-                state={handoff}
-                onRetry={() => continueNew()}
-                onSkip={() => continueNew(true)}
-                onCancel={() => setHandoffFor(null)}
-              />
-            )}
-            {!live && continuedIn.length > 0 && <ContinuedIn links={continuedIn} onOpen={open} />}
-            {live && (
-              <>
-                <UserBubble text={live.userText} />
-                {live.files ? (
-                  <p className="-mt-4 text-right text-[11px] text-ash-500">
-                    Sending with {live.files} {live.files === 1 ? 'file' : 'files'}
-                  </p>
-                ) : null}
-                <Working segments={live.segments} approvals={live.approvals} />
-              </>
-            )}
-            <div ref={bottom} />
-          </div>
-        )}
+                  )}
+                  {notices
+                    // The length notice below says it, with the way on.
+                    .filter(
+                      (n) => n.after === i + 1 && !(showLength && n === lastNotice && tooLong)
+                    )
+                    .map((n, j) => (
+                      <NoticeLine
+                        key={j}
+                        notice={n}
+                        onContinue={
+                          canContinue && n === lastNotice ? () => send(CONTINUE) : undefined
+                        }
+                      />
+                    ))}
+                </Fragment>
+              ))}
+              {showLength && !handoff && (
+                <LengthNotice
+                  use={current.context}
+                  tooLong={tooLong}
+                  busy={!!handoff}
+                  onContinue={() => continueNew()}
+                />
+              )}
+              {handoff && (
+                <HandoffProgress
+                  state={handoff}
+                  onRetry={() => continueNew()}
+                  onSkip={() => continueNew(true)}
+                  onCancel={() => setHandoffFor(null)}
+                />
+              )}
+              {!live && continuedIn.length > 0 && <ContinuedIn links={continuedIn} onOpen={open} />}
+              {live && (
+                <>
+                  <UserBubble text={live.userText} />
+                  {live.files ? (
+                    <p className="-mt-4 text-right text-[11px] text-ash-500">
+                      Sending with {live.files} {live.files === 1 ? 'file' : 'files'}
+                    </p>
+                  ) : null}
+                  <Working segments={live.segments} approvals={live.approvals} />
+                </>
+              )}
+              <div ref={bottom} />
+            </div>
+          )}
+        </div>
+
+        <div className="mx-auto w-full max-w-3xl px-6 pb-6">
+          {/* The length notice in the chat already says it, with the way on. */}
+          {error && !(overflow && showLength) && (
+            <div className="mb-2 px-2 text-sm text-ember-600">{error}</div>
+          )}
+          <WidgetSlot
+            conversationId={current?.id ?? null}
+            requestId={live?.requestId ?? null}
+            provider={providerOf(settings.model)}
+          />
+          {mode === 'code' && (
+            <WorkspaceBar
+              fixed={current ? current.workspace : null}
+              value={workspace}
+              onChange={setWorkspace}
+              disabled={!!live}
+            />
+          )}
+          <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
+          <Composer
+            busy={!!live}
+            placeholder={copy[mode].placeholder.replace('{provider}', providerName)}
+            settings={settings}
+            onSettings={onSettings}
+            onSend={send}
+            onStop={() => live && window.custard.chat.stop(live.requestId)}
+            draft={draft}
+            setDraft={setDraft}
+            {...(acceptsAttachments(mode)
+              ? {
+                  files: {
+                    items: files,
+                    errors: fileErrors,
+                    adding,
+                    onPick: () => void pickFiles(),
+                    onAdd: (f: File[]) => void addFiles(f),
+                    onRemove: removeFile,
+                    onDismiss: () => setFileErrors([])
+                  }
+                }
+              : {})}
+          />
+        </div>
       </div>
 
-      <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-        {/* The length notice in the chat already says it, with the way on. */}
-        {error && !(overflow && showLength) && (
-          <div className="mb-2 px-2 text-sm text-ember-600">{error}</div>
-        )}
-        <WidgetSlot
-          conversationId={current?.id ?? null}
-          requestId={live?.requestId ?? null}
-          provider={providerOf(settings.model)}
-        />
-        {mode === 'code' && (
-          <WorkspaceBar
-            fixed={current ? current.workspace : null}
-            value={workspace}
-            onChange={setWorkspace}
-            disabled={!!live}
+      {split && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the outputs"
+          tabIndex={0}
+          onPointerDown={dragPane}
+          onKeyDown={nudgePane}
+          className="group flex w-2 shrink-0 cursor-col-resize items-stretch justify-center focus:outline-none"
+        >
+          <div className="w-px bg-forge-700 transition-colors group-hover:bg-molten-500/60 group-focus:bg-molten-500/60" />
+        </div>
+      )}
+      {showPane && (split || side === 'outputs') && (
+        <div
+          className={`flex min-h-0 min-w-0 flex-col ${split ? 'shrink-0' : 'flex-1'}`}
+          style={split ? { width: clampPane(paneWidth) } : undefined}
+        >
+          {narrow && <SideSwitch side={side} onSide={setSide} count={outputs.length} />}
+          <DesignWorkspace
+            chat={current.id}
+            outputs={outputs}
+            latest={latest}
+            onDraft={(text) => {
+              setDraft(text)
+              setSide('chat')
+            }}
           />
-        )}
-        <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
-        <Composer
-          busy={!!live}
-          placeholder={copy[mode].placeholder.replace('{provider}', providerName)}
-          settings={settings}
-          onSettings={onSettings}
-          onSend={send}
-          onStop={() => live && window.custard.chat.stop(live.requestId)}
-          draft={draft}
-          setDraft={setDraft}
-          {...(acceptsAttachments(mode)
-            ? {
-                files: {
-                  items: files,
-                  errors: fileErrors,
-                  adding,
-                  onPick: () => void pickFiles(),
-                  onAdd: (f: File[]) => void addFiles(f),
-                  onRemove: removeFile,
-                  onDismiss: () => setFileErrors([])
-                }
-              }
-            : {})}
-        />
-      </div>
+        </div>
+      )}
 
       {historyOpen && (
         <HistoryDrawer
