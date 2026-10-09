@@ -75,8 +75,43 @@ function reasonOf(err: APIError): string {
   return clean.length > 240 ? `${clean.slice(0, 240)}…` : clean || `HTTP ${err.status}`
 }
 
+// Dispatch evidence (stabilization contract S1), set only from what Custard
+// itself observed:
+//   - refusedHere: Custard stopped it before calling OpenAI, so nothing left
+//     this computer and repeating it is safe;
+//   - refusedByOpenAI: Custard's own HTTP client got a 4xx from OpenAI. It
+//     was dispatched and failed. Whether OpenAI bills a refused request isn't
+//     documented (docs/design/IMAGES.md, Evidence E7, checked 2026-10-09), so
+//     a repeat's risk stays unknown and Design warns before one;
+//   - unclear: anything else after sending.
+const refusedHere = (kind: MediaError['kind'], message: string): MediaError =>
+  new MediaError(kind, message, false, {
+    state: 'not-dispatched',
+    repeat: { risk: 'safe', basis: 'Custard refused it before calling OpenAI.' }
+  })
+
+// `sent: true`: a 4xx is a response, so the request did leave (amendment 1).
+const refusedByOpenAI = (kind: MediaError['kind'], message: string, status: number): MediaError =>
+  new MediaError(kind, message, true, {
+    state: 'rejected',
+    repeat: {
+      risk: 'unknown',
+      basis: `OpenAI answered HTTP ${status}. OpenAI doesn't document whether a refused request is billed.`
+    }
+  })
+
+const unclear = (message: string): MediaError =>
+  new MediaError('temporary', message, 'unknown', {
+    state: 'unknown',
+    repeat: {
+      risk: 'unknown',
+      basis: 'It may have reached OpenAI and run; OpenAI offers no way to check.'
+    }
+  })
+
 // How a failed request maps to a job outcome:
-//   - OpenAI answered with a 4xx: it refused the request, which didn't run.
+//   - OpenAI answered with a 4xx: it refused the request and made no image
+//     (rejected; repeat risk unknown, see refusedByOpenAI).
 //   - Anything else (5xx, a dropped connection, a timeout, Custard stopping
 //     the turn): it may have reached OpenAI and run, so the outcome is
 //     unknown and it is never sent again on its own.
@@ -85,32 +120,32 @@ export function mapError(err: unknown, model: string): MediaError {
   if (err instanceof APIError && typeof err.status === 'number') {
     const reason = reasonOf(err)
     if (err.status === 401)
-      return new MediaError('unconfigured', 'OpenAI rejected the saved API key.', false)
+      return refusedByOpenAI('unconfigured', 'OpenAI rejected the saved API key.', err.status)
     if (err.status === 403)
-      return new MediaError(
+      return refusedByOpenAI(
         'unconfigured',
         `OpenAI refused access to ${model}: ${reason} (OpenAI may require organization verification for its image models.)`,
-        false
+        err.status
       )
     if (err.status === 404)
-      return new MediaError(
+      return refusedByOpenAI(
         'unsupported',
         `OpenAI doesn't offer ${model} to this key: ${reason}`,
-        false
+        err.status
       )
     if (err.status === 429)
-      return new MediaError(
+      return refusedByOpenAI(
         'temporary',
         `OpenAI is rate limiting or out of quota: ${reason}`,
-        false
+        err.status
       )
     if (err.status >= 400 && err.status < 500)
-      return new MediaError('rejected', `OpenAI refused the request: ${reason}`, false)
-    return new MediaError('temporary', `OpenAI had an error (${err.status}): ${reason}`, 'unknown')
+      return refusedByOpenAI('rejected', `OpenAI refused the request: ${reason}`, err.status)
+    return unclear(`OpenAI had an error (${err.status}): ${reason}`)
   }
   if (err instanceof APIConnectionError)
-    return new MediaError('temporary', `The connection to OpenAI failed: ${err.message}`, 'unknown')
-  return new MediaError('temporary', err instanceof Error ? err.message : String(err), 'unknown')
+    return unclear(`The connection to OpenAI failed: ${err.message}`)
+  return unclear(err instanceof Error ? err.message : String(err))
 }
 
 export const remoteIdFor = (idempotencyKey: string): string =>
@@ -170,23 +205,22 @@ export class OpenAIImages implements MediaProvider {
   ): Promise<{ remoteId: string; status: RemoteStatus }> {
     const model = this.chosen()
     const key = this.deps.apiKey()
-    if (!key) throw new MediaError('unconfigured', 'Add your OpenAI API key in Settings.', false)
-    if (!model)
-      throw new MediaError('unconfigured', 'Choose an image model in Design settings.', false)
+    if (!key) throw refusedHere('unconfigured', 'Add your OpenAI API key in Settings.')
+    if (!model) throw refusedHere('unconfigured', 'Choose an image model in Design settings.')
     if (request.operation !== 'image.generate' && request.operation !== 'image.edit')
-      throw new MediaError('unsupported', `OpenAI Images can't do ${request.operation}.`, false)
+      throw refusedHere('unsupported', `OpenAI Images can't do ${request.operation}.`)
     const remoteId = remoteIdFor(options.idempotencyKey)
     if (this.deps.results.has(remoteId))
-      throw new MediaError('rejected', 'This request was already made.', false)
+      throw refusedHere('rejected', 'This request was already made.')
     const format = EXT[request.format ?? 'image/png']
-    if (!format) throw new MediaError('unsupported', `${request.format} isn't offered.`, false)
+    if (!format) throw refusedHere('unsupported', `${request.format} isn't offered.`)
 
     // Everything that can fail before sending happens here, so a failure
     // is certain not to have reached OpenAI.
     let images: Awaited<ReturnType<typeof toFile>>[] = []
     if (request.operation === 'image.edit') {
       if (!request.references.length)
-        throw new MediaError('rejected', 'An edit needs an image to work from.', false)
+        throw refusedHere('rejected', 'An edit needs an image to work from.')
       try {
         images = await Promise.all(
           request.references.map(async (r) => {
@@ -197,11 +231,10 @@ export class OpenAIImages implements MediaProvider {
           })
         )
       } catch (err) {
-        throw new MediaError('rejected', err instanceof Error ? err.message : String(err), false)
+        throw refusedHere('rejected', err instanceof Error ? err.message : String(err))
       }
     }
-    if (options.signal?.aborted)
-      throw new MediaError('rejected', 'Stopped before it was sent.', false)
+    if (options.signal?.aborted) throw refusedHere('rejected', 'Stopped before it was sent.')
 
     const { baseURL } = this.deps.endpoint()
     const client = this.deps.client
@@ -273,7 +306,14 @@ export class OpenAIImages implements MediaProvider {
       throw new MediaError(
         'temporary',
         `OpenAI made the image but Custard couldn't save it (${err instanceof Error ? err.message : String(err)}).`,
-        true
+        true,
+        {
+          state: 'unknown',
+          repeat: {
+            risk: 'may-duplicate',
+            basis: 'OpenAI returned an image, so it ran and was probably charged.'
+          }
+        }
       )
     }
     return { remoteId, status: { state: 'completed' } }

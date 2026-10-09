@@ -143,6 +143,22 @@ describe('OpenAI Images: what it declares', () => {
     }
   })
 
+  it('gives rates, never a per-request price', () => {
+    for (const m of OPENAI_IMAGE_MODELS.filter((x) => x.pricing)) {
+      expect(m.pricing?.text).toMatch(/per 1M tokens/)
+      expect(m.pricing?.text).toMatch(/total depends/)
+      expect(m.pricing?.text).not.toMatch(/per (image|request)/)
+    }
+    // No standard-tier row for gpt-image-2 on the pricing page (2026-10-09).
+    expect(OPENAI_IMAGE_MODELS.find((m) => m.id === 'gpt-image-2')?.pricing).toBeUndefined()
+  })
+
+  it('offers exactly the ids the OpenAI SDK accepts for images, minus those shutting down', () => {
+    // ImageModel in openai 7.30.0 resources/images.d.ts, the undated aliases.
+    const sdk = ['gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']
+    expect(OPENAI_IMAGE_MODELS.map((m) => m.id).sort()).toEqual([...sdk].sort())
+  })
+
   it('lists no retired or scheduled-for-shutdown model and no chat model', () => {
     const ids = OPENAI_IMAGE_MODELS.map((m) => m.id)
     for (const gone of ['dall-e-2', 'dall-e-3', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5'])
@@ -343,21 +359,59 @@ describe('OpenAI Images: submitting', () => {
 
 describe('OpenAI Images: outcomes', () => {
   const h = new Headers()
-  it('a 4xx means OpenAI refused it and it did not run', () => {
+  it('a 4xx means OpenAI refused it: it was sent, and made no image', () => {
     expect(
       mapError(APIError.generate(400, { error: { message: 'bad prompt' } }, undefined, h), 'm')
-    ).toMatchObject({ kind: 'rejected', sent: false })
+    ).toMatchObject({ kind: 'rejected', sent: true })
     expect(mapError(APIError.generate(401, undefined, 'nope', h), 'm')).toMatchObject({
       kind: 'unconfigured',
-      sent: false
+      sent: true
     })
     expect(mapError(APIError.generate(403, undefined, 'verify', h), 'm').message).toMatch(
       /organization verification/
     )
     expect(mapError(APIError.generate(429, undefined, 'slow down', h), 'm')).toMatchObject({
       kind: 'temporary',
-      sent: false
+      sent: true
     })
+  })
+
+  it('sets dispatch evidence only from what Custard saw (contract S1)', async () => {
+    // A 4xx is a response: dispatched and failed, repeat risk unknown,
+    // because OpenAI doesn't document whether a refused request is billed.
+    for (const status of [400, 401, 403, 404, 409, 413, 422, 429])
+      expect(
+        mapError(APIError.generate(status, undefined, 'no', h), 'm'),
+        String(status)
+      ).toMatchObject({ sent: true, dispatch: { state: 'rejected', repeat: { risk: 'unknown' } } })
+    for (const e of [
+      APIError.generate(500, undefined, 'oops', h),
+      APIError.generate(503, undefined, 'busy', h),
+      new APIConnectionError({ message: 'reset' }),
+      new APIConnectionTimeoutError(),
+      new Error('aborted')
+    ])
+      expect(mapError(e, 'm').dispatch).toMatchObject({
+        state: 'unknown',
+        repeat: { risk: 'unknown' }
+      })
+    // Refused here, before calling OpenAI: not dispatched, safe to repeat.
+    const notSent = { state: 'not-dispatched', repeat: { risk: 'safe' } }
+    const noKey = provider({ apiKey: () => null }).p
+    expect(
+      (await noKey.submit(gen(), { idempotencyKey: 'c1', read: noRead }).catch((e) => e)).dispatch
+    ).toMatchObject(notSent)
+    const stop = new AbortController()
+    stop.abort()
+    const { p, fake } = provider()
+    expect(
+      (
+        await p
+          .submit(gen(), { idempotencyKey: 'c2', read: noRead, signal: stop.signal })
+          .catch((e) => e)
+      ).dispatch
+    ).toMatchObject(notSent)
+    expect(fake.calls).toHaveLength(0)
   })
 
   it('a 5xx, a dropped connection or a timeout leaves the outcome unknown', () => {
@@ -477,6 +531,10 @@ describe('OpenAI Images: through design_media', () => {
     expect(asked).toHaveLength(1)
     expect(asked[0]).toMatch(/^OpenAI Images: Generate an image/)
     expect(asked[0]).toMatch(/from OpenAI API pricing page/)
+    // A rate with its source, never shown as what this request costs.
+    expect(asked[0]).toMatch(/Pricing, not a quote for this request: image output \$30\.00/)
+    expect(asked[0]).toMatch(/doesn't know the total before it runs/)
+    expect(asked[0]).not.toMatch(/^Price:/m)
     expect(asked[0]).toMatch(/can't be cancelled/)
     expect(fake.calls).toHaveLength(1)
     const job = s.jobs.list()[0]

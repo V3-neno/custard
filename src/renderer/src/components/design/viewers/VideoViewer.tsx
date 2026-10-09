@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Job } from '../../../../../shared/design'
 import { cleanError } from '../../settings/ui'
-import { mediaUrl, type ViewerProps } from './types'
+import { jobOf, mediaUrl, type ViewerProps } from './types'
 
 // A video version: native playback controls on the stored file, where it
 // came from, and a saved copy through export. While its job runs, the job's
@@ -26,7 +26,15 @@ const STATE: Record<Job['state'], string> = {
   unknown: "Unknown: it may have been submitted. Don't send it again without checking."
 }
 
-function JobPanel({ chat, jobId }: { chat: string; jobId: string }): React.JSX.Element {
+function JobPanel({
+  chat,
+  artifactId,
+  versionId
+}: {
+  chat: string
+  artifactId: string
+  versionId: string
+}): React.JSX.Element {
   const [job, setJob] = useState<Job | null>(null)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
@@ -37,22 +45,29 @@ function JobPanel({ chat, jobId }: { chat: string; jobId: string }): React.JSX.E
     let live = true
     window.custard.design
       .jobs(chat)
-      .then((all) => live && setJob(all.find((j) => j.id === jobId) ?? null))
+      .then((all) => live && setJob(jobOf(all, artifactId, versionId) ?? null))
     const off = window.custard.design.onEvent((e) => {
-      if (e.type === 'job' && e.conversationId === chat && e.job.id === jobId) setJob(e.job)
+      if (
+        e.type === 'job' &&
+        e.conversationId === chat &&
+        e.job.target.artifactId === artifactId &&
+        e.job.target.versionId === versionId
+      )
+        setJob(e.job)
     })
     return () => {
       live = false
       off()
     }
-  }, [chat, jobId])
+  }, [chat, artifactId, versionId])
 
   const act = async (action: 'check' | 'cancel' | 'stop'): Promise<void> => {
     setBusy(true)
     setNote(null)
     setConfirming(false)
     try {
-      const r = await window.custard.design.job(chat, action, jobId)
+      if (!job) return
+      const r = await window.custard.design.job(chat, action, job.id)
       if ('error' in r) setNote(r.error)
       else {
         setJob(r.job)
@@ -152,8 +167,8 @@ function Version({ chat, artifact, version }: ViewerProps): React.JSX.Element {
     }
   }
 
-  if (version.status === 'pending' && version.jobId)
-    return <JobPanel chat={chat} jobId={version.jobId} />
+  if (version.status === 'pending')
+    return <JobPanel chat={chat} artifactId={artifact.id} versionId={version.id} />
   if (version.status !== 'succeeded' || !file)
     return (
       <div className="rounded-2xl border border-forge-700 bg-forge-900/60 p-4 text-sm text-ash-400">

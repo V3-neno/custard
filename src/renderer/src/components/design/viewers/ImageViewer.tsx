@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Job, Version } from '../../../../../shared/design'
-import { mediaUrl, type ViewerProps } from './types'
+import { jobOf, mediaUrl, type ViewerProps } from './types'
 
 // A generated image: fit or actual size, zoom, and where it came from. An
 // edit (of images attached in the chat) is told apart from a new image made
@@ -47,15 +47,14 @@ function Viewer({ chat, artifact, version }: ViewerProps): React.JSX.Element {
 
   useEffect(() => {
     let live = true
-    if (!version.jobId) return
     window.custard.design
       .jobs(chat)
-      .then((list) => live && setJob(list.find((j) => j.id === version.jobId)))
+      .then((list) => live && setJob(jobOf(list, artifact.id, version.id)))
       .catch(() => {})
     return () => {
       live = false
     }
-  }, [chat, version.jobId])
+  }, [chat, artifact.id, version.id])
 
   const file = version.files.find((f) => f.mime.startsWith('image/'))
   const step = (dir: 1 | -1): void => {
