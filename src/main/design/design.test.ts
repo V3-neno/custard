@@ -21,7 +21,6 @@ import {
   VersionError
 } from './versions'
 import { DuplicateRiskError, JobError, JobTracker } from './jobs'
-import { approveSubmission } from './approval'
 import { fingerprint, planSkills, skillChanges, skillUse, type Candidate } from './skills'
 import {
   defaultDesignSettings,
@@ -381,7 +380,6 @@ describe('generation jobs, with the development-only video fixture', () => {
     const job = tracker.create({
       providerId: p.info().id,
       request,
-      approval: approveSubmission(p.info().source, request, 0),
       requestedBy: { conversationId: 'c1', messageIndex: 0 },
       target: { artifactId: artifact.id, versionId: created.version.id }
     })
@@ -416,7 +414,6 @@ describe('generation jobs, with the development-only video fixture', () => {
     const job = tracker.create({
       providerId: p.info().id,
       request,
-      approval: approveSubmission(p.info().source, request, 0),
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
@@ -435,7 +432,6 @@ describe('generation jobs, with the development-only video fixture', () => {
     const job = tracker.create({
       providerId: p.info().id,
       request,
-      approval: approveSubmission(p.info().source, request, 0),
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
@@ -451,15 +447,13 @@ describe('generation jobs, with the development-only video fixture', () => {
     const job = tracker.create({
       providerId: p.info().id,
       request,
-      approval: approveSubmission(p.info().source, request, 0),
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
     expect((await tracker.submit(job.id, undefined, auth(tracker, job.id))).state).toBe('unknown')
     const next = {
       requestedBy: { conversationId: 'c', messageIndex: 2 },
-      target: { artifactId: 'a', versionId: 'v2' },
-      approval: approveSubmission(p.info().source, request, 1)
+      target: { artifactId: 'a', versionId: 'v2' }
     }
     expect(() => tracker.resubmitJob(job.id, { acknowledgeDuplicateRisk: false, ...next })).toThrow(
       DuplicateRiskError
@@ -476,7 +470,6 @@ describe('generation jobs, with the development-only video fixture', () => {
     const job = tracker.create({
       providerId: p.info().id,
       request,
-      approval: approveSubmission(p.info().source, request, 0),
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
@@ -604,7 +597,6 @@ describe('generation jobs, with the development-only video fixture', () => {
     const job = tracker.create({
       providerId: p.info().id,
       request,
-      approval: approveSubmission(p.info().source, request, 0),
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
@@ -612,8 +604,7 @@ describe('generation jobs, with the development-only video fixture', () => {
     const again = tracker.resubmitJob(job.id, {
       acknowledgeDuplicateRisk: false,
       requestedBy: { conversationId: 'c', messageIndex: 2 },
-      target: { artifactId: 'a', versionId: 'v2' },
-      approval: approveSubmission(p.info().source, request, 1)
+      target: { artifactId: 'a', versionId: 'v2' }
     })
     expect(again.idempotencyKey).toBe(job.idempotencyKey)
   })
@@ -625,7 +616,6 @@ describe('generation jobs, with the development-only video fixture', () => {
       idempotencyKey: 'j1',
       providerId: p.info().id,
       request,
-      approval: approveSubmission(p.info().source, request, 0),
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' },
       state: 'not-submitted',
@@ -656,7 +646,6 @@ describe('generation jobs, with the development-only video fixture', () => {
       tracker.create({
         providerId: p.info().id,
         request,
-        approval: approveSubmission(p.info().source, request, 0),
         requestedBy: { conversationId: 'c', messageIndex: 0 },
         target: { artifactId: 'a', versionId: 'v' }
       })
@@ -672,7 +661,6 @@ describe('generation jobs, with the development-only video fixture', () => {
     const b = t2.create({
       providerId: noCancel.info().id,
       request,
-      approval: approveSubmission(noCancel.info().source, request, 0),
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' }
     })
@@ -696,7 +684,6 @@ describe('generation jobs, with the development-only video fixture', () => {
       idempotencyKey: 'j',
       providerId: p.info().id,
       request,
-      approval: approveSubmission(p.info().source, request, 0),
       requestedBy: { conversationId: 'c', messageIndex: 0 },
       target: { artifactId: 'a', versionId: 'v' },
       state: 'completed',

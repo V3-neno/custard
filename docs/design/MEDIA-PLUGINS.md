@@ -50,34 +50,32 @@ Design's card is asked every time, never "for this chat", and the plugin's
 (`'pending'`, used before the decision, sent nothing; the adapter still
 supports it.)
 
-The card covers exactly one submission (`src/main/design/approval.ts`):
+The card covers exactly one submission (contract S3,
+`src/main/design/authorization.ts`):
 
-- When the card is shown, Design records a `SubmissionApproval` on the job:
-  the provider's `Source` (for a plugin: plugin id, **build id** and provider
-  id), the operation, and a SHA-256 digest of what the card shows (prompt,
-  size, duration, format, and each file's name, type and SHA-256).
-- Before sending, the job tracker checks it against the job's request and
-  the provider as it is now. A changed argument or file, an updated or
-  rolled-back plugin, or a changed image model refuses the send, and the
-  job fails as not sent.
-- The adapter checks each file's bytes against the approved SHA-256.
-- The host (`invokeMedia`) gets a `MediaApproval` token, not a yes/no flag.
-  It recomputes the digest from the input it is about to hand the plugin
-  (hashing the file bytes it actually sends), checks the active build, the
-  provider, operation and role, and uses a submission's token **once**. A
-  replay is refused.
-- A job is sent at most once (`attemptedAt` is saved before sending), so an
-  approval can't be reused across restarts either.
+- Right after the card is approved, Design mints an opaque, single-use
+  token. Its binding stays in main-process memory: job, chat, provider
+  `Source` (for a plugin: id, **build** and provider id), operation, a hash
+  of the canonical arguments, and each reference's attachment id and content
+  SHA-256. Tokens are never saved, expire after 10 minutes unused, and are
+  dropped with a deleted chat.
+- The job tracker checks the token against the job before anything is sent.
+- The plugin host **consumes** it in `invokeMedia`, at the dispatch
+  boundary, before any other check: it compares the plugin input it is
+  about to send with the approved request (every field, and each reference's
+  bytes by SHA-256) and the binding with the active build. The token is
+  deleted first, so a refusal, a replay or an uncertain outcome never leaves
+  it usable.
 - `PluginHost.invoke` (the assistant's and widgets' route) refuses a media
-  tool by name, even with `preApproved`, so there's no second way in.
-- Status and result never take an approval: one passed with them is refused.
+  tool by name, even with `preApproved`. Status and result refuse a token.
 
 Cancel changes the job at the provider, so it is a write: the manifest
-requires a `write` tool, and the adapter sends a `MediaApproval` (role
-`cancel`, bound to the job reference) only when the job tracker was called
-with the user's go-ahead. The submission card doesn't cover it. Any other
-card the host would raise for these calls is refused, because the adapter
-has no way to show one.
+requires a `write` tool. It needs explicit intent: the workspace's
+confirming second click, or its own approval card when the model asks. A
+cancel token is then minted for that job's reference, and the host consumes
+it. "Stop tracking" is local and sends nothing. The submission card doesn't
+cover a cancel. Any other card the host would raise for these calls is
+refused, because the adapter has no way to show one.
 
 ## What the tools get and return
 
@@ -101,22 +99,21 @@ plugin never gets a path. At most 8 MB in total, and no more than the
 capability's `maxBytes` each.
 
 It returns `data: { remoteId, status }` (`PluginMediaSubmitData`). On a
-failure it returns an error. A failure after the plugin was called counts as
-**outcome unknown**, because the request may still run and be charged. It
-may add `data: { sent: false }` when its service never received the request;
-Custard shows that claim, but can't confirm it, so the job stays unknown and
-a repeat still warns about a second charge. Only a refusal Custard makes
-itself before the plugin runs (no approval, a changed request, a disabled
-plugin, a host check) counts as failed and not sent (`MediaError.confirmed`).
-Nothing is resubmitted on its own.
+failure it returns an error. Once the plugin has run, the outcome is
+**unknown** (contract S1, `DispatchEvidence`): the request may still run and
+be charged, and a repeat warns. It may add `data: { sent: false }`; Custard
+keeps that as the plugin's claim (`providerClaim`) and shows it, but it is
+never evidence. Only Custard's own refusals before the plugin runs (a
+refused token, a changed reference, a disabled plugin, a host check) are
+`not-dispatched`. Nothing is resubmitted on its own.
 
 Status, result and cancel tools receive `{ remoteId }`.
 
 - Status returns `data` as a `RemoteStatus`.
 - Result returns `data: { files }` (`PluginMediaResultData`).
 - Cancel returns `data: { state: 'cancelled' }` when the job is really
-  cancelled. An error or any other answer counts as not cancelled; a call
-  that was cut off counts as unknown, and the user is told to check the job.
+  cancelled. Anything else counts as not cancelled, and the user can check
+  the job.
 
 ## Untrusted output
 

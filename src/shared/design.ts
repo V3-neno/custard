@@ -248,10 +248,6 @@ export interface MediaProvider {
       signal?: AbortSignal
       // Reads a reference's bytes, checked against its recorded sha256.
       read: (ref: MediaReference) => Promise<Uint8Array>
-      // The job and the user's approval of exactly this request, checked
-      // by the job tracker before this is called.
-      jobId?: string
-      approval?: SubmissionApproval
     }
   ): Promise<{ remoteId: string; status: RemoteStatus }>
   status(remoteId: string, signal?: AbortSignal): Promise<RemoteStatus>
@@ -266,16 +262,6 @@ export interface MediaProvider {
 }
 
 // ---------------------------------------------------------------- jobs
-
-// The user's approval of one submission (Design's card): which provider,
-// down to the plugin build, and a digest of exactly what was shown. It is
-// used once: a job is sent at most once (see main/design/approval.ts).
-export type SubmissionApproval = {
-  source: Source
-  operation: MediaOperation
-  requestSha256: string
-  approvedAt: number
-}
 
 export type JobState =
   'not-submitted' | 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
@@ -299,8 +285,6 @@ export type Job = {
   // The output version the result goes into.
   target: { artifactId: string; versionId: string }
   state: JobState
-  // The approval this job is sent under. A job without one isn't sent.
-  approval?: SubmissionApproval
   // Set just before the request goes out, so a crash in between is known.
   attemptedAt?: number
   remoteId?: string

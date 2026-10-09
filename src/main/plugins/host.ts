@@ -9,8 +9,19 @@ import {
   type PluginStatus,
   type TestReport
 } from '../../shared/plugins'
-import type { PluginMediaSpec, PluginMediaSubmitInput } from '../../shared/design'
-import { approvalDigest, sha256, type ApprovedContent, digestOf } from '../design/approval'
+import type {
+  AuthorizationToken,
+  MediaRequest,
+  PluginMediaSpec,
+  PluginMediaSubmitInput
+} from '../../shared/design'
+import {
+  AuthorizationError,
+  authorizations,
+  bindingFor,
+  sha256,
+  type Authorizations
+} from '../design/authorization'
 import { formatLabel } from '../../shared/vault'
 import { WIDGET_LIMITS, type WidgetSpec } from '../../shared/widgets'
 import { resolveInside } from '../workspace/paths'
@@ -85,6 +96,9 @@ export type HostDeps = {
   openExternal: (url: string) => Promise<void>
   openBrowser: (url: string) => Promise<void>
   askByDefault: () => boolean
+  // Single-use media authorizations (contract S3); the process registry by
+  // default, tests pass their own.
+  authorizations?: Authorizations
   transport?: () => Transport | undefined
 }
 
@@ -132,22 +146,26 @@ export const mediaTools = (m: PluginManifest): Set<string> =>
 
 export type MediaRole = 'submit' | 'status' | 'result' | 'cancel'
 
-// The user's go-ahead for one media write (a submission or a cancel), bound
-// to the job, the plugin build, the provider, the operation and a digest of
-// what was approved. invokeMedia checks it against the active build and the
-// input it is about to send, and a submission's approval is used once.
-// Status and result never take one. See main/design/approval.ts.
-export type MediaApproval = {
-  jobId: string
-  pluginId: string
-  buildId: string
-  providerId: string
-  operation: string
-  role: 'submit' | 'cancel'
-  // submit: the approval digest (approvedContent) of the request.
-  // cancel: digestOf({ remoteId }).
-  inputSha256: string
-}
+// The user's go-ahead for one media write (contract S3): the opaque token
+// minted after Design's card or the cancel confirmation, plus what it is
+// for, which the host checks against what it is about to send. The token is
+// consumed here, at the dispatch boundary, whatever happens next.
+export type MediaAuthorization =
+  | {
+      action: 'submit'
+      token: AuthorizationToken
+      // Custard's job id (correlation id).
+      jobId: string
+      // The request as approved; the plugin input must be exactly this, with
+      // each reference's bytes matching its approved sha256.
+      request: MediaRequest
+    }
+  | {
+      action: 'cancel'
+      token: AuthorizationToken
+      // Custard's full job reference, "<operation>|<plugin's id>".
+      remoteId: string
+    }
 
 export type MediaEntry = {
   pluginId: string
@@ -160,27 +178,34 @@ export type MediaEntry = {
   needs?: string
 }
 
-// What a media submission's input amounts to, in the terms the user
-// approved: the files by the SHA-256 of the bytes actually being sent.
-function submittedContent(
-  a: { pluginId: string; providerId: string; operation: string; input: unknown },
-  buildId: string
-): ApprovedContent {
-  const i = (a.input ?? {}) as Partial<PluginMediaSubmitInput>
-  if (typeof i.prompt !== 'string' || i.operation !== a.operation) throw new Error('mismatch')
-  return {
-    source: { kind: 'plugin', pluginId: a.pluginId, buildId, providerId: a.providerId },
-    operation: i.operation,
-    prompt: i.prompt,
-    references: (i.references ?? []).map((r) => ({
-      name: r.name,
-      mime: r.mime,
-      sha256: sha256(Buffer.from(r.base64, 'base64'))
-    })),
-    ...(i.size ? { size: { width: i.size.width, height: i.size.height } } : {}),
-    ...(i.durationSeconds !== undefined ? { durationSeconds: i.durationSeconds } : {}),
-    ...(i.format !== undefined ? { format: i.format } : {})
+// Whether a media submission's plugin input differs from the approved
+// request: every field, and each reference's bytes by sha256, in order.
+function submitDiffers(operation: string, input: unknown, r: MediaRequest): string | null {
+  const i = (input ?? {}) as Partial<PluginMediaSubmitInput>
+  if (operation !== r.operation || i.operation !== r.operation)
+    return 'The operation changed since it was approved'
+  if (i.prompt !== r.prompt) return 'The request changed since it was approved'
+  const same = (x: unknown, y: unknown): boolean => JSON.stringify(x) === JSON.stringify(y)
+  if (
+    !same(i.size ?? null, r.size ? { width: r.size.width, height: r.size.height } : null) ||
+    (i.durationSeconds ?? null) !== (r.durationSeconds ?? null) ||
+    (i.format ?? null) !== (r.format ?? null)
+  )
+    return 'The request changed since it was approved'
+  const refs = i.references ?? []
+  if (refs.length !== r.references.length)
+    return 'The files to send changed since they were approved'
+  for (const [n, ref] of refs.entries()) {
+    let bytes: Buffer
+    try {
+      bytes = Buffer.from(String(ref.base64), 'base64')
+    } catch {
+      return 'The files to send changed since they were approved'
+    }
+    if (sha256(bytes) !== r.references[n].sha256)
+      return 'The files to send changed since they were approved'
   }
+  return null
 }
 
 // A tool's `data` for widgets: plain JSON, bounded, and dropped if it holds a
@@ -200,8 +225,6 @@ function widgetData(data: unknown, secrets: string[], limit = WIDGET_LIMITS.data
 
 export class PluginHost {
   private runtimes = new Map<string, { handle: RuntimeHandle; buildId: string }>()
-  // Media submissions already sent under their approval, by plugin and job.
-  private usedApprovals = new Set<string>()
   private starting = new Map<string, Promise<RuntimeHandle>>()
   private calls = new Map<
     string,
@@ -926,9 +949,10 @@ export class PluginHost {
   // Runs one of a media provider's declared tools for Design, through the
   // same checks as any tool call (invoke). The tool must be the one the
   // active build declares for this provider, operation and role, so Design
-  // can't reach any other tool this way. `approval` is the user's go-ahead
-  // for this exact write (see MediaApproval and docs/design/MEDIA-PLUGINS.md);
-  // without it a write asks through `approve`, which Design refuses.
+  // can't reach any other tool this way. `authorization` is the user's
+  // go-ahead for this exact write (see MediaAuthorization and
+  // docs/design/MEDIA-PLUGINS.md); without it a write asks through
+  // `approve`, which Design refuses.
   async invokeMedia(
     a: {
       pluginId: string
@@ -940,7 +964,7 @@ export class PluginHost {
     o: {
       signal: AbortSignal
       approve: (r: ApprovalRequest) => Promise<boolean>
-      approval?: MediaApproval
+      authorization?: MediaAuthorization
     }
   ): Promise<ToolOutcome> {
     const st = this.d.store.state(a.pluginId)
@@ -959,10 +983,14 @@ export class PluginHost {
       [name, { pluginId: a.pluginId, buildId: st.active.buildId }]
     ])
     let preApproved = false
-    if (o.approval) {
-      const refused = this.checkMediaApproval(a, o.approval, st.active.buildId)
+    if (o.authorization) {
+      // Used up first, so a refusal below can't leave it reusable.
+      const refused = this.consumeMediaAuthorization(a, o.authorization, {
+        pluginId: a.pluginId,
+        buildId: st.active.buildId,
+        providerId: spec.id
+      })
       if (refused) return notRun(refused)
-      if (a.role === 'submit') this.usedApprovals.add(`${a.pluginId}:${o.approval.jobId}`)
       preApproved = true
     }
     return this.run(
@@ -973,37 +1001,76 @@ export class PluginHost {
     )
   }
 
-  // Why an approval doesn't cover this media call, or null when it does.
-  private checkMediaApproval(
-    a: { pluginId: string; providerId: string; operation: string; role: MediaRole; input: unknown },
-    t: MediaApproval,
-    buildId: string
+  // Consumes a media authorization against what is about to be sent, from
+  // the active build. Why it doesn't cover this call, or null when it does.
+  private consumeMediaAuthorization(
+    a: { operation: string; role: MediaRole; input: unknown },
+    auth: MediaAuthorization,
+    current: { pluginId: string; buildId: string; providerId: string }
   ): string | null {
     const nothing = 'so nothing was sent.'
-    if (a.role !== 'submit' && a.role !== 'cancel')
-      return `A status or result check can't use an approval, ${nothing}`
-    if (
-      t.role !== a.role ||
-      t.pluginId !== a.pluginId ||
-      t.providerId !== a.providerId ||
-      t.operation !== a.operation
-    )
-      return `That approval was for something else, ${nothing}`
-    if (t.buildId !== buildId)
-      return `The plugin was updated or rolled back after you approved this, ${nothing} Ask again to approve the current version.`
-    if (a.role === 'submit' && this.usedApprovals.has(`${a.pluginId}:${t.jobId}`))
-      return `That approval was already used, ${nothing}`
-    let digest: string
+    const source = { kind: 'plugin' as const, ...current }
+    let actual: ReturnType<typeof bindingFor>
+    let unseen: ('conversationId' | 'jobId' | 'references')[]
+    if (a.role === 'submit' && auth.action === 'submit') {
+      const differs = submitDiffers(a.operation, a.input, auth.request)
+      if (differs) return this.spend(auth.token, `${differs}, ${nothing}`)
+      actual = bindingFor('submit', {
+        jobId: auth.jobId,
+        conversationId: '',
+        source,
+        request: auth.request
+      })
+      unseen = ['conversationId']
+    } else if (a.role === 'cancel' && auth.action === 'cancel') {
+      const sep = auth.remoteId.indexOf('|')
+      const theirs = (a.input as { remoteId?: unknown } | null)?.remoteId
+      if (
+        sep <= 0 ||
+        auth.remoteId.slice(0, sep) !== a.operation ||
+        theirs !== auth.remoteId.slice(sep + 1)
+      )
+        return this.spend(auth.token, `That approval was for another job, ${nothing}`)
+      actual = bindingFor('cancel', {
+        jobId: '',
+        conversationId: '',
+        source,
+        request: {
+          operation: a.operation as MediaRequest['operation'],
+          prompt: '',
+          references: []
+        },
+        remoteId: auth.remoteId
+      })
+      unseen = ['conversationId', 'jobId', 'references']
+    } else
+      return this.spend(
+        auth.token,
+        a.role === 'status' || a.role === 'result'
+          ? `A status or result check can't use an approval, ${nothing}`
+          : `That approval was for something else, ${nothing}`
+      )
     try {
-      digest =
-        a.role === 'cancel'
-          ? digestOf({ remoteId: (a.input as { remoteId?: unknown } | null)?.remoteId })
-          : approvalDigest(submittedContent(a, buildId))
-    } catch {
-      return `The request can't be matched to what you approved, ${nothing}`
+      this.authorizations().consume(auth.token, actual, unseen)
+    } catch (err) {
+      if (err instanceof AuthorizationError) return err.message
+      throw err
     }
-    if (digest !== t.inputSha256) return `The request changed after you approved it, ${nothing}`
     return null
+  }
+
+  // Uses a token up without dispatching anything, and says why.
+  private spend(token: AuthorizationToken, why: string): string {
+    try {
+      this.authorizations().consume(token, {} as never, [])
+    } catch {
+      // Always throws: an empty binding matches nothing.
+    }
+    return why
+  }
+
+  private authorizations(): Authorizations {
+    return this.d.authorizations ?? authorizations
   }
 
   widgetCode(id: string, buildId: string, widgetId: string): string | null {

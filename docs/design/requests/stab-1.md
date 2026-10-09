@@ -1,27 +1,32 @@
-# Stabilization Thread 1: edits outside Thread 1's files
+# Stabilization Thread 1: requests and notes for the integration owner
 
-For the integration owner. Thread 1 made these edits on its branch because
-they are the agreed shared interfaces (plan §3, items 1 to 4) or the
-callers they force. Each is small; take, change or redo them as you see fit.
+Thread 1 works on the published contracts (ce41cd5). Its own files: host.ts,
+manifest.ts, plugin-media/*, MODE-BOUNDARY.md, MEDIA-PLUGINS.md, MANIFEST.md,
+the D2 section of SECURITY-REVIEW.
 
-| File | Owner | Change | Why |
-| --- | --- | --- | --- |
-| `src/shared/design.ts` | integration | `MediaError.confirmed` (4th arg, default false); `MediaReference.sha256?`; `SubmissionApproval`; `Job.approval?`; `MediaProvider.submit` options `jobId?`, `approval?`; `cancel(remoteId, { jobId })` may resolve `'unknown'` | Interfaces 1, 3, 4 |
-| `src/main/design/approval.ts` (new) | integration (shared by jobs/tools/host) | Approval digest, `approveSubmission`, `approvalMismatch` | Interface 3 |
-| `src/main/design/jobs.ts` | integration (catch: Thread 1) | `create`/`resubmitJob` take `approval`; `submit` refuses a missing or mismatched approval before `attemptedAt` (failed, not sent); `submit` passes `jobId`/`approval`; catch uses `confirmed`; `cancel` passes `{ jobId }` and handles `'unknown'` | 1.3, 1.4, 1.2 |
-| `src/main/design/tools.ts` | integration (cancel path/approval wrapper: Thread 1) | `media()` records the approval before the card; Custard's own refusal is `not-run`, not "<provider> refused it"; `design_jobs cancel` shows its own card; `jobAction` takes `cancelApproved`; stop-tracking text | 1.2, 1.3 |
-| `src/main/chat.ts` | integration (mode/approval code: Thread 1) | `designReferences` carries the attachment's `sha256`; `design_jobs` with `action: cancel` counts as a write | 1.3, 1.2 |
-| `src/main/design/index.ts` | integration | IPC `design:job` passes `cancelApproved` for the workspace's confirmed cancel | 1.2 |
-| `src/main/design/images/openai.ts` | Thread 3 | Local refusals before sending (lines ~170–201) are `confirmed`. **HTTP 4xx left unconfirmed (now outcome unknown) for Thread 3 to decide from OpenAI's docs.** | Interface 1 |
-| `src/main/design/images/openai.test.ts`, `test/e2e/design-images.mjs` | Thread 3 | A 400 now expects `unknown`, with a note pointing at Thread 3 | Follows from the above |
-| `src/renderer/.../viewers/VideoViewer.tsx` | Thread 3 | "Cancel job" takes a confirming second click; stop-tracking tooltip says it may be charged | 1.2 (the controls live here, not in Workspace.tsx) |
-| `test/fixtures/media/slow-video.ts`, `src/main/design/design.test.ts`, `tools.test.ts` | integration | Tests attach approvals; providers' own pre-send refusals are `confirmed` | Follows from the interfaces |
+## Edits outside Thread 1's files
 
-## Finding for the integration owner (not fixed here)
+| File                                       | Owner       | Change                                                                                                                                                                                                                                                               | Why                                                                                           |
+| ------------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/main/design/authorization.ts`         | integration | `consume(token, actual, unseen?)`: fields the caller can't establish from what it sends (`conversationId`; for a cancel also `jobId` and `references`) are taken from the binding, after the job tracker's `check()` covered them. The token is still deleted first. | The plugin host consumes at dispatch but doesn't know the chat, nor a cancel's job and files. |
+| `src/renderer/.../viewers/VideoViewer.tsx` | Thread 3    | "Cancel job" takes a confirming second click; stop-tracking tooltip says it may be charged.                                                                                                                                                                          | The workspace cancel control lives here, not in Workspace.tsx.                                |
+| `src/main/ipc.security.test.ts` (new)      | —           | Plugin, widget and preview senders are refused on `design:job`.                                                                                                                                                                                                      | Amendment 3 test: unauthorized renderers.                                                     |
+| `test/e2e/design-media.mjs`                | Thread 1    | Cancel shows its own card; a plugin's "not sent" stays unknown.                                                                                                                                                                                                      |                                                                                               |
 
-`tools.ts media()`: if `jobs.submit()` throws a `JobError` (for example the
-provider turned not-ready between the card and the send, via `need()`), the
-error escapes `runDesignTool`, and the version created for the job stays
-`pending` with the job `not-submitted`. Nothing is sent, so it's not a charge
-risk, but the output is left hanging. Reproduce: disable the plugin inside
-the approval callback (see the removed draft in Thread 1's notes).
+## Notes
+
+- `chat.ts`: `design_jobs` with `action: cancel` still counts as a read in
+  `CORE_WRITES` (so its outcome isn't tracked as an action). Suggest
+  `design_jobs` cancel be treated as a write there.
+- `tools.ts` stop text could say the job "may be charged" (brief 1.2).
+- `MediaProvider.cancel` returns only `cancelled`/`not-cancelled`; a cut-off
+  cancel is reported as "did not confirm", which is accurate but not
+  "unknown". Optional: add `'unknown'`.
+- `host.invoke`'s `preApproved` remains for the chat's own "repeat an
+  unknown action" card on ordinary plugin tools (the user just approved
+  that exact call on a card). It can't reach media tools. Replacing it with a
+  token too is possible; say if you want it.
+- Finding (not fixed): if `jobs.submit()` throws a `JobError` (the provider
+  turned not-ready between the card and the send, via `need()`), the error
+  escapes `runDesignTool` and the new version stays `pending`. Nothing is
+  sent.

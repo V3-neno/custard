@@ -155,9 +155,6 @@ export class JobTracker {
     request: MediaRequest
     requestedBy: Job['requestedBy']
     target: Job['target']
-    // The user's approval of this request (Design's card). Without it the
-    // job is never sent.
-    approval?: Job['approval']
   }): Job {
     const provider = this.deps.provider(a.providerId)
     if (!provider) throw new JobError("That provider isn't available.")
@@ -174,7 +171,6 @@ export class JobTracker {
       request: a.request,
       requestedBy: a.requestedBy,
       target: a.target,
-      ...(a.approval ? { approval: a.approval } : {}),
       state: 'not-submitted',
       tracking: false,
       checks: 0,
@@ -215,8 +211,6 @@ export class JobTracker {
         correlationId: job.id,
         authorization: authorization as AuthorizationToken,
         signal,
-        jobId: job.id,
-        approval: job.approval,
         read: (ref) => {
           if (!read || !job.request.references.some((x) => x.attachmentId === ref.attachmentId))
             return Promise.reject(new Error('That file is not part of this request.'))
@@ -374,13 +368,7 @@ export class JobTracker {
     if (r === 'cancelled') {
       job.state = 'cancelled'
       job.tracking = false
-      job.error = undefined
-    } else if (r === 'unknown')
-      job.error =
-        "It's not known whether the provider got the cancellation. Check the job to see its state; it may still run and be charged."
-    else
-      job.error =
-        'The provider did not confirm the cancellation. The job may still run and be charged.'
+    } else job.error = 'The provider did not confirm the cancellation.'
     return this.put(job)
   }
 
@@ -408,9 +396,6 @@ export class JobTracker {
       acknowledgeDuplicateRisk: boolean
       requestedBy: Job['requestedBy']
       target: Job['target']
-      // A new approval of this request: an earlier job's approval covered
-      // that job's one submission only.
-      approval: Job['approval']
     }
   ): Job {
     const { job, cap } = this.need(id)
@@ -430,8 +415,7 @@ export class JobTracker {
       providerId: job.providerId,
       request: job.request,
       requestedBy: a.requestedBy,
-      target: a.target,
-      approval: a.approval
+      target: a.target
     })
     // The provider deduplicates by key, so the same key makes it the same job.
     return dedupes ? this.put({ ...fresh, idempotencyKey: job.idempotencyKey }) : fresh

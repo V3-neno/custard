@@ -137,7 +137,7 @@ export const designToolSchemas: BetaTool[] = [
   {
     name: 'design_jobs',
     description:
-      "Checks a generation job once, asks the provider to cancel it (only if the provider can, and only after the user allows it on a card), or stops tracking it (local only: it keeps running, and may be charged, at the provider). Only when the user asks or right after submitting; don't loop.",
+      "Checks a generation job once, cancels it (only if the provider can), or stops tracking it (it keeps running at the provider). Only when the user asks or right after submitting; don't loop.",
     input_schema: {
       type: 'object',
       properties: {
@@ -248,14 +248,6 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
     throw err
   }
 
-  // What the card shows, bound to this provider (and plugin build): a change
-  // to any of it before sending refuses the send (see approval.ts).
-  let approval: Job['approval']
-  try {
-    approval = approveSubmission(info.source, request, Date.now())
-  } catch (err) {
-    return notRun(err instanceof Error ? err.message : String(err))
-  }
   const allowed = await ctx.approve(
     `${info.name}: ${NAMES[op]}`,
     [
@@ -288,8 +280,7 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
       providerId: info.id,
       request,
       requestedBy: { conversationId: ctx.conversationId, messageIndex: ctx.messageIndex },
-      target: { artifactId: artifact.id, versionId },
-      approval
+      target: { artifactId: artifact.id, versionId }
     })
   } catch (err) {
     artifact = settleVersion(artifact, versionId, { status: 'failed', error: String(err) })
@@ -327,9 +318,7 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
     })
     s.artifacts.save(artifact)
     s.emit({ type: 'artifact', conversationId: ctx.conversationId, artifact })
-    return job.attemptedAt
-      ? { content: `${info.name} refused it: ${job.error}`, isError: true, outcome: 'failed' }
-      : { content: job.error ?? 'Nothing was sent.', isError: true, outcome: 'not-run' }
+    return { content: `${info.name} refused it: ${job.error}`, isError: true, outcome: 'failed' }
   }
   // Finished at submission (a synchronous provider): save the files now.
   if (job.state === 'completed') {
@@ -429,7 +418,7 @@ export async function jobAction(
   s.emit({ type: 'job', conversationId, job: next })
   const text =
     action === 'stop'
-      ? `Stopped tracking job ${next.id}. Custard won't check it, but it keeps running (and may be charged) at the provider.`
+      ? `Stopped tracking job ${next.id}. It keeps running at the provider.`
       : files?.length
         ? `${describeJob(next)} The result is saved as a new version.`
         : describeJob(next)

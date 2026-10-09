@@ -256,7 +256,7 @@ try {
     step('Refused and cancelled jobs')
     const cards = await turnAll('c cancel test')
     check(
-      cards.length === 2 && /Cancel a job/.test(cards[1]) && /provider confirms/.test(cards[1]),
+      cards.length === 2 && /cancel a job/i.test(cards[1]) && /provider confirms/.test(cards[1]),
       `the cancel asks on its own card (${cards.length} cards)`
     )
     check(
@@ -265,7 +265,7 @@ try {
     )
     await turn('c reject test')
     check(
-      lastResults().some((r) => /can't confirm/.test(r) && /Outcome unknown|unknown/.test(r)),
+      lastResults().some((r) => /not known/.test(r) && /plugin says: not sent/.test(r)),
       `a plugin's own "not sent" stays unknown (${lastResults().at(-1)?.slice(0, 120)})`
     )
     // A refused prompt doesn't turn the provider off for the session.

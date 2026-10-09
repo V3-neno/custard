@@ -121,13 +121,24 @@ export class Authorizations {
 
   // At the dispatch boundary: uses the token up (whatever happens next) and
   // throws unless it authorizes exactly `actual`.
-  consume(token: AuthorizationToken | undefined, actual: Binding): void {
+  //
+  // `unseen` names fields the caller can't establish from what it sends (the
+  // plugin host doesn't know the chat, nor a cancel's job and files); those
+  // were checked by the job tracker just before, in this process, with
+  // check(). Everything the caller sends is compared.
+  consume(
+    token: AuthorizationToken | undefined,
+    actual: Binding,
+    unseen: readonly ('conversationId' | 'jobId' | 'references')[] = []
+  ): void {
     const e = token ? this.live.get(token) : undefined
     if (token) this.live.delete(token)
     if (!e) throw new AuthorizationError('This action has no valid approval, so nothing was sent.')
     if (e.expires <= this.now())
       throw new AuthorizationError('The approval for this action expired, so nothing was sent.')
-    const why = mismatch(e.binding, actual)
+    const known = { ...actual }
+    for (const k of unseen) (known as Record<string, unknown>)[k] = e.binding[k]
+    const why = mismatch(e.binding, known)
     if (why) throw new AuthorizationError(`${why} Nothing was sent.`)
   }
 

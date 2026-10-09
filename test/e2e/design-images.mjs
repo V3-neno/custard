@@ -280,11 +280,9 @@ try {
   await turn('b refuse test')
   check(imageRequests().length === 4, 'one request')
   check(/rejected by the safety system/.test(lastResult()), 'the reason is passed on')
-  // An HTTP 4xx isn't confirmed as never billed yet (Thread 3 decides from
-  // OpenAI's docs), so it stays unknown rather than failed.
   check(
-    jobs().some((j) => j.state === 'unknown'),
-    'the job is unknown, not failed (an HTTP rejection is not yet confirmed unbilled)'
+    jobs().some((j) => j.state === 'failed'),
+    'the job is failed'
   )
   check(artifacts(chat)[0].versions[1].status === 'succeeded', 'the last good image stays')
   await shot('b-04-refused')

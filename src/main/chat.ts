@@ -140,11 +140,6 @@ function widgetTools(keys: string[]): BetaTool[] {
 
 // design_media can start paid work at a provider.
 const CORE_WRITES = /^(vault_create_note|vault_append|fs_write|fs_delete|fs_rename|design_media)$/
-// Cancelling a generation job changes it at the provider, so it is an action
-// like any other write; checking and stop tracking (local) are not.
-const coreWrite = (name: string, input: unknown): boolean =>
-  CORE_WRITES.test(name) ||
-  (name === 'design_jobs' && (input as { action?: unknown } | null)?.action === 'cancel')
 
 const systemPrompt = (model: (typeof chatModels)[number]): string =>
   `${model.provider === 'claude' ? 'You are Claude' : `You are ${model.label}, an OpenAI model`}, ` +
@@ -479,7 +474,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       name,
       input,
       label: described?.label ?? toolLabel(name, input),
-      write: described?.write ?? coreWrite(name, input)
+      write: described?.write ?? CORE_WRITES.test(name)
     }
   }
 
