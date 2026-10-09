@@ -1,8 +1,13 @@
-# Proposed live OpenAI image test (needs separate approval)
+# Live OpenAI image test (approved with conditions, not run)
 
-Stabilization item 3.4. **Nothing here has been run.** It is a plan for Neno
-to approve, change or decline on its own, separate from merging anything.
-Approving it covers exactly the two requests below and nothing else.
+**Status: approved by Neno on 2026-10-09, with conditions. Not run.**
+
+- It runs only after Neno confirms that OpenAI organization verification is
+  complete for image models on the account, and that this scope is agreed.
+- It covers exactly the two requests below. It isn't to be batched with
+  other testing, and it is no precedent for any other paid experiment.
+- It runs on Neno's own machine with the key saved in Custard. Cloud
+  sessions have no OpenAI key and can't reach `api.openai.com`.
 
 ## What it would establish
 

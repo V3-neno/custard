@@ -1,32 +1,39 @@
-# Proposed image skill (for review, not installed)
+# Example image skill (create it yourself if you want it)
 
-Stabilization item 3.5. This is a **proposal for Neno to review**. Nothing
-here is created in the vault or the vault template, and Design doesn't depend
-on it: without the skill, Design's image tools, approval cards and job rules
-work exactly as they do now. Skills can't grant permissions
-([SKILLS.md](SKILLS.md#permissions)), so this one can't either.
+An optional skill for making images in Design. **Custard doesn't ship it:**
+it isn't in the app or the starter vault, and Design works the same without
+it (the approval card, the job rules and the no-resend rule are enforced in
+code). Skills can't grant permissions ([SKILLS.md](SKILLS.md#permissions)),
+so this one can't either.
 
-If approved, it would go at `Custard/Skills/image-making/SKILL.md` (vault) or
-`vault-template/Custard/Skills/image-making/SKILL.md` (starter template).
-Which, if either, is Neno's call.
+Neno reviewed it on 2026-10-09 and decided to publish it as an example for
+users to read, rather than bundle it.
+
+## Using it
+
+1. Read it, and change anything you'd do differently.
+2. In your vault, create `Custard/Skills/image-making/SKILL.md` and paste the
+   file contents below into it. Or open the **Skills** mode and ask Custard
+   to create it from this page.
+3. Delete the folder to stop using it.
 
 ## What can go stale
 
 Lines marked **[provider fact, checked 2026-10-09]** come from OpenAI's
 documentation and can change; the source for each is in
-[IMAGES.md, Evidence](IMAGES.md#evidence-checked-2026-10-09). The proposal
+[IMAGES.md, Evidence](IMAGES.md#evidence-checked-2026-10-09). The example
 keeps them few and general on purpose: model ids, rates and limits stay in
 `models.ts` and the approval card, which are what the user actually sees, not
 in the skill. Everything else is Custard behaviour, which only changes with
 the code.
 
-## Proposed file contents
+## File contents
 
 ```markdown
 ---
 name: image-making
 description: Use in Design when the user wants a generated image, or a change to one: deciding between a new image and an edit, writing the prompt, and handling paid requests safely.
-modes: [design]
+modes: design
 ---
 
 # Making images in Design
@@ -72,15 +79,15 @@ modes: [design]
     workspace to compare versions or export.
 ```
 
-## Review notes
+## Notes
 
-- **Overlap with Design's own rules.** Points 4, 5 and 8 restate rules Design
-  already enforces in code (the card, no automatic resend, the job tracker).
-  They're in the skill so the model explains them well. Removing them changes
-  wording, not safety.
+- **Overlap with Design's own rules.** Points 4, 5 and 8 restate rules
+  Design already enforces in code (the card, no automatic resend, the job
+  tracker). They're in the skill so the model explains them well. Removing
+  them changes the wording, not the safety.
 - **Not included:** model recommendations, prices, size limits beyond the
   three standard sizes, or quality settings. Custard doesn't send `quality`,
   `background` or arbitrary sizes ([IMAGES.md](IMAGES.md#models)), and those
   facts go stale fastest.
-- **Point 6** is a product choice: it rules out rephrasing to get past a
-  refusal. Drop it if that's not wanted.
+- **Point 6** (don't reword a prompt to get around a refusal) is kept on
+  purpose.

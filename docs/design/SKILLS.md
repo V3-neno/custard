@@ -58,3 +58,8 @@ skills are recorded on the version with `skillUse`. The workspace's
 focus, and offers a changed skill ("Use the updated skill") or the
 explicit override ("Without this skill") by filling in the message box,
 never by sending or restyling. Details: [WORKSPACE.md](WORKSPACE.md#skills).
+
+## Example skills
+
+- [Image making](IMAGE-SKILL-PROPOSAL.md): an optional skill for generated
+  images in Design. It isn't shipped; create it in your vault if you want it.
