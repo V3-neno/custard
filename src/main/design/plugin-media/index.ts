@@ -8,10 +8,10 @@ import type { BinaryTransport } from './results'
 // the list is read again on every use, so enabling, disabling, updating or
 // removing a plugin shows at once.
 
-// Whether Design's approval card is the approval for a plugin submission
-// (see docs/design/MEDIA-PLUGINS.md). 'pending' until Neno decides; nothing
-// is submitted to a plugin while it is.
-export const SUBMIT_APPROVAL: ReturnType<PluginMediaDeps['submitApproval']> = 'pending'
+// Design's approval card is the approval for a plugin submission: one card,
+// asked every time, and the plugin's own card is skipped for that one submit
+// call only (Neno's decision, 2026-10-09; see docs/design/MEDIA-PLUGINS.md).
+export const SUBMIT_APPROVAL: ReturnType<PluginMediaDeps['submitApproval']> = 'design-card'
 
 export function registerPluginMedia(): void {
   const host = pluginHost

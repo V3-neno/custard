@@ -1,8 +1,8 @@
 # Workstream C: requests for shared files
 
 For the integration owner ("Build Custard app"). Items 1, 2, 3, 5 and 6 were
-applied on `design-batch` (2b11675) and merged into C's branch. Item 4 waits
-on Neno's answer about approval cards.
+applied on `design-batch` (2b11675) and merged into C's branch. Item 4 is not
+needed: Neno chose "Design card only" (2026-10-09).
 
 1. **`describePermission` for `media:`** (`src/shared/plugins.ts`). Add
    `case 'media': return \`Offer its "${v}" image or video generation to Design (each job asks first)\``.

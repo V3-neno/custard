@@ -38,17 +38,14 @@ widget tools, so Design's job flow is the only way to call them.
 Nothing runs on a timer. There are no schedules, automatic checks,
 automatic retries or follow-up submissions.
 
-## Approval: open decision
+## Approval: one card
 
-Design's card and the plugin's own write-tool card would both apply to a
-submission. The decision is with Neno. Until it is made,
-`SUBMIT_APPROVAL` in `plugin-media/index.ts` is `'pending'` and **no plugin
-submission is sent**: `design_media` reports that it is waiting on this
-decision, and the job is recorded as failed and not sent.
-
-The proposal is that Design's card is the approval for that one submit call
-(`preApproved` for that call only). The plugin's "ask every time" setting
-can't remove Design's card. Every other host check still runs.
+Decided by Neno (2026-10-09): Design's card is the only card for a plugin
+submission. `SUBMIT_APPROVAL` in `plugin-media/index.ts` is `'design-card'`:
+the submit call runs with `preApproved` for that one call only. Design's card
+is asked every time, never "for this chat", and the plugin's "ask every time"
+setting can't remove it. Every other host check still runs. (`'pending'`,
+used before the decision, sent nothing; the adapter still supports it.)
 
 Cancel is the user's own request and can't start or charge for anything, so
 it runs without the plugin's card. Any other card the host would raise for

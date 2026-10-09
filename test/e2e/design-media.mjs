@@ -5,9 +5,9 @@
 //     available through it
 //   - its media tools aren't offered to the model, and a direct call is refused
 //   - a video request shows one Design approval card naming the provider
-//   - while the approval decision is pending nothing reaches the plugin;
-//     once decided, the job completes and the stored video plays from
-//     custard-media:// (inline and from a result link)
+//   - that card is the only one (Neno's decision: Design card only); the
+//     job completes and the stored video plays from custard-media://
+//     (inline and from a result link)
 //   - a refused prompt fails cleanly; cancel is confirmed by the plugin
 //   - disabling the plugin keeps saved video and says why new jobs can't run
 // Usage, from the repo root after `npx electron-vite build`:
@@ -196,9 +196,10 @@ try {
   const results = lastResults()
   const pending = results.some((r) => /waiting on a decision/.test(r))
   const chat = chatId()
+  check((await card().count()) === 0, "no second card (the plugin's own) was shown")
   if (pending) {
-    console.log('  (approval decision pending: checking that nothing was sent)')
-    check(true, `submission held: ${results.find((r) => /waiting on a decision/.test(r))}`)
+    // SUBMIT_APPROVAL is back to 'pending': nothing may have been sent.
+    check(false, `submission held: ${results.find((r) => /waiting on a decision/.test(r))}`)
     const jobs = chat ? await jobsOf(chat) : []
     check(jobs.length === 0 || jobs.every((j) => !j.remoteId), 'no job reached the plugin')
   } else {
