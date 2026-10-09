@@ -12,7 +12,7 @@ macOS or against a live provider.
 | D2 | Tool routes in Chat and Design | Enforced in code, except D1 and the residual network route below. |
 | D3 | Link-swap race (`src/main/fsafe`) | Helper built and tested on Linux. Narrowed, not closed; residual risk below. Callers not switched yet. |
 | D4 | HTML preview sandbox | Tested against A at ac9a4a2: contained, except `window.print()` (opens the OS print dialog). One-line CSP fix sent to A. Results in `SANDBOX.md`. |
-| D5 | Reliability and privacy flows | Waiting for A, B and C. |
+| D5 | Reliability and privacy flows | Tested across A, B and C (below). One finding (D5a) sent to integration. |
 
 ## D1: plugin "open links on this computer" (`open:`)
 
@@ -124,6 +124,33 @@ is outstanding.
 belong to A and the integration owner. Until they call `fsafe`, the gap
 documented in `docs/plugins/SECURITY.md` ("File-check races") still applies
 to them.
+
+## D5: reliability and privacy across A, B and C
+
+Linux, xvfb, mock providers only, 2026-10-09, on D's branch with A, B, C and
+design-batch merged (D1 included).
+
+- **Regression run together:** `design-workspace` 67/67, `design-images`
+  33/33, `design-media` 21/21, `modes` 27/27, `attachments-leak` 13/13.
+- **`design-attachments.mjs` (17/17):** an edit sends only the attachment it
+  names, and the card lists it; no attachment name or text reaches the memory
+  summarizer or a vault note through Design's tools or labels; a temporary
+  Design chat with attachments isn't summarized; deleting the chat deletes its
+  attachments, outputs and job records; Code and Skills have no attach
+  button.
+- **Restart during a paid submission (`design-security.mjs`):** the edit
+  reached the provider (a server that never answers), the app was killed, and
+  after the restart the job was `unknown`, nothing was resent, and a repeat
+  asked first with "may already have happened". Declining sent nothing.
+- **D5a (low, sent to integration):** that repeat card is the generic one
+  (tool name and raw JSON). Because the repeat counts as pre-approved,
+  Design's own card, which names the provider, the files sent and the price,
+  is skipped, so a paid repeat is approved without that information.
+  Suggested fix: for `design_media`, pass the warning into Design's card
+  instead of pre-approving.
+- Covered by unit tests elsewhere and not repeated here: expired result links
+  and permanent result errors, plugin removal, skill matching cases (A, C and
+  integration tests).
 
 ## Windows and macOS
 

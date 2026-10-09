@@ -12,6 +12,7 @@
 import { _electron as electron } from 'playwright'
 import { createRequire } from 'module'
 import fs from 'fs'
+import http from 'http'
 
 const [, , OUT, SHOTS] = process.argv
 const check = (cond, what) => {
@@ -58,23 +59,30 @@ const leaks = () => {
 
 let app
 let w
-async function launch() {
+let proc
+async function launch(cfg = CFG, extra = {}) {
   app = await electron.launch({
     executablePath: createRequire(import.meta.url)('electron'),
     args: [...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), '--password-store=basic', '.'],
     env: {
       ...process.env,
       ANTHROPIC_BASE_URL: 'http://127.0.0.1:8899',
-      XDG_CONFIG_HOME: CFG,
-      CUSTARD_PLUGIN_DIR: OUT + '/plugin'
+      XDG_CONFIG_HOME: cfg,
+      CUSTARD_PLUGIN_DIR: OUT + '/plugin',
+      ...extra
     }
   })
+  proc = app.process()
   await app.evaluate(
     ({ safeStorage, dialog, shell, clipboard }, { vault }) => {
       safeStorage.setUsePlainTextEncryption?.(true)
       globalThis.__boxes = []
       globalThis.__opened = []
-      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [vault] })
+      globalThis.__pick = null
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: globalThis.__pick ?? [vault]
+      })
       dialog.showMessageBox = async (...args) => {
         globalThis.__boxes.push(args.at(-1).message)
         return { response: 0 }
@@ -304,5 +312,108 @@ try {
 } finally {
   // A print dialog left open can wedge Electron's shutdown: don't wait on it.
   await Promise.race([app?.close().catch(() => {}), new Promise((r) => setTimeout(r, 5000))])
-  app?.process().kill('SIGKILL')
+  proc?.kill('SIGKILL')
+}
+
+// ---------------------------------------------------------------- restart
+
+// A paid submission cut off by quitting the app: the request reached the
+// provider but no answer came back. After a restart the job must be known as
+// unknown, nothing is sent again by itself, and a repeat asks first with the
+// warning. The provider here is a server that takes requests and never
+// answers.
+step('Restart during a paid submission')
+const CFG2 = OUT + '/cfg-design-d-restart'
+const DATA2 = `${CFG2}/custard`
+fs.rmSync(CFG2, { recursive: true, force: true })
+const FILES = OUT + '/d-files'
+fs.mkdirSync(FILES, { recursive: true })
+const { png } = await import('./mocks/b-images.mjs')
+fs.writeFileSync(`${FILES}/Osprey-8890.png`, png(2, 2))
+const held = []
+const hang = http.createServer((req) => {
+  held.push({ method: req.method, path: req.url })
+  req.resume()
+})
+await new Promise((r) => hang.listen(8898, '127.0.0.1', r))
+const ENV2 = { OPENAI_BASE_URL: 'http://127.0.0.1:8898/v1' }
+const jobs2 = () => {
+  try {
+    return Object.values(
+      JSON.parse(fs.readFileSync(`${DATA2}/design/jobs.json`, 'utf8')).jobs ?? {}
+    )
+  } catch {
+    return []
+  }
+}
+const card = () => w.locator('[role=alertdialog]').first()
+try {
+  await launch(CFG2, ENV2)
+  await w.click('button[title=Settings]')
+  await w.fill('input[aria-label="Claude API key"]', 'sk-ant-test')
+  await w.press('input[aria-label="Claude API key"]', 'Enter')
+  await w.fill('input[aria-label="OpenAI API key"]', 'sk-openai-test')
+  await w.press('input[aria-label="OpenAI API key"]', 'Enter')
+  await w.waitForSelector('text=OpenAI API key · saved')
+  await w.click('button:has-text("Use an existing vault")')
+  await w.waitForSelector('text=· connected')
+  await w.getByRole('tab', { name: 'Design' }).click()
+  await w.selectOption('#design-image-provider', 'openai-images')
+  await w.waitForSelector('#design-image-model')
+  await w.click('button:text-is("Done")')
+  await w.click('button:text-is("Design")')
+  await app.evaluate((_, p) => (globalThis.__pick = p), [`${FILES}/Osprey-8890.png`])
+  await w.click('button[aria-label="Attach files"]')
+  await w.waitForSelector('[aria-label="Files to send"] li')
+  await send('d ref test')
+  await card().waitFor({ timeout: 30000 })
+  await card().getByRole('button', { name: 'Allow', exact: true }).click()
+  const reached = await (async () => {
+    for (let i = 0; i < 100 && !held.length; i++) await new Promise((r) => setTimeout(r, 100))
+    return held.length
+  })()
+  check(reached === 1, `the edit reached the provider once (${reached})`)
+  console.log('  job before quitting:', JSON.stringify(jobs2().map((j) => j.state)))
+  // Quit hard while the request is out.
+  proc.kill('SIGKILL')
+  await new Promise((r) => setTimeout(r, 1000))
+
+  await launch(CFG2, ENV2)
+  await w.waitForTimeout(4000)
+  const after = jobs2()
+  console.log('  jobs after restart:', JSON.stringify(after.map((j) => [j.state, j.tracking])))
+  check(after.length === 1, 'the job survived the restart')
+  check(after[0]?.state === 'unknown', `its outcome is unknown, not pending (${after[0]?.state})`)
+  check(held.length === 1, `nothing was sent again by itself (${held.length} requests)`)
+
+  // The same chat: a repeat of the same edit asks first, with the warning.
+  await w.click('button:text-is("Design")')
+  await w.click('button[title="Design history"]')
+  await w.click('button:has-text("d ref test")')
+  await w.waitForTimeout(500)
+  let warned = null
+  const watch = card()
+    .waitFor({ timeout: 30000 })
+    .then(async () => (warned = await card().textContent()))
+    .catch(() => {})
+  await send('d ref test')
+  await watch
+  console.log('  repeat card:', (warned ?? '').slice(0, 160))
+  check(
+    /unknown|may already have happened/i.test(warned ?? ''),
+    'the repeat warns that it may already have happened'
+  )
+  if (warned !== null)
+    await card().getByRole('button', { name: "Don't allow", exact: true }).click()
+  await w.waitForSelector('button[title=Send]', { timeout: 30000 }).catch(() => {})
+  await w.waitForTimeout(1000)
+  check(held.length === 1, `declining sent nothing (${held.length} requests)`)
+} catch (err) {
+  console.log('✕ crashed (restart):', err)
+  process.exitCode = 1
+} finally {
+  await Promise.race([app?.close().catch(() => {}), new Promise((r) => setTimeout(r, 5000))])
+  proc?.kill('SIGKILL')
+  hang.closeAllConnections?.()
+  hang.close()
 }
