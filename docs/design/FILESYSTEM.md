@@ -65,7 +65,7 @@ _different_ user who can write the destination folder.
 | An **empty folder** left where the link pointed (`makeDirs`, export top folder) | Possible                                                                                                          | Possible                               | Possible                         |
 | Removing a stray file removes a different file                                  | Only an empty file with the same name, only if swapped again in the instant between the identity check and unlink | Same                                   | Same                             |
 
-**Alternatives** (none taken; each needs Neno's call):
+**Decision (Neno, 2026-10-09): accepted.** The residual below is accepted as is; no native code and no folder-ownership refusal. The alternatives that were offered:
 
 1. Accept the residual above (recommended: low impact, no new dependency).
 2. A native addon with `openat`/`mkdirat`/`unlinkat` (Linux, macOS) and

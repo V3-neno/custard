@@ -10,7 +10,7 @@ macOS or against a live provider.
 | --- | --- | --- |
 | D1 | Plugin `open:` permission | **Fixed** on design-batch (dffbfd7) after Neno chose "Allowlist" (2026-10-09): vetted schemes only (today `spotify:`), and only write tools can open links. Tests in `open.security.test.ts` pass. |
 | D2 | Tool routes in Chat and Design | Enforced in code, except D1 and the residual network route below. |
-| D3 | Link-swap race (`src/main/fsafe`) | Narrowed, not closed. Stabilization 2.3: the empty stray file is now removed on Linux; folders are made with checked `makeDirs` instead of `mkdir -p`; memory captures, the vault id and capture deletion use it too. Residual risk (macOS/Windows empty file, any-platform empty folder) awaits Neno's acceptance: see `FILESYSTEM.md`. |
+| D3 | Link-swap race (`src/main/fsafe`) | Narrowed, not closed. Stabilization 2.3: the empty stray file is now removed on Linux; folders are made with checked `makeDirs` instead of `mkdir -p`; memory captures, the vault id and capture deletion use it too. Residual risk (macOS/Windows empty file, any-platform empty folder) **accepted by Neno on 2026-10-09**: see `FILESYSTEM.md`. |
 | D4 | HTML preview sandbox | Contained. `window.print()` opened the OS print dialog at ac9a4a2; A fixed it with a CSP sandbox directive (90b1dde). `design-security.mjs` 40/40 on design-integration plus A's fix. Results in `SANDBOX.md`. |
 | D5 | Reliability and privacy flows | Tested across A, B and C (below). D5a fixed by integration (a99419c). |
 
@@ -137,9 +137,8 @@ simulate the swap at the moment of opening (and of each `mkdir`).
 are in `docs/design/FILESYSTEM.md`). Node has no `openat()`/`mkdirat()`, so
 the window can't be closed without native code. No content is ever written
 to a redirected place. Left: an empty file (macOS, Windows) or an empty
-folder (all platforms) where a swapped link pointed. This needs Neno's
-acceptance, or one of the alternatives in `FILESYSTEM.md`; it is **not**
-described as closed. Windows and macOS are unverified.
+folder (all platforms) where a swapped link pointed. **Accepted by Neno on
+2026-10-09** (no native code); it is still **not** described as closed. Windows and macOS are unverified.
 
 ## D5: reliability and privacy across A, B and C
 
