@@ -306,7 +306,9 @@ http
         [/fs write test/, 'fswrite'],
         [/forged test/, 'forged'],
         [/note test/, 'note'],
-        [/append test/, 'append']
+        [/append test/, 'append'],
+        [/long copy test/, 'copylong'],
+        [/copy test/, 'copy']
       ].find(([r]) => r.test(ask))?.[1]
       // Plugin widget checks (test/e2e/widgets.mjs).
       const widget = [
@@ -624,6 +626,16 @@ http
         mfs: [
           () => tool('fs_write', { path: 'plugin/forged/index.ts', content: 'FORGED-FS' }),
           'Tried a file.'
+        ],
+        // A drafted prompt in a code block, for the Copy button (copy.mjs).
+        copy: ['Here is the prompt:\n\n```\nBuild a tea timer.\nUse the forge style.\n```'],
+        // A long one, which starts collapsed under "Show more".
+        copylong: [
+          'Here is the long prompt:\n\n```\n' +
+            Array.from({ length: 40 }, (_, i) => `Step ${i + 1}: keep the forge style.`).join(
+              '\n'
+            ) +
+            '\n```'
         ],
         plain: ['OK.']
       }

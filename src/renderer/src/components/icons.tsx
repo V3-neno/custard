@@ -70,3 +70,17 @@ export const PaperclipIcon = ({ className }: IconProps): React.JSX.Element => (
     <path d="M21 11.5 12.4 20a5.5 5.5 0 0 1-7.8-7.8l8.9-8.8a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.8a1.8 1.8 0 0 1-2.6-2.6l8.2-8.1" />
   </svg>
 )
+
+// Two overlapping sheets: copy.
+export const CopyIcon = ({ className }: IconProps): React.JSX.Element => (
+  <svg {...base} className={className}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15H4a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h9a1 1 0 0 1 1 1v1" />
+  </svg>
+)
+
+export const CheckIcon = ({ className }: IconProps): React.JSX.Element => (
+  <svg {...base} className={className}>
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </svg>
+)
