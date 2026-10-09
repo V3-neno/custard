@@ -18,7 +18,7 @@ export const goodManifest = (): Record<string, unknown> => ({
   entry: 'src/index.ts',
   permissions: {
     network: ['api.example.com', 'auth.example.com'],
-    openExternal: ['demo:'],
+    openExternal: ['spotify:'],
     storage: true
   },
   config: {
@@ -167,7 +167,7 @@ describe('manifest', () => {
     expect(permissionsOf(m)).toEqual([
       'network:api.example.com',
       'network:auth.example.com',
-      'open:demo:',
+      'open:spotify:',
       'storage',
       'account:auth.example.com',
       'account-token:auth.example.com',

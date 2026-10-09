@@ -1,0 +1,79 @@
+{
+  "manifestVersion": 1,
+  "id": "bigmedia",
+  "name": "Bigmedia (test fixture)",
+  "description": "Development-only provider for size tests. Contacts nothing; makes its files locally.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "src/index.ts",
+  "permissions": { "network": [], "openExternal": [], "storage": true },
+  "config": {},
+  "tools": [
+    {
+      "name": "submit",
+      "description": "Starts a test job.",
+      "effect": "write",
+      "label": "Start a test job",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation": { "type": "string", "enum": ["image.generate", "video.text-to-video"] },
+          "prompt": { "type": "string", "maxLength": 4000 },
+          "idempotencyKey": { "type": "string", "maxLength": 100 },
+          "durationSeconds": { "type": "number", "minimum": 1, "maximum": 8 }
+        },
+        "required": ["operation", "prompt", "idempotencyKey"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "status",
+      "description": "Reads a test job's status.",
+      "effect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "remoteId": { "type": "string", "maxLength": 200 } },
+        "required": ["remoteId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "result",
+      "description": "Makes and returns a test job's files.",
+      "effect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "remoteId": { "type": "string", "maxLength": 200 } },
+        "required": ["remoteId"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "media": [
+    {
+      "id": "big",
+      "name": "Bigmedia test files",
+      "capabilities": [
+        {
+          "operation": "image.generate",
+          "formats": ["image/png"],
+          "progress": false,
+          "cancel": false,
+          "idempotency": false,
+          "minPollSeconds": 1,
+          "tools": { "submit": "submit", "status": "status", "result": "result" }
+        },
+        {
+          "operation": "video.text-to-video",
+          "formats": ["video/webm"],
+          "durations": { "min": 1, "max": 8 },
+          "progress": false,
+          "cancel": false,
+          "idempotency": false,
+          "minPollSeconds": 1,
+          "tools": { "submit": "submit", "status": "status", "result": "result" }
+        }
+      ]
+    }
+  ]
+}

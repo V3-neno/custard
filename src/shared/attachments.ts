@@ -35,6 +35,10 @@ export type DraftAttachment = Omit<Attachment, 'message'> & { draft: string }
 export type AttachResult =
   { ok: true; attachment: DraftAttachment } | { ok: false; name: string; error: string }
 
+// Modes whose messages can carry files: Chat, and Design for references.
+export const attachmentModes: readonly string[] = ['chat', 'design']
+export const acceptsAttachments = (mode: string): boolean => attachmentModes.includes(mode)
+
 export const ATTACHMENT_LIMITS = {
   imageBytes: 5_000_000,
   imageSide: 8000,

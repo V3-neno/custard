@@ -9,6 +9,20 @@ import {
   type PluginStatus,
   type TestReport
 } from '../../shared/plugins'
+import type {
+  AuthorizationToken,
+  MediaRequest,
+  PluginMediaSpec,
+  PluginMediaSubmitInput
+} from '../../shared/design'
+import {
+  AuthorizationError,
+  authorizations,
+  bindingFor,
+  sha256,
+  type Authorizations
+} from '../design/authorization'
+import type { Mode } from '../../shared/chat'
 import { formatLabel } from '../../shared/vault'
 import { WIDGET_LIMITS, type WidgetSpec } from '../../shared/widgets'
 import { resolveInside } from '../workspace/paths'
@@ -83,6 +97,9 @@ export type HostDeps = {
   openExternal: (url: string) => Promise<void>
   openBrowser: (url: string) => Promise<void>
   askByDefault: () => boolean
+  // Single-use media authorizations (contract S3); the process registry by
+  // default, tests pass their own.
+  authorizations?: Authorizations
   transport?: () => Transport | undefined
 }
 
@@ -114,9 +131,113 @@ const fail = (content: string): ToolOutcome => ({ content, isError: true })
 const notRun = (content: string): ToolOutcome => ({ content, isError: true, outcome: 'not-run' })
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
+// Media tools' `data` (job references, status, results with inline files) is
+// bigger than a widget's. It goes only to Design's media adapter, which
+// checks it again; never to the model or a widget.
+export const MEDIA_DATA_BYTES = 48 * 1024 * 1024
+
+// Tools a plugin's `media` declaration names: Design's job flow is the only
+// way to call them, so they aren't offered to the model as plain tools.
+export const mediaTools = (m: PluginManifest): Set<string> =>
+  new Set(
+    (m.media ?? []).flatMap((p) =>
+      p.capabilities.flatMap((c) => Object.values(c.tools).filter(Boolean) as string[])
+    )
+  )
+
+// "Use in Chat and Design" (docs/design/MODE-BOUNDARY.md, option A, chosen by
+// Neno on 2026-10-09). Chat, Design and Skills only use extensions; they must
+// not start implementation work. Custard can't tell from outside what a
+// plugin's code does with its network access, so a plugin runs in those modes
+// only after the user says they trust it there. This records the user's
+// trust; it is not proof that the plugin can't start implementation work.
+// Only Code's Plugins workspace (where plugins are built) runs plugins
+// without it.
+export const needsChatDesign = (mode: Mode): boolean => mode !== 'code'
+
+// What the choice covers: everywhere the plugin can send data or links, the
+// account it acts as, and its actions. A version that asks for more needs the
+// choice again.
+export const chatDesignScope = (m: PluginManifest): string[] =>
+  permissionsOf(m).filter((p) => /^(network|open|account(-[a-z]+)?|action):/.test(p))
+
+const chatDesignState = (m: PluginManifest, saved: string[] | null): 'on' | 'off' | 'changed' =>
+  !Array.isArray(saved)
+    ? 'off'
+    : chatDesignScope(m).every((p) => saved.includes(p))
+      ? 'on'
+      : 'changed'
+
+const CHAT_DESIGN_OFF = (name: string): string =>
+  `${name} isn't turned on for Chat and Design (Use in Chat and Design, in its plugin settings), so nothing was done.`
+
+export type MediaRole = 'submit' | 'status' | 'result' | 'cancel'
+
+// The user's go-ahead for one media write (contract S3): the opaque token
+// minted after Design's card or the cancel confirmation, plus what it is
+// for, which the host checks against what it is about to send. The token is
+// consumed here, at the dispatch boundary, whatever happens next.
+export type MediaAuthorization =
+  | {
+      action: 'submit'
+      token: AuthorizationToken
+      // Custard's job id (correlation id).
+      jobId: string
+      // The request as approved; the plugin input must be exactly this, with
+      // each reference's bytes matching its approved sha256.
+      request: MediaRequest
+    }
+  | {
+      action: 'cancel'
+      token: AuthorizationToken
+      // Custard's full job reference, "<operation>|<plugin's id>".
+      remoteId: string
+    }
+
+export type MediaEntry = {
+  pluginId: string
+  pluginName: string
+  buildId: string
+  spec: PluginMediaSpec
+  // ready only when enabled, every permission granted, required settings
+  // set and, with an account, signed in.
+  ready: boolean
+  needs?: string
+}
+
+// Whether a media submission's plugin input differs from the approved
+// request: every field, and each reference's bytes by sha256, in order.
+function submitDiffers(operation: string, input: unknown, r: MediaRequest): string | null {
+  const i = (input ?? {}) as Partial<PluginMediaSubmitInput>
+  if (operation !== r.operation || i.operation !== r.operation)
+    return 'The operation changed since it was approved'
+  if (i.prompt !== r.prompt) return 'The request changed since it was approved'
+  const same = (x: unknown, y: unknown): boolean => JSON.stringify(x) === JSON.stringify(y)
+  if (
+    !same(i.size ?? null, r.size ? { width: r.size.width, height: r.size.height } : null) ||
+    (i.durationSeconds ?? null) !== (r.durationSeconds ?? null) ||
+    (i.format ?? null) !== (r.format ?? null)
+  )
+    return 'The request changed since it was approved'
+  const refs = i.references ?? []
+  if (refs.length !== r.references.length)
+    return 'The files to send changed since they were approved'
+  for (const [n, ref] of refs.entries()) {
+    let bytes: Buffer
+    try {
+      bytes = Buffer.from(String(ref.base64), 'base64')
+    } catch {
+      return 'The files to send changed since they were approved'
+    }
+    if (sha256(bytes) !== r.references[n].sha256)
+      return 'The files to send changed since they were approved'
+  }
+  return null
+}
+
 // A tool's `data` for widgets: plain JSON, bounded, and dropped if it holds a
 // secret value (redaction would garble it, so it isn't attempted).
-function widgetData(data: unknown, secrets: string[]): unknown {
+function widgetData(data: unknown, secrets: string[], limit = WIDGET_LIMITS.dataBytes): unknown {
   if (data === undefined) return undefined
   let json: string | undefined
   try {
@@ -124,7 +245,7 @@ function widgetData(data: unknown, secrets: string[]): unknown {
   } catch {
     return undefined
   }
-  if (json === undefined || json.length > WIDGET_LIMITS.dataBytes) return undefined
+  if (json === undefined || json.length > limit) return undefined
   if (redact(json, secrets) !== json) return undefined
   return JSON.parse(json)
 }
@@ -134,7 +255,7 @@ export class PluginHost {
   private starting = new Map<string, Promise<RuntimeHandle>>()
   private calls = new Map<
     string,
-    { pluginId: string; buildId: string; controller: AbortController }
+    { pluginId: string; buildId: string; controller: AbortController; write: boolean }
   >()
   private logs = new Map<string, string[]>()
   private refreshing = new Map<string, Promise<string>>()
@@ -324,6 +445,7 @@ export class PluginHost {
         effect: t.effect,
         askEveryTime: t.effect === 'write' && (st.askEveryTime[t.name] ?? this.d.askByDefault())
       })),
+      chatDesign: active ? chatDesignState(active, st.chatDesign) : 'off',
       ...(m?.widgets?.length
         ? { widgets: m.widgets.map((w) => ({ id: w.id, title: w.title })) }
         : {}),
@@ -689,6 +811,17 @@ export class PluginHost {
     return this.status(id)
   }
 
+  // The user's "Use in Chat and Design" choice for the active version.
+  setChatDesign(id: string, on: boolean): PluginStatus {
+    const st = this.d.store.state(id)
+    if (on && !st.active) throw new Error('Review and activate the plugin first.')
+    this.d.store.setState(id, {
+      chatDesign: on ? chatDesignScope(this.build(id, st.active!.buildId).manifest) : null
+    })
+    this.changed(id)
+    return this.status(id)
+  }
+
   async connect(id: string): Promise<PluginStatus> {
     const { manifest, granted } = this.activeManifest(id)
     const spec = manifest.auth
@@ -743,8 +876,9 @@ export class PluginHost {
     }
   }
 
-  // Tools of every enabled plugin, for the existing assistant tool pipeline.
-  toolSet(): { tools: BetaTool[]; snapshot: ToolSnapshot; instructions: string[] } {
+  // Tools of every enabled plugin a conversation in this mode may use, for
+  // the existing assistant tool pipeline.
+  toolSet(mode: Mode): { tools: BetaTool[]; snapshot: ToolSnapshot; instructions: string[] } {
     const tools: BetaTool[] = []
     const snapshot: ToolSnapshot = new Map()
     const instructions: string[] = []
@@ -752,7 +886,10 @@ export class PluginHost {
       const st = this.d.store.state(id)
       if (!st.enabled || !st.active) continue
       const { manifest, instructions: text } = this.build(id, st.active.buildId)
+      if (needsChatDesign(mode) && chatDesignState(manifest, st.chatDesign) !== 'on') continue
+      const media = mediaTools(manifest)
       for (const t of manifest.tools) {
+        if (media.has(t.name)) continue
         const name = fullToolName(id, t.name)
         tools.push({
           name,
@@ -769,9 +906,9 @@ export class PluginHost {
     return { tools, snapshot, instructions }
   }
 
-  // Widgets the assistant may show now: declared by an enabled plugin's
-  // active build and approved by the user.
-  widgetCatalog(): {
+  // Widgets the assistant may show now in a conversation of this mode:
+  // declared by an enabled plugin's active build and approved by the user.
+  widgetCatalog(mode: Mode): {
     pluginId: string
     pluginName: string
     buildId: string
@@ -783,6 +920,7 @@ export class PluginHost {
       if (!st.enabled || !st.active) continue
       const { manifest } = this.build(id, st.active.buildId)
       if (permissionsOf(manifest).some((p) => !st.granted.includes(p))) continue
+      if (needsChatDesign(mode) && chatDesignState(manifest, st.chatDesign) !== 'on') continue
       for (const w of manifest.widgets ?? [])
         if (st.granted.includes(`widget:${w.id}`))
           out.push({
@@ -793,6 +931,199 @@ export class PluginHost {
           })
     }
     return out
+  }
+
+  // Media providers declared by active builds, enabled or not, so Design can
+  // say why one isn't ready. Not-activated plugins aren't listed: nothing of
+  // theirs has been reviewed.
+  mediaCatalog(): MediaEntry[] {
+    const out: MediaEntry[] = []
+    for (const id of this.d.store.ids()) {
+      const st = this.d.store.state(id)
+      if (!st.active) continue
+      let manifest: PluginManifest
+      try {
+        manifest = this.build(id, st.active.buildId).manifest
+      } catch {
+        continue
+      }
+      for (const spec of manifest.media ?? []) {
+        const missingPerm = permissionsOf(manifest).some((p) => !st.granted.includes(p))
+        const config = this.d.store.config(id)
+        const unset = Object.entries(manifest.config).filter(
+          ([k, f]) =>
+            f.required &&
+            (f.secret
+              ? !this.d.store.secretsLocked(id) && !this.d.store.secrets(id)[k]
+              : config[k] === undefined && f.default === undefined)
+        )
+        const needs = !st.enabled
+          ? `the ${manifest.name} plugin is turned off.`
+          : missingPerm
+            ? `the ${manifest.name} plugin is missing approved permissions.`
+            : chatDesignState(manifest, st.chatDesign) !== 'on'
+              ? `turn on Use in Chat and Design in the ${manifest.name} plugin's settings.`
+              : this.d.store.secretsLocked(id)
+                ? `the ${manifest.name} plugin's saved secrets can't be read.`
+                : unset.length
+                  ? `set ${unset.map(([, f]) => f.title).join(', ')} in the ${manifest.name} plugin's settings.`
+                  : manifest.auth && !this.d.store.secrets(id)[OAUTH_KEY]
+                    ? `connect your account in the ${manifest.name} plugin's settings.`
+                    : undefined
+        out.push({
+          pluginId: id,
+          pluginName: manifest.name,
+          buildId: st.active.buildId,
+          spec,
+          ready: !needs,
+          ...(needs ? { needs } : {})
+        })
+      }
+    }
+    return out
+  }
+
+  // The hosts a plugin's approved network permission reaches now: the only
+  // places a media result URL may be fetched from.
+  mediaHosts(id: string): string[] {
+    const { manifest, granted } = this.activeManifest(id)
+    return this.allowedHosts(manifest, granted)
+  }
+
+  // Runs one of a media provider's declared tools for Design, through the
+  // same checks as any tool call (invoke). The tool must be the one the
+  // active build declares for this provider, operation and role, so Design
+  // can't reach any other tool this way. `authorization` is the user's
+  // go-ahead for this exact write (see MediaAuthorization and
+  // docs/design/MEDIA-PLUGINS.md); without it a write asks through
+  // `approve`, which Design refuses.
+  async invokeMedia(
+    a: {
+      pluginId: string
+      providerId: string
+      operation: string
+      role: MediaRole
+      input: unknown
+    },
+    o: {
+      signal: AbortSignal
+      approve: (r: ApprovalRequest) => Promise<boolean>
+      authorization?: MediaAuthorization
+    }
+  ): Promise<ToolOutcome> {
+    const st = this.d.store.state(a.pluginId)
+    if (!st.enabled || !st.active)
+      return notRun(`The ${a.pluginId} plugin is not enabled, so nothing was done.`)
+    const { manifest } = this.build(a.pluginId, st.active.buildId)
+    const spec = manifest.media?.find((p) => p.id === a.providerId)
+    const cap = spec?.capabilities.find((c) => c.operation === a.operation)
+    const tool = cap?.tools[a.role]
+    if (!spec || !cap || !tool)
+      return notRun(`${manifest.name} no longer offers this, so nothing was done.`)
+    if (!st.granted.includes(`media:${spec.id}`))
+      return notRun(`${spec.name} isn't approved for Design, so nothing was done.`)
+    if (chatDesignState(manifest, st.chatDesign) !== 'on')
+      return notRun(CHAT_DESIGN_OFF(manifest.name))
+    const name = fullToolName(a.pluginId, tool)
+    const snapshot: ToolSnapshot = new Map([
+      [name, { pluginId: a.pluginId, buildId: st.active.buildId }]
+    ])
+    let preApproved = false
+    if (o.authorization) {
+      // Used up first, so a refusal below can't leave it reusable.
+      const refused = this.consumeMediaAuthorization(a, o.authorization, {
+        pluginId: a.pluginId,
+        buildId: st.active.buildId,
+        providerId: spec.id
+      })
+      if (refused) return notRun(refused)
+      preApproved = true
+    }
+    return this.run(
+      name,
+      a.input,
+      {
+        signal: o.signal,
+        approve: o.approve,
+        preApproved,
+        snapshot,
+        mode: 'design',
+        dataLimit: MEDIA_DATA_BYTES
+      },
+      true
+    )
+  }
+
+  // Consumes a media authorization against what is about to be sent, from
+  // the active build. Why it doesn't cover this call, or null when it does.
+  private consumeMediaAuthorization(
+    a: { operation: string; role: MediaRole; input: unknown },
+    auth: MediaAuthorization,
+    current: { pluginId: string; buildId: string; providerId: string }
+  ): string | null {
+    const nothing = 'so nothing was sent.'
+    const source = { kind: 'plugin' as const, ...current }
+    let actual: ReturnType<typeof bindingFor>
+    let unseen: ('conversationId' | 'jobId' | 'references')[]
+    if (a.role === 'submit' && auth.action === 'submit') {
+      const differs = submitDiffers(a.operation, a.input, auth.request)
+      if (differs) return this.spend(auth.token, `${differs}, ${nothing}`)
+      actual = bindingFor('submit', {
+        jobId: auth.jobId,
+        conversationId: '',
+        source,
+        request: auth.request
+      })
+      unseen = ['conversationId']
+    } else if (a.role === 'cancel' && auth.action === 'cancel') {
+      const sep = auth.remoteId.indexOf('|')
+      const theirs = (a.input as { remoteId?: unknown } | null)?.remoteId
+      if (
+        sep <= 0 ||
+        auth.remoteId.slice(0, sep) !== a.operation ||
+        theirs !== auth.remoteId.slice(sep + 1)
+      )
+        return this.spend(auth.token, `That approval was for another job, ${nothing}`)
+      actual = bindingFor('cancel', {
+        jobId: '',
+        conversationId: '',
+        source,
+        request: {
+          operation: a.operation as MediaRequest['operation'],
+          prompt: '',
+          references: []
+        },
+        remoteId: auth.remoteId
+      })
+      unseen = ['conversationId', 'jobId', 'references']
+    } else
+      return this.spend(
+        auth.token,
+        a.role === 'status' || a.role === 'result'
+          ? `A status or result check can't use an approval, ${nothing}`
+          : `That approval was for something else, ${nothing}`
+      )
+    try {
+      this.authorizations().consume(auth.token, actual, unseen)
+    } catch (err) {
+      if (err instanceof AuthorizationError) return err.message
+      throw err
+    }
+    return null
+  }
+
+  // Uses a token up without dispatching anything, and says why.
+  private spend(token: AuthorizationToken, why: string): string {
+    try {
+      this.authorizations().consume(token, {} as never, [])
+    } catch {
+      // Always throws: an empty binding matches nothing.
+    }
+    return why
+  }
+
+  private authorizations(): Authorizations {
+    return this.d.authorizations ?? authorizations
   }
 
   widgetCode(id: string, buildId: string, widgetId: string): string | null {
@@ -859,17 +1190,40 @@ export class PluginHost {
     return values
   }
 
+  // A tool call from the assistant or a widget, in a conversation of `mode`.
+  // A media provider's tools aren't reachable this way, whatever the snapshot
+  // says: only Design's job flow runs them, through invokeMedia.
   async invoke(
     name: string,
     input: unknown,
     o: {
       snapshot: ToolSnapshot
       signal: AbortSignal
+      // The mode of the conversation the call comes from: outside Code it
+      // needs "Use in Chat and Design".
+      mode: Mode
       approve: (r: ApprovalRequest) => Promise<boolean>
       // The user already approved this exact call (a repeat of an action
       // whose outcome was unknown), so don't ask again.
       preApproved?: boolean
     }
+  ): Promise<ToolOutcome> {
+    return this.run(name, input, o, false)
+  }
+
+  private async run(
+    name: string,
+    input: unknown,
+    o: {
+      snapshot: ToolSnapshot
+      signal: AbortSignal
+      mode: Mode
+      approve: (r: ApprovalRequest) => Promise<boolean>
+      preApproved?: boolean
+      // Media calls only (invokeMedia): a larger bound on `data`.
+      dataLimit?: number
+    },
+    media: boolean
   ): Promise<ToolOutcome> {
     const offered = o.snapshot.get(name)
     const split = splitToolName(name)
@@ -888,12 +1242,16 @@ export class PluginHost {
       const missing = permissionsOf(manifest).filter((p) => !st.granted.includes(p))
       if (missing.length)
         return 'The plugin is missing approved permissions, so this call was not run.'
+      if (needsChatDesign(o.mode) && chatDesignState(manifest, st.chatDesign) !== 'on')
+        return CHAT_DESIGN_OFF(manifest.name)
       return { manifest, granted: st.granted }
     }
     let c = current()
     if (typeof c === 'string') return notRun(c)
     const tool = c.manifest.tools.find((t) => t.name === split.tool)
     if (!tool) return notRun('This plugin has no such tool.')
+    if (!media && mediaTools(c.manifest).has(tool.name))
+      return notRun("This tool is only run by Design's media jobs, so nothing was done.")
     const errors = validate(tool.inputSchema, input ?? {})
     if (errors.length) return notRun(`Invalid input: ${errors.slice(0, 5).join('; ')}`)
 
@@ -926,9 +1284,9 @@ export class PluginHost {
     const controller = new AbortController()
     const onAbort = (): void => controller.abort()
     o.signal.addEventListener('abort', onAbort)
-    this.calls.set(callId, { pluginId: id, buildId: offered.buildId, controller })
-    const secrets = this.secretValues(id)
     const write = tool.effect === 'write'
+    this.calls.set(callId, { pluginId: id, buildId: offered.buildId, controller, write })
+    const secrets = this.secretValues(id)
     // Once the call may have reached the plugin, a write cut short might
     // still have happened.
     let sent = false
@@ -949,7 +1307,7 @@ export class PluginHost {
         controller.signal
       )
       const content = redact(String(r.content).slice(0, MAX_RESULT_CHARS), secrets)
-      const data = widgetData(r.data, secrets)
+      const data = widgetData(r.data, secrets, o.dataLimit)
       if (r.isError) this.log(id, `${tool.name}: ${content.slice(0, 200)}`)
       const outcome = r.notSent
         ? 'not-run'
@@ -1011,7 +1369,7 @@ export class PluginHost {
         case 'fetch':
           return {
             ok: true,
-            value: await this.fetchFor(id, manifest, granted, a, call.controller.signal)
+            value: await this.fetchFor(id, manifest, granted, a, call.controller.signal, call.write)
           }
         case 'storage.get':
         case 'storage.set':
@@ -1026,6 +1384,9 @@ export class PluginHost {
           return { ok: true, value: null }
         }
         case 'openExternal': {
+          // Only during an action (a write tool), which the user can be
+          // asked about; a read tool never shows an approval card.
+          if (!call.write) throw new Error('Only actions can open links, so nothing was opened.')
           const url = String(a.url ?? '')
           const prefixes = manifest.permissions.openExternal.filter((p) =>
             granted.includes(`open:${p}`)
@@ -1052,13 +1413,25 @@ export class PluginHost {
     m: PluginManifest,
     granted: string[],
     a: Record<string, unknown>,
-    signal: AbortSignal
+    signal: AbortSignal,
+    write: boolean
   ): Promise<NetResponse> {
     const init = (a.init ?? {}) as {
       method?: string
       headers?: Record<string, string>
       body?: string
       auth?: boolean
+    }
+    // A read tool only reads, in every mode: it may only GET or HEAD, with
+    // no body. Anything that sends or changes something is an action, which
+    // the user approves and can be asked about. This narrows what a read
+    // tool can do; a GET can still reach a server that acts on it.
+    if (!write) {
+      const method = String(init.method ?? 'GET').toUpperCase()
+      if ((method !== 'GET' && method !== 'HEAD') || (init.body ?? '') !== '')
+        throw new Error(
+          `Read tools may only GET or HEAD, without a body, so this ${method} request was not sent.`
+        )
     }
     const url = String(a.url ?? '')
     const auth = init.auth === true

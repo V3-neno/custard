@@ -56,9 +56,9 @@ import {
 import { withoutUnavailableTools } from './history'
 import { attachments } from './attachments'
 import { claudeFilesFrom, prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
-import type { Attachment } from '../shared/attachments'
+import { acceptsAttachments, type Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
-import { pluginHost, verifyWorkspace } from './plugins'
+import { pluginHost, protectedRoots, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
 import { workspaceTools, type WorkspaceTools } from './workspace'
 import { isWebTool, runWebTool, webTools } from './web'
@@ -79,6 +79,36 @@ import {
 import { toolLabel } from '../shared/vault'
 import { setRequestLookup, widgets } from './widgets'
 import { anthropicEndpoint } from './endpoints'
+import { modeName, modePolicy, refuseKind, toolKind } from './modes/policy'
+import { extensionRefusal, extensionTarget } from './modes/extensions'
+import { resolveInVault } from './memory/paths'
+import { design } from './design'
+import { designTools, runDesignTool } from './design/tools'
+import type { MediaReference } from '../shared/design'
+
+// Files attached in this chat, as Design references, by id or exact file
+// name (the model sees names). Only images, only from this chat, and never
+// one Custard found missing or changed.
+function designReferences(c: Conversation, ids: string[]): MediaReference[] {
+  return ids.map((id) => {
+    const all = c.attachments ?? []
+    const byName = all.filter((x) => x.name === id)
+    if (byName.length > 1)
+      throw new Error(`More than one attached file is called ${id}, so nothing was sent.`)
+    const a = all.find((x) => x.id === id) ?? byName[0]
+    if (!a) throw new Error(`There is no attached file ${id} in this chat, so nothing was sent.`)
+    if (a.missing) throw new Error(`${a.name} is no longer available, so nothing was sent.`)
+    if (a.kind !== 'image') throw new Error(`${a.name} isn't an image, so it can't be a reference.`)
+    return {
+      kind: 'image',
+      name: a.name,
+      mime: a.mime,
+      bytes: a.bytes,
+      attachmentId: a.id,
+      sha256: a.sha256
+    }
+  })
+}
 
 const isVaultTool = (name: string): boolean => name.startsWith('vault_')
 // The assistant's widget tools. Neither runs a plugin tool.
@@ -108,22 +138,36 @@ function widgetTools(keys: string[]): BetaTool[] {
   ]
 }
 
-const CORE_WRITES = /^(vault_create_note|vault_append|fs_write|fs_delete|fs_rename)$/
+// design_media can start paid work at a provider.
+const CORE_WRITES = /^(vault_create_note|vault_append|fs_write|fs_delete|fs_rename|design_media)$/
+// design_jobs reads, except a cancel, which changes the job at the provider.
+const isCoreWrite = (name: string, input: unknown): boolean =>
+  CORE_WRITES.test(name) ||
+  (name === 'design_jobs' && (input as { action?: unknown } | null)?.action === 'cancel')
 
 const systemPrompt = (model: (typeof chatModels)[number]): string =>
   `${model.provider === 'claude' ? 'You are Claude' : `You are ${model.label}, an OpenAI model`}, ` +
   'working with the user through Custard, their personal desktop client. ' +
   'Format responses in Markdown when it helps readability.'
 
+// Chat and Design use extensions but never make them; the app enforces it
+// (see modes/policy), and this says what to offer instead.
+const USE_ONLY =
+  " In this mode you can't create, change or install skills or plugins, or hand work to Code mode or another agent. When one would help, recommend it, and if the user asks, draft the skill's text or a development prompt in a code block for them to copy. Never say one was sent, built or installed."
+
 // Each mode keeps its own history and nudges Claude toward that kind of work.
 const MODE_PROMPTS: Record<Mode, string> = {
-  chat: 'The user is in Chat mode: a general conversation.',
+  chat: 'The user is in Chat mode: a general conversation.' + USE_ONLY,
   code:
     'The user is in Code mode. Act as a senior software engineer: give complete, working code in fenced blocks with the language named, ' +
     'explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
   design:
     'The user is in Design mode. Act as a product and visual designer: think about layout, hierarchy, color, typography, spacing and interaction states. ' +
-    'When showing UI, give self-contained HTML with inline CSS (or React with Tailwind when asked) in fenced code blocks, and describe the design choices.',
+    'When the user wants a page, mockup or UI, make it with design_html: send the complete document (inline CSS and JS, or local files through `files`), never a fragment, and never only a code block. ' +
+    'Change an output by sending a new complete version with `artifact` (and `from` for an older one); `relation: "variation"` for another option beside it. ' +
+    'Before generating, read any skill whose description fits and list each one you considered in `skills` with its strength (explicit when the user named it, clear, or similar); if design_html answers with a question, ask the user that question and stop. ' +
+    "The user's own words override skill defaults. Report only the checks design_html says ran, and describe the design choices briefly." +
+    USE_ONLY,
   skills: [
     "The user is in Skills mode. You curate their Obsidian vault, Custard's long-term brain, so that future answers in Chat, Code and Design get better.",
     "- If the vault isn't connected, ask them to connect it in Settings and stop there.",
@@ -228,8 +272,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   if (!existing && !isMode(req.mode)) return refuse('Unknown mode.')
   if (existing && active.has(existing.id))
     return refuse('This chat is still answering. Wait for it to finish or stop it first.')
-  if (fileIds.length && (existing?.mode ?? req.mode) !== 'chat')
-    return refuse('Files can be attached in Chat mode only.')
+  if (fileIds.length && !acceptsAttachments(existing?.mode ?? req.mode))
+    return refuse('Files can be attached in Chat and Design modes only.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
   // Off before anything is said, so no part of it is ever captured.
   if (!existing && req.temporary) conversation.memory = { off: true, temporary: true, watermark: 0 }
@@ -269,13 +313,16 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const vault = getVaultPath()
   const vaultReady = vault !== null && existsSync(vault)
   const workspace = conversation.mode === 'code' ? workspaceTools(conversation.workspace) : null
+  // What this mode may do (see modes/policy): which kinds of tool it's
+  // offered and runs, and whether it may write skills or plugin files.
+  const policy = modePolicy(conversation.mode, conversation.workspace)
+  const kindOf = (name: string): ReturnType<typeof toolKind> =>
+    toolKind(name, { isWorkspace: (n) => !!workspace?.has(n), isWeb: isWebTool })
   // Enabled plugins' tools, and which build each came from. Every call is
   // checked against the plugin's state again when it runs.
-  // General Code gets no plugin tools: only Chat, Design, Skills and the
-  // Plugins workspace do.
-  const pluginsAllowed = conversation.mode !== 'code' || conversation.workspace?.kind === 'internal'
+  const pluginsAllowed = policy.tools.has('plugin')
   const plugins = pluginsAllowed
-    ? pluginHost().toolSet()
+    ? pluginHost().toolSet(conversation.mode)
     : { tools: [], snapshot: new Map(), instructions: [] }
 
   const system: BetaTextBlockParam[] = [
@@ -337,7 +384,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   })
 
   // Plugin widgets the assistant can show next to the message box.
-  const widgetCatalog = pluginsAllowed ? widgets().describe(conversation.id) : []
+  const widgetCatalog = policy.tools.has('widget') ? widgets().describe(conversation.id) : []
   if (widgetCatalog.length)
     system.push({
       type: 'text',
@@ -357,8 +404,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ...(workspace?.tools ?? []),
     ...web.tools,
     ...plugins.tools,
-    ...(widgetCatalog.length ? widgetTools(widgets().keys()) : [])
-  ]
+    ...(widgetCatalog.length ? widgetTools(widgets().keys(conversation.id)) : []),
+    ...(policy.tools.has('design') ? designTools() : [])
+  ].filter((t) => policy.tools.has(kindOf(t.name)))
   const available = new Set(tools.map((t) => t.name))
   // Attached files, read once the turn starts (see attachments/request).
   let files: PreparedFiles | null = null
@@ -430,8 +478,27 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       name,
       input,
       label: described?.label ?? toolLabel(name, input),
-      write: described?.write ?? CORE_WRITES.test(name)
+      write: described?.write ?? isCoreWrite(name, input)
     }
+  }
+
+  // Why the mode refuses a call, checked before anything runs or asks: its
+  // kind of tool, and for a new note, whether it would land among skills,
+  // plugin files or Custard's own files (by any path, links included).
+  const modeRefusal = (c: Call): string | null => {
+    const kind = kindOf(c.name)
+    const refused = refuseKind(policy, c.name, kind)
+    if (refused || kind !== 'vault-write' || !vaultReady) return refused
+    let full: string
+    try {
+      full = resolveInVault(vault, ((c.input ?? {}) as { path?: unknown }).path)
+    } catch {
+      // A path the vault refuses anyway; the tool says why.
+      return null
+    }
+    const target = extensionTarget(full, vault, protectedRoots())
+    if (!target || (target === 'skill' && policy.authorSkills)) return null
+    return extensionRefusal(target, modeName(policy.mode))
   }
 
   // Runs one tool call. Its record is kept by the log.
@@ -451,9 +518,16 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         isError: true,
         outcome: 'not-run'
       }
+    const refusal = modeRefusal(c)
+    if (refusal) return { content: refusal, isError: true, outcome: 'not-run' }
     const isPlugin = c.name.includes('__') && !workspace?.has(c.name)
     let preApproved = false
-    if (c.write && log.unknownRepeat(c)) {
+    const repeatWarning =
+      'This repeats an earlier action whose outcome is unknown. It may already have happened.'
+    // A Design repeat carries the warning on Design's own card, which names
+    // the provider, the files sent and the price; it is never pre-approved.
+    const designRepeat = kindOf(c.name) === 'design' && c.write && log.unknownRepeat(c)
+    if (c.write && !designRepeat && log.unknownRepeat(c)) {
       const allowed = await approve(
         {
           pluginId: isPlugin ? c.name.split('__')[0] : 'custard',
@@ -462,7 +536,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
           label: c.label,
           input: c.input
         },
-        'This repeats an earlier action whose outcome is unknown. It may already have happened.'
+        repeatWarning
       )
       if (!allowed)
         return {
@@ -559,8 +633,36 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
             outcome: 'not-run'
           }
       }
-      return runVaultTool(vault, c.name, c.input)
+      // The mode's protection is checked again on the real place the note
+      // lands, just before it is created.
+      return runVaultTool(vault, c.name, c.input, (real) => {
+        const t = extensionTarget(real, vault, protectedRoots())
+        return t && !(t === 'skill' && policy.authorSkills)
+          ? extensionRefusal(t, modeName(policy.mode))
+          : null
+      })
     }
+    if (kindOf(c.name) === 'design')
+      return runDesignTool(design(), c.name, c.input, {
+        conversationId: conversation.id,
+        messageIndex: log.startLength,
+        chat: { provider: model.provider, model: model.id, hasKey: true },
+        approve: (label, detail) =>
+          approve(
+            {
+              pluginId: 'custard',
+              pluginName: 'Custard',
+              tool: c.name,
+              label,
+              input: c.input,
+              detail,
+              individual: true
+            },
+            designRepeat ? repeatWarning : undefined
+          ),
+        references: async (ids) => designReferences(conversation, ids),
+        signal: controller.signal
+      })
     if (c.name === 'widget_show' || c.name === 'widget_hide') {
       const i = (c.input ?? {}) as { widget?: unknown; input?: unknown }
       const r =
@@ -577,6 +679,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       const { data, ...r } = await pluginHost().invoke(c.name, c.input, {
         snapshot: plugins.snapshot,
         signal: controller.signal,
+        mode: conversation.mode,
         approve,
         preApproved
       })

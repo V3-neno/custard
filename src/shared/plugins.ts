@@ -1,6 +1,7 @@
 // Types shared by the plugin host (main process) and the Settings UI.
 // The manifest format itself is documented in docs/plugins/MANIFEST.md.
 
+import type { PluginMediaSpec } from './design'
 import type { WidgetSpec } from './widgets'
 
 export const PLUGIN_API_VERSION = 1
@@ -79,6 +80,9 @@ export type PluginManifest = {
   instructions?: string
   // UI the assistant can show next to the message box (see shared/widgets).
   widgets?: WidgetSpec[]
+  // Image or video generation the plugin offers to Design (see
+  // shared/design PluginMediaSpec). Optional; older manifests are unchanged.
+  media?: PluginMediaSpec[]
 }
 
 export type BuildInfo = { buildId: string; version: string; builtAt: number }
@@ -110,6 +114,9 @@ export type PluginStatus = {
   // changing them waits until they can be read or the user resets them.
   secretsLocked?: boolean
   tools: { name: string; fullName: string; effect: 'read' | 'write'; askEveryTime: boolean }[]
+  // "Use in Chat and Design": off until the user turns it on. 'changed' means
+  // it was on, but this version asks for more than it covered.
+  chatDesign: 'on' | 'off' | 'changed'
   widgets?: { id: string; title: string }[]
   errors: { at: number; message: string }[]
   log: string[]
@@ -162,6 +169,8 @@ export function describePermission(p: string): string {
       return `Send your account's access token to ${v}`
     case 'account-scope':
       return `Account access: ${v}`
+    case 'media':
+      return `Offer its "${v}" image or video generation to Design (each job asks first)`
     case 'widget':
       return `Show its "${v}" panel in chats when the assistant or you open it`
     case 'action':

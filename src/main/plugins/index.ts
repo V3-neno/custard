@@ -28,6 +28,12 @@ export const pluginDocsDir = (): string =>
     : join(appRoot(), 'docs', 'plugins')
 // Custard's own source, protected from General Code unless the user allows it.
 export const custardSource = (): string => appRoot()
+// Where plugin code lives (sources, built and installed copies, the SDK) and
+// Custard's own files: no mode writes there through the vault tools.
+export const protectedRoots = (): { plugin: string[]; app: string[] } => ({
+  plugin: [pluginsRoot(), join(app.getPath('userData'), 'plugins'), sdkDir()],
+  app: [custardSource()]
+})
 
 const crypto: Crypto = {
   available: () => safeStorage.isEncryptionAvailable(),
@@ -148,6 +154,9 @@ export function registerPluginHandlers(): void {
   )
   handle('plugins:setAskEveryTime', (_, id: string, tool: string, ask: boolean) =>
     h().setAskEveryTime(id, tool, ask === true)
+  )
+  handle('plugins:setChatDesign', (_, id: string, on: boolean) =>
+    h().setChatDesign(id, on === true)
   )
   handle('plugins:connect', (_, id: string) => h().connect(id))
   handle('plugins:disconnect', (_, id: string) => h().disconnect(id))
