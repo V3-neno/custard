@@ -26,7 +26,4 @@ the D2 section of SECURITY-REVIEW.
   unknown action" card on ordinary plugin tools (the user just approved
   that exact call on a card). It can't reach media tools. Replacing it with a
   token too is possible; say if you want it.
-- Finding (not fixed): if `jobs.submit()` throws a `JobError` (the provider
-  turned not-ready between the card and the send, via `need()`), the error
-  escapes `runDesignTool` and the new version stays `pending`. Nothing is
-  sent.
+- The JobError-leaves-pending-version finding is fixed in ff5f3a2.
