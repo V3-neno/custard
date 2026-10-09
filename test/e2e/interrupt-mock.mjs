@@ -263,7 +263,8 @@ http
         [/fs write test/, 'fswrite'],
         [/forged test/, 'forged'],
         [/note test/, 'note'],
-        [/append test/, 'append']
+        [/append test/, 'append'],
+        [/copy test/, 'copy']
       ].find(([r]) => r.test(ask))?.[1]
       const key =
         hardening ??
@@ -511,6 +512,8 @@ http
             tool('vault_append', { path: 'Areas/Music Preferences.md', content: 'APPENDED-9001' }),
           'Tried to append.'
         ],
+        // A drafted prompt in a code block, for the Copy button (copy.mjs).
+        copy: ['Here is the prompt:\n\n```\nBuild a tea timer.\nUse the forge style.\n```'],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]
