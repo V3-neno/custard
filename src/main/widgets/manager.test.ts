@@ -52,7 +52,9 @@ let views: FakeView[]
 let records: Map<string, WidgetRecord>
 let counts: Map<string, number>
 let emitted: (WidgetView | null)[]
-let invoked: { name: string; input: unknown; signal: AbortSignal }[]
+let invoked: { name: string; input: unknown; signal: AbortSignal; conversationId: string }[]
+// The conversations the catalog was asked for.
+let catalogFor: (string | null)[]
 let invokeImpl: (
   name: string,
   approve: (r: ApprovalRequest) => Promise<boolean>,
@@ -77,6 +79,7 @@ beforeEach(() => {
   counts = new Map()
   emitted = []
   invoked = []
+  catalogFor = []
   createThrows = false
   invokeImpl = async (name) => ({
     content: `ran ${name}`,
@@ -85,11 +88,14 @@ beforeEach(() => {
     data: { n: 1 }
   })
   const deps: ManagerDeps = {
-    catalog: () => catalog,
+    catalog: (conversationId) => {
+      catalogFor.push(conversationId)
+      return catalog
+    },
     widgetCode: (id, buildId, widgetId) => `code:${id}/${buildId}/${widgetId}`,
     isWrite: (_id, _b, tool) => (tool === 'add' ? true : tool === 'count' ? false : null),
     invoke: (name, input, o) => {
-      invoked.push({ name, input, signal: o.signal })
+      invoked.push({ name, input, signal: o.signal, conversationId: o.conversationId })
       return invokeImpl(name, o.approve, o.signal)
     },
     log: () => {},
@@ -148,7 +154,7 @@ describe('nothing showing', () => {
   })
 
   it('lists only the catalog, with plugin text as plain descriptions', () => {
-    expect(m.keys()).toEqual(['tally/counter', 'gauge/meter'])
+    expect(m.keys('A')).toEqual(['tally/counter', 'gauge/meter'])
     const lines = m.describe('A')
     expect(lines[0]).toContain('tally/counter: Tally. Counts things.')
     expect(lines[0]).toContain('"maxLength":10')
@@ -372,6 +378,11 @@ describe('calls from a widget', () => {
     const r = await v.events.call('count', {})
     expect(r).toEqual({ status: 'completed', content: 'ran tally__count', data: { n: 1 } })
     expect(invoked[0].name).toBe('tally__count')
+    // The host is told whose call it is, so the chat's mode decides whether
+    // the plugin may run there (needsChatDesign).
+    expect(invoked[0].conversationId).toBe('A')
+    expect(catalogFor.length).toBeGreaterThan(0)
+    expect(catalogFor.every((c) => c === 'A')).toBe(true)
     expect((await v.events.call('other', {})).status).toBe('not-run')
     expect((await v.events.call('gauge__scale', {})).status).toBe('not-run')
     expect(invoked).toHaveLength(1)

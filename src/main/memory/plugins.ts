@@ -1,8 +1,9 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
-import { dirname, join, relative, sep } from 'path'
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'fs'
+import { join, relative, sep } from 'path'
 import type { Conversation } from '../../shared/chat'
 import { resolveInVault, safeName } from './paths'
-import { captureNotes, frontmatter, sections } from './write'
+import { FsafeExistsError } from '../fsafe'
+import { captureNotes, createNote, frontmatter, sections } from './write'
 
 // Plugin knowledge: one folder per plugin under Custard/Plugins, with an
 // Overview made once (what the plugin said about itself, related notes) and
@@ -188,9 +189,12 @@ export function ensurePluginFolder(vault: string, p: PluginInfo): string {
   const folder = `${PLUGINS_DIR}/${folderName(vault, p)}`
   const overview = resolveInVault(vault, `${folder}/Overview.md`)
   const r = relatedNotes(vault, p, folder)
-  mkdirSync(dirname(overview), { recursive: true })
   try {
-    writeFileSync(
+    // Through the same race-resistant helper as captures (fsafe): folders
+    // made one level at a time inside the real vault, the note created
+    // exclusively.
+    createNote(
+      vault,
       overview,
       [
         `${front(p.id)}`,
@@ -208,11 +212,10 @@ export function ensurePluginFolder(vault: string, p: PluginInfo): string {
         '',
         '## Your notes',
         ''
-      ].join('\n'),
-      { flag: 'wx' }
+      ].join('\n')
     )
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+    if (!(err instanceof FsafeExistsError)) throw err
   }
   return folder
 }

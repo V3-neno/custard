@@ -47,3 +47,19 @@ description and modes, and Chat and Design can't write into the skills
 folder by any route (`src/main/modes/extensions.ts`). Tests:
 `src/main/modes/policy.test.ts` and `test/e2e/modes.mjs` (a skill claiming
 `allowed-tools` and `permissions` leaves Design's tools exactly Chat's).
+
+## In the workspace (Phase 2)
+
+`design_html` takes every skill the model considered (`strength`,
+`conflicts`, `material`, `guidance`) and runs `planSkills` on them before
+anything is generated: a question stops it with nothing saved. Applied
+skills are recorded on the version with `skillUse`. The workspace's
+"Skills used" shows them, checks `skillChanges` when the window regains
+focus, and offers a changed skill ("Use the updated skill") or the
+explicit override ("Without this skill") by filling in the message box,
+never by sending or restyling. Details: [WORKSPACE.md](WORKSPACE.md#skills).
+
+## Starter skills for Design
+
+- [Image making](IMAGE-SKILL-PROPOSAL.md) (`Custard/Skills/image-making`):
+  generated images in Design. Ships in the starter vault.

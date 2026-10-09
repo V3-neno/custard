@@ -1,6 +1,7 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { readdirSync, readFileSync, realpathSync, statSync, unlinkSync } from 'fs'
 import { createHash, randomUUID } from 'crypto'
-import { dirname, join } from 'path'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'path'
+import { FsafeError, FsafeExistsError, makeDirs, writeNewSync, type Guard } from '../fsafe'
 import { resolveInVault, safeName } from './paths'
 
 // Where automatic memory goes. Each capture is a new note, created only if
@@ -46,6 +47,24 @@ const read = (full: string): string | null => {
   }
 }
 
+const insideOf = (root: string, p: string): boolean => {
+  const rel = relative(root, p)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+// Custard's own vault writes go through the race-resistant helper like the
+// vault tools do: Custard choosing the names doesn't make the folders above
+// them safe (a folder can be a link, or be swapped for one). Folders are made
+// one level at a time and the note created exclusively, each checked to be
+// really inside the real vault. See docs/design/FILESYSTEM.md.
+export function createNote(vault: string, full: string, text: string): void {
+  const realVault = realpathSync(vault)
+  const guard: Guard = (real) =>
+    insideOf(realVault, real) ? null : 'That path leads outside the vault, so nothing was written.'
+  makeDirs(vault, relative(vault, dirname(full)).split(sep).filter(Boolean), { guard })
+  writeNewSync(full, text, { guard })
+}
+
 // Creates `folder/name.md` (or "name (2).md", …) with exclusive create, so
 // an existing file is never replaced. A file already holding this capture
 // (same job and plugin: a crash after writing, before it was recorded)
@@ -60,12 +79,11 @@ export function writeCapture(
   for (let n = 1; n <= 20; n++) {
     const rel = `${folder}/${name}${n > 1 ? ` (${n})` : ''}.md`
     const full = resolveInVault(vault, rel)
-    mkdirSync(dirname(full), { recursive: true })
     try {
-      writeFileSync(full, text, { flag: 'wx' })
+      createNote(vault, full, text)
       return rel
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      if (!(err instanceof FsafeExistsError)) throw err
       const fm = frontmatter(read(full) ?? '')
       if (fm['custard-capture'] === key.job && (fm.plugin ?? '') === key.plugin) return rel
     }
@@ -214,7 +232,13 @@ export function chatCaptures(vault: string, chatId: string): string[] {
 export function deleteNotes(vault: string, notes: string[]): string[] {
   return notes.filter((n) => {
     try {
-      rmSync(resolveInVault(vault, n))
+      // Removed by its real folder, checked to be inside the real vault just
+      // before, so a folder swapped for a link isn't followed out of it. A
+      // link at the note itself is removed, not followed.
+      const full = resolveInVault(vault, n)
+      const realDir = realpathSync(dirname(full))
+      if (!insideOf(realpathSync(vault), realDir)) return false
+      unlinkSync(join(realDir, basename(full)))
       return true
     } catch (err) {
       return (err as NodeJS.ErrnoException).code === 'ENOENT'
@@ -235,12 +259,16 @@ export function vaultId(vault: string, create: boolean): string | null {
     // Not there yet.
   }
   if (!create) return null
-  mkdirSync(dirname(resolveInVault(vault, 'Custard/id.md')), { recursive: true })
   const id = randomUUID()
   try {
-    writeFileSync(file, `${id}\n`, { flag: 'wx' })
+    createNote(
+      vault,
+      join(dirname(resolveInVault(vault, 'Custard/id.md')), basename(ID_FILE)),
+      `${id}\n`
+    )
     return id
-  } catch {
+  } catch (err) {
+    if (err instanceof FsafeError && !(err instanceof FsafeExistsError)) throw err
     // Another write got there first.
     return readFileSync(file, 'utf8').trim() || null
   }

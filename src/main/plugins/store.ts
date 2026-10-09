@@ -33,6 +33,11 @@ export type StateFile = {
   granted: string[]
   // Per write tool: true asks before every call. Missing means the global default.
   askEveryTime: Record<string, boolean>
+  // "Use in Chat and Design": the user's choice to let this plugin run in
+  // Chat, Design and Skills, saved with what it covered then (the network,
+  // link, account and action permissions). null means off. A version that
+  // asks for anything outside it needs the choice again.
+  chatDesign: string[] | null
   errors: { at: number; message: string }[]
 }
 
@@ -42,6 +47,7 @@ const emptyState = (): StateFile => ({
   previous: null,
   granted: [],
   askEveryTime: {},
+  chatDesign: null,
   errors: []
 })
 

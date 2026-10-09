@@ -72,7 +72,9 @@ function limitsOf(cap: MediaCapability): string[] {
           `up to ${cap.references.maxCount} reference ${cap.references.maxCount === 1 ? 'file' : 'files'}`
         ]
       : []),
-    ...(cap.pricing ? [`Price: ${cap.pricing.text} (from ${cap.pricing.source})`] : []),
+    ...(cap.pricing
+      ? [`pricing, not a quote: ${cap.pricing.text} (from ${cap.pricing.source})`]
+      : []),
     ...(cap.cancel ? [] : ["can't be cancelled once submitted"]),
     ...(cap.constraints ?? [])
   ]

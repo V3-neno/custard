@@ -1,5 +1,14 @@
-import { createHash } from 'crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { createHash, randomBytes } from 'crypto'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from 'fs'
 import { dirname, join } from 'path'
 import type { Artifact, ArtifactFile, Job } from '../../shared/design'
 import { readSettingsFile, writeSettingsFile } from '../settingsFile'
@@ -10,7 +19,12 @@ import { readSettingsFile, writeSettingsFile } from '../settingsFile'
 //   <root>/jobs.json                                 generation jobs
 // Never in the vault. A version's files are written once (exclusive create)
 // and made read-only; the index only ever gains versions, and a settled
-// version never changes. Deleting a chat deletes its folder here; exported
+// version never changes. They are written into a staging folder
+// (<version>.partial-<random>) and renamed into place, so a version folder
+// is complete or absent. A version folder that exists while the index still
+// shows the version pending (Custard stopped between the rename and the
+// index update) is unrecorded, so a later write for that version replaces
+// it; this is how a result fetched again after a restart is saved. Deleting a chat deletes its folder here; exported
 // copies elsewhere are separate files and are left alone.
 
 export class StoreError extends Error {}
@@ -102,26 +116,45 @@ export class ArtifactStore {
     const total = files.reduce((n, f) => n + f.bytes.byteLength, 0)
     if (total > STORE_LIMITS.versionBytes)
       throw new StoreError('These files are too large to keep.')
-    const dir = join(this.chatDir(chat), id(artifactId, 'output'), id(versionId, 'version'))
+    const settled = this.get(chat, artifactId)?.versions.find((v) => v.id === versionId)
+    if (settled && settled.status !== 'pending')
+      throw new StoreError('A finished version can never be changed.')
+    const parent = join(this.chatDir(chat), id(artifactId, 'output'))
+    const dir = join(parent, id(versionId, 'version'))
+    const staging = `${dir}.partial-${randomBytes(6).toString('hex')}`
+    mkdirSync(parent, { recursive: true })
+    mkdirSync(staging)
     const seen = new Set<string>()
     const records: ArtifactFile[] = []
-    for (const f of files) {
-      const parts = safeFilePath(f.path)
-      const key = parts.join('/').toLowerCase()
-      if (seen.has(key)) throw new StoreError(`"${f.path}" is listed twice.`)
-      seen.add(key)
-      if (f.bytes.byteLength > STORE_LIMITS.fileBytes)
-        throw new StoreError(`${f.path} is too large.`)
-      const full = join(dir, ...parts)
-      mkdirSync(dirname(full), { recursive: true })
-      writeFileSync(full, f.bytes, { flag: 'wx' })
-      chmodSync(full, 0o444)
-      records.push({
-        path: parts.join('/'),
-        mime: f.mime,
-        sha256: createHash('sha256').update(f.bytes).digest('hex'),
-        size: f.bytes.byteLength
-      })
+    try {
+      for (const f of files) {
+        const parts = safeFilePath(f.path)
+        const key = parts.join('/').toLowerCase()
+        if (seen.has(key)) throw new StoreError(`"${f.path}" is listed twice.`)
+        seen.add(key)
+        if (f.bytes.byteLength > STORE_LIMITS.fileBytes)
+          throw new StoreError(`${f.path} is too large.`)
+        const full = join(staging, ...parts)
+        mkdirSync(dirname(full), { recursive: true })
+        writeFileSync(full, f.bytes, { flag: 'wx' })
+        chmodSync(full, 0o444)
+        records.push({
+          path: parts.join('/'),
+          mime: f.mime,
+          sha256: createHash('sha256').update(f.bytes).digest('hex'),
+          size: f.bytes.byteLength
+        })
+      }
+      // Leftovers for this version: an unrecorded folder, or staging from an
+      // attempt that stopped part way.
+      rmSync(dir, { recursive: true, force: true })
+      for (const n of readdirSync(parent))
+        if (n.startsWith(`${versionId}.partial-`) && join(parent, n) !== staging)
+          rmSync(join(parent, n), { recursive: true, force: true })
+      renameSync(staging, dir)
+    } catch (err) {
+      rmSync(staging, { recursive: true, force: true })
+      throw err
     }
     return records
   }

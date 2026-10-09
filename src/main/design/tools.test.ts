@@ -17,7 +17,8 @@ import {
   runDesignTool,
   setDesignToolHandler,
   type DesignService,
-  type DesignToolContext
+  type DesignToolContext,
+  uniqueNames
 } from './tools'
 import { normalizeDesignSettings } from './settings'
 import { createArtifact, settleVersion } from './versions'
@@ -221,7 +222,10 @@ describe('design tools', () => {
       submit: async (r, o) => {
         const kind = fail.shift()
         if (kind)
-          throw new MediaError(kind, kind === 'rejected' ? 'Blocked prompt.' : 'Busy.', false)
+          throw new MediaError(kind, kind === 'rejected' ? 'Blocked prompt.' : 'Busy.', false, {
+            state: 'rejected',
+            repeat: { risk: 'unknown' }
+          })
         return base.submit(r, o)
       }
     }
@@ -257,7 +261,10 @@ describe('design tools', () => {
       ...base,
       info: base.info,
       submit: async () => {
-        throw new MediaError('unconfigured', 'Bad key.', false)
+        throw new MediaError('unconfigured', 'Bad key.', false, {
+          state: 'rejected',
+          repeat: { risk: 'unknown' }
+        })
       }
     }
     const s = service(p)
@@ -311,6 +318,30 @@ describe('design tools', () => {
       }
     ])
     await expect(t.check('j')).rejects.toThrow(/removed or turned off/)
+  })
+
+  it('a provider that stops being ready after the card leaves no pending version', async () => {
+    const base = slowVideo()
+    let ready = true
+    const p: MediaProvider = {
+      ...base,
+      info: () => ({ ...base.info(), state: ready ? 'ready' : 'disabled' })
+    }
+    const s = service(p)
+    const r = await runDesignTool(
+      s,
+      'design_media',
+      { operation: 'video.text-to-video', prompt: 'waves', durationSeconds: 5 },
+      ctx({
+        approve: async () => {
+          ready = false
+          return true
+        }
+      })
+    )
+    expect(r.outcome).toBe('not-run')
+    expect(base.calls.submit).toHaveLength(0)
+    expect(s.artifacts.list(CHAT)[0]?.versions[0].status ?? 'none').not.toBe('pending')
   })
 
   it('declined: nothing is sent or saved', async () => {
@@ -374,5 +405,16 @@ describe('design tools', () => {
     )
     expect(r.content).toMatch(/no such job in this chat/)
     expect(p.calls.cancel).toBe(0)
+  })
+})
+
+describe('result file names', () => {
+  it('keeps every file when a provider repeats a name', () => {
+    expect(uniqueNames(['image.png', 'image.png', 'IMAGE.png', 'clip'])).toEqual([
+      'image.png',
+      'image-2.png',
+      'IMAGE-3.png',
+      'clip'
+    ])
   })
 })

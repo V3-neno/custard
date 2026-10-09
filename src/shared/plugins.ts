@@ -114,6 +114,9 @@ export type PluginStatus = {
   // changing them waits until they can be read or the user resets them.
   secretsLocked?: boolean
   tools: { name: string; fullName: string; effect: 'read' | 'write'; askEveryTime: boolean }[]
+  // "Use in Chat and Design": off until the user turns it on. 'changed' means
+  // it was on, but this version asks for more than it covered.
+  chatDesign: 'on' | 'off' | 'changed'
   widgets?: { id: string; title: string }[]
   errors: { at: number; message: string }[]
   log: string[]

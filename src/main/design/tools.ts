@@ -7,6 +7,7 @@ import {
   type DesignSettings,
   type DesignToolName,
   type Job,
+  type MediaFile,
   type MediaOperation,
   type MediaProvider,
   type MediaReference,
@@ -19,6 +20,7 @@ import { discoverCapabilities, type Failure } from './capabilities'
 import { checkRequest } from './media'
 import { createArtifact, settleVersion, startVersion, VersionError } from './versions'
 import { JobError, type JobTracker } from './jobs'
+import { authorizations, bindingFor } from './authorization'
 import type { ArtifactStore } from './store'
 
 // Design mode's tools. Only Design is offered them (modes/policy.ts), and
@@ -255,8 +257,9 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
       references.length
         ? `Files sent to ${info.name}: ${references.map((r) => `${r.name} (${kb(r.bytes)})`).join(', ')}`
         : 'No files are sent.',
+      // A published rate is never shown as the price of this request.
       cap.pricing
-        ? `Price: ${cap.pricing.text} (from ${cap.pricing.source})`
+        ? `Pricing, not a quote for this request: ${cap.pricing.text} (from ${cap.pricing.source}). Custard doesn't know the total before it runs.`
         : 'No price information from the provider.',
       ...(cap.cancel ? [] : ["It can't be cancelled once submitted."]),
       ...(a.status === 'quality-uncertain' ? [`Note: ${a.uncertainty}`] : []),
@@ -287,7 +290,28 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
     s.emit({ type: 'artifact', conversationId: ctx.conversationId, artifact })
     return notRun(err instanceof Error ? err.message : String(err))
   }
-  job = await s.jobs.submit(job.id, ctx.signal)
+  // The user approved this request above: mint its single-use authorization
+  // (contract S3), bound to this job, provider (build) and exact request.
+  const token = authorizations.mint(
+    bindingFor('submit', {
+      jobId: job.id,
+      conversationId: ctx.conversationId,
+      source: info.source,
+      request
+    })
+  )
+  try {
+    job = await s.jobs.submit(job.id, ctx.signal, token)
+  } catch (err) {
+    // Refused before sending (e.g. the provider stopped being ready after
+    // the card): nothing was sent; settle the version rather than leave it
+    // pending.
+    if (!(err instanceof JobError)) throw err
+    artifact = settleVersion(artifact, versionId, { status: 'failed', error: err.message })
+    s.artifacts.save(artifact)
+    s.emit({ type: 'artifact', conversationId: ctx.conversationId, artifact })
+    return notRun(`${err.message} Nothing was sent.`)
+  }
   s.emit({ type: 'job', conversationId: ctx.conversationId, job })
   // Only failures that say something about the provider are kept for the
   // session. A refused prompt (rejected) says nothing about the next one, so
@@ -346,7 +370,11 @@ export async function jobAction(
   conversationId: string,
   action: 'check' | 'cancel' | 'stop',
   jobId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // cancel only: the user's explicit go-ahead (an approval card for the
+  // model, the workspace's confirmation for the user). Without it nothing
+  // is cancelled.
+  confirmCancel?: (label: string, detail: string) => Promise<boolean>
 ): Promise<{ job: Job; text: string }> {
   const job = s.jobs.get(jobId)
   if (!job || job.requestedBy.conversationId !== conversationId)
@@ -354,8 +382,21 @@ export async function jobAction(
   let next: Job
   let files: Awaited<ReturnType<JobTracker['check']>>['files']
   if (action === 'stop') next = s.jobs.stopTracking(jobId)
-  else if (action === 'cancel') next = await s.jobs.cancel(jobId)
-  else {
+  else if (action === 'cancel') {
+    // Cancelling changes state at the provider (contract S3).
+    const name = s
+      .providers()
+      .find((p) => p.info().id === job.providerId)
+      ?.info().name
+    const ok =
+      !!confirmCancel &&
+      (await confirmCancel(
+        `${name ?? 'Provider'}: cancel a job`,
+        `Asks ${name ?? 'the provider'} to cancel job ${job.id}. It counts as cancelled only if the provider confirms; whether anything was already charged is up to the provider.`
+      ))
+    if (!ok) throw new JobError('Cancelling was not confirmed, so nothing was cancelled.')
+    next = await s.jobs.cancel(jobId, authorizations.mint(s.jobs.cancelBinding(jobId)))
+  } else {
     // A completed job whose version is still waiting for its files.
     const waiting =
       job.state === 'completed' &&
@@ -366,6 +407,27 @@ export async function jobAction(
       ? await s.jobs.collect(jobId, signal)
       : await s.jobs.check(jobId, signal))
   }
+  settleJobVersion(s, conversationId, next, files)
+  s.emit({ type: 'job', conversationId, job: next })
+  const text =
+    action === 'stop'
+      ? `Stopped tracking job ${next.id}. It keeps running at the provider.`
+      : files?.length
+        ? `${describeJob(next)} The result is saved as a new version.`
+        : describeJob(next)
+  return { job: next, text }
+}
+
+// A job's outcome on its pending version: its files stored (the normal
+// save path: name cleaning, store limits, read-only files), or its failure
+// or cancellation recorded. Used by checks and by startup reconciliation
+// (reconcile.ts), so a recovered result goes through the same validation.
+export function settleJobVersion(
+  s: Pick<DesignService, 'artifacts' | 'emit'>,
+  conversationId: string,
+  next: Job,
+  files?: MediaFile[]
+): void {
   let artifact = s.artifacts.get(conversationId, next.target.artifactId)
   const version = artifact?.versions.find((v) => v.id === next.target.versionId)
   if (artifact && version?.status === 'pending') {
@@ -374,7 +436,11 @@ export async function jobAction(
         conversationId,
         artifact.id,
         version.id,
-        files.map((f, n) => ({ path: safeName(f.name, n), mime: f.mime, bytes: f.bytes }))
+        uniqueNames(files.map((f, n) => safeName(f.name, n))).map((path, n) => ({
+          path,
+          mime: files[n].mime,
+          bytes: files[n].bytes
+        }))
       )
       artifact = settleVersion(artifact, version.id, { status: 'succeeded', files: records })
     } else if (next.state === 'failed' || next.state === 'cancelled')
@@ -387,17 +453,24 @@ export async function jobAction(
       s.emit({ type: 'artifact', conversationId, artifact })
     }
   }
-  s.emit({ type: 'job', conversationId, job: next })
-  const text =
-    action === 'stop'
-      ? `Stopped tracking job ${next.id}. It keeps running at the provider.`
-      : files?.length
-        ? `${describeJob(next)} The result is saved as a new version.`
-        : describeJob(next)
-  return { job: next, text }
 }
 
 // Provider file names are untrusted: keep a plain name, or number it.
+// Two result files with the same name (a provider's slip) are both kept,
+// the later ones as "image-2.png" and so on: the result may have been paid
+// for, so a name clash never discards it.
+export function uniqueNames(names: string[]): string[] {
+  const used = new Set<string>()
+  return names.map((name) => {
+    const dot = name.lastIndexOf('.')
+    const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, '']
+    let candidate = name
+    for (let k = 2; used.has(candidate.toLowerCase()); k++) candidate = `${stem}-${k}${ext}`
+    used.add(candidate.toLowerCase())
+    return candidate
+  })
+}
+
 function safeName(name: string, n: number): string {
   const base = name.split(/[\\/]/).pop() ?? ''
   const clean = base
@@ -413,7 +486,14 @@ async function jobs(s: DesignService, input: unknown, ctx: DesignToolContext): P
   if (i.action !== 'check' && i.action !== 'cancel' && i.action !== 'stop')
     return notRun('Unknown action.')
   try {
-    const r = await jobAction(s, ctx.conversationId, i.action, String(i.job), ctx.signal)
+    const r = await jobAction(
+      s,
+      ctx.conversationId,
+      i.action,
+      String(i.job),
+      ctx.signal,
+      ctx.approve
+    )
     return { content: r.text, isError: false, outcome: 'completed' }
   } catch (err) {
     if (err instanceof JobError) return notRun(err.message)
