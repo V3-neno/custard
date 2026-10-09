@@ -96,6 +96,42 @@ Unknown fields are errors, so a typo can't silently drop a restriction.
 
 `widgets` (optional) declares UI the plugin draws next to the message box. Each widget needs its own permission, `widget:<id>`. The fields, the widget API and its rules are in [WIDGETS.md](WIDGETS.md).
 
+## Media
+
+`media` (optional) offers image or video generation to Design. Manifests without it are unchanged. Each entry is one provider:
+
+```json
+"media": [
+  {
+    "id": "video",
+    "name": "Example video",
+    "capabilities": [
+      {
+        "operation": "video.text-to-video",
+        "formats": ["video/mp4"],
+        "durations": { "min": 2, "max": 10 },
+        "progress": true,
+        "cancel": true,
+        "idempotency": false,
+        "minPollSeconds": 5,
+        "pricing": { "text": "$0.10 per second", "source": "example.com/pricing" },
+        "tools": { "submit": "submit", "status": "status", "result": "result", "cancel": "cancel" }
+      }
+    ]
+  }
+]
+```
+
+- At most 4 providers. `id` is lowercase letters, digits or hyphens; `name` is 1 to 60 characters.
+- Each capability is checked by Design's rules (operations, output types, references, sizes, durations, pricing with its source); see [docs/design/CONTRACTS.md](../design/CONTRACTS.md).
+- `tools.submit` must be a `write` tool. `tools.status` and `tools.result` must be `read` tools. `tools.cancel` is a read or write tool, required exactly when `cancel` is true.
+- The submit tool's `inputSchema` must declare `operation`, `prompt` and `idempotencyKey`, plus `references`, `size`, `durationSeconds` and `format` when the capability takes them (`format` only when it lists more than one). Status, result and cancel tools must require `remoteId`.
+- None of these tools may also be a widget's tool.
+- Each provider needs its own permission, `media:<id>`.
+- These tools are not offered to the assistant as plain tools. Only Design's job flow calls them, through the plugin host's usual checks.
+
+What the tools receive and return, and how Design approves and tracks jobs, is in [docs/design/MEDIA-PLUGINS.md](../design/MEDIA-PLUGINS.md).
+
 ## Permissions as the user sees them
 
 Activation shows each requested permission in plain words, and the user ticks every new one:
@@ -108,5 +144,6 @@ Activation shows each requested permission in plain words, and the user ticks ev
 | `account:<host>` and `account-scope:<scope>` | Sign in to an account, and each scope it asks for |
 | `action:<tool>`                              | Run a write tool                                  |
 | `widget:<id>`                                | Show that widget in chats                         |
+| `media:<id>`                                 | Offer that image or video provider to Design      |
 
 Grants are stored per plugin and shrink to what the active version asks for. An update that asks for anything new must be approved again. Rolling back to a version that needs a permission since dropped also asks again.
