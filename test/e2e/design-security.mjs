@@ -400,11 +400,34 @@ try {
   await watch
   console.log('  repeat card:', (warned ?? '').slice(0, 160))
   check(
-    /unknown|may already have happened/i.test(warned ?? ''),
+    /may already have happened/i.test(warned ?? ''),
     'the repeat warns that it may already have happened'
   )
-  if (warned !== null)
+  check(
+    /Provider: OpenAI Images/.test(warned ?? '') &&
+      /Files sent to OpenAI Images: Osprey-8890\.png/.test(warned ?? ''),
+    "it is Design's own card, naming the provider and the files sent"
+  )
+  check(
+    (await card().getByRole('button', { name: 'Allow for this chat' }).count()) === 0,
+    "a warned card can't be allowed for the whole chat"
+  )
+  let cards = 0
+  if (warned !== null) {
     await card().getByRole('button', { name: "Don't allow", exact: true }).click()
+    cards = 1
+    // Any further card in this turn would be a second approval for the same call.
+    await w.waitForTimeout(800)
+    if (
+      await card()
+        .isVisible()
+        .catch(() => false)
+    ) {
+      cards++
+      await card().getByRole('button', { name: "Don't allow", exact: true }).click()
+    }
+  }
+  check(cards === 1, `one card for the repeat (${cards})`)
   await w.waitForSelector('button[title=Send]', { timeout: 30000 }).catch(() => {})
   await w.waitForTimeout(1000)
   check(held.length === 1, `declining sent nothing (${held.length} requests)`)

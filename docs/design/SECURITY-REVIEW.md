@@ -12,7 +12,7 @@ macOS or against a live provider.
 | D2 | Tool routes in Chat and Design | Enforced in code, except D1 and the residual network route below. |
 | D3 | Link-swap race (`src/main/fsafe`) | Helper built and tested on Linux. Narrowed, not closed; residual risk below. Export and `vault_create_note` use it on design-integration (4acb584); memory captures don't (Custard-chosen names). |
 | D4 | HTML preview sandbox | Contained. `window.print()` opened the OS print dialog at ac9a4a2; A fixed it with a CSP sandbox directive (90b1dde). `design-security.mjs` 40/40 on design-integration plus A's fix. Results in `SANDBOX.md`. |
-| D5 | Reliability and privacy flows | Tested across A, B and C (below). D5a fixed on design-batch (a99419c). |
+| D5 | Reliability and privacy flows | Tested across A, B and C (below). D5a fixed by integration (a99419c). |
 
 ## D1: plugin "open links on this computer" (`open:`)
 
@@ -146,12 +146,13 @@ design-batch merged (D1 included).
   reached the provider (a server that never answers), the app was killed, and
   after the restart the job was `unknown`, nothing was resent, and a repeat
   asked first with "may already have happened". Declining sent nothing.
-- **D5a (low, sent to integration):** that repeat card is the generic one
+- **D5a (low, fixed in a99419c):** that repeat card is the generic one
   (tool name and raw JSON). Because the repeat counts as pre-approved,
   Design's own card, which names the provider, the files sent and the price,
   is skipped, so a paid repeat is approved without that information.
-  Fixed (a99419c): a Design repeat skips the generic card and is never
-  pre-approved; Design's own card carries the warning.
+  Fixed: a repeat now shows only Design's card, carrying the warning, and it
+  can't be allowed for the whole chat. `design-security.mjs` checks this
+  (43/43).
 - Covered by unit tests elsewhere and not repeated here: expired result links
   and permanent result errors, plugin removal, skill matching cases (A, C and
   integration tests).
