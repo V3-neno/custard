@@ -10,9 +10,9 @@ macOS or against a live provider.
 | --- | --- | --- |
 | D1 | Plugin `open:` permission | **Fixed** on design-batch (dffbfd7) after Neno chose "Allowlist" (2026-10-09): vetted schemes only (today `spotify:`), and only write tools can open links. Tests in `open.security.test.ts` pass. |
 | D2 | Tool routes in Chat and Design | Enforced in code, except D1 and the residual network route below. |
-| D3 | Link-swap race (`src/main/fsafe`) | Helper built and tested on Linux. Narrowed, not closed; residual risk below. Callers not switched yet. |
+| D3 | Link-swap race (`src/main/fsafe`) | Helper built and tested on Linux. Narrowed, not closed; residual risk below. Export and `vault_create_note` use it on design-integration (4acb584); memory captures don't (Custard-chosen names). |
 | D4 | HTML preview sandbox | Contained. `window.print()` opened the OS print dialog at ac9a4a2; A fixed it with a CSP sandbox directive (90b1dde). `design-security.mjs` 40/40 on design-integration plus A's fix. Results in `SANDBOX.md`. |
-| D5 | Reliability and privacy flows | Tested across A, B and C (below). One finding (D5a) sent to integration. |
+| D5 | Reliability and privacy flows | Tested across A, B and C (below). D5a fixed on design-batch (a99419c). |
 
 ## D1: plugin "open links on this computer" (`open:`)
 
@@ -120,10 +120,14 @@ No content is written there. On Windows, junctions and NTFS file ids should
 behave the same way but haven't been run there. Native Windows verification
 is outstanding.
 
-**Who switches over.** A's export and the vault and memory note writes
-belong to A and the integration owner. Until they call `fsafe`, the gap
-documented in `docs/plugins/SECURITY.md` ("File-check races") still applies
-to them.
+**Who switched over.** At integration (4acb584), A's export uses `fsafe`
+as its default writer, and `vault_create_note` creates notes with
+`writeNew`: the real place must still be inside the real vault and pass the
+mode's skills and plugin protection, checked again on that real place.
+Memory captures keep their exclusive-create writes (names Custard chooses
+under `Custard/Captures`), so the gap in `docs/plugins/SECURITY.md`
+("File-check races") still applies to them. Folders made with
+`mkdir -p` before a write are not covered by `fsafe`.
 
 ## D5: reliability and privacy across A, B and C
 
@@ -146,8 +150,8 @@ design-batch merged (D1 included).
   (tool name and raw JSON). Because the repeat counts as pre-approved,
   Design's own card, which names the provider, the files sent and the price,
   is skipped, so a paid repeat is approved without that information.
-  Suggested fix: for `design_media`, pass the warning into Design's card
-  instead of pre-approving.
+  Fixed (a99419c): a Design repeat skips the generic card and is never
+  pre-approved; Design's own card carries the warning.
 - Covered by unit tests elsewhere and not repeated here: expired result links
   and permanent result errors, plugin removal, skill matching cases (A, C and
   integration tests).

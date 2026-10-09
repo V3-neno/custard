@@ -109,17 +109,13 @@ box (as with widgets).
   stored file means nothing is exported.
 - Exports are copies: deleting the chat deletes Custard's copy only.
 
-### Known gap: link swaps
+### Link swaps
 
-The writes go through a `Writer` with the same shape as Workstream D's
+The writes go through a `Writer`; by default that is Workstream D's
 `src/main/fsafe` (`writeNew`, `writeReplace`, with a guard on the real
-target). Until that helper is on `design-batch`, a local fallback is used:
-it resolves the parent folder's real path, checks it against the guard,
-then creates the file relative to that resolved path. A parent folder
-swapped for a link between the check and the create could still be
-written through. Integration replaces `localWriter` with `fsafe` (one
-import in `html/export.ts`); D3 in `docs/design/SECURITY-REVIEW.md` covers
-what remains after that. Native Windows behaviour is not verified.
+target), switched over at integration. What remains after that (an empty
+file in a swap-and-swap-back race, never content) is D3 in
+`docs/design/SECURITY-REVIEW.md`. Native Windows behaviour is not verified.
 
 ## Skills
 
