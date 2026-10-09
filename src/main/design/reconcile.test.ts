@@ -28,7 +28,7 @@ import { jobAction, type DesignService } from './tools'
 import { createArtifact } from './versions'
 import { reconcileDesign } from './reconcile'
 import { clearLocalResults, registerLocalResults } from './recovery'
-import { forgetImageJobs, localImageIndex, pruneImages, UNLINKED_RETENTION_MS } from './images'
+import { forgetImageJobs, localImageIndex, pruneImages } from './images'
 import { DEFAULT_IMAGE_MODEL, OPENAI_IMAGES_ID } from './images/models'
 import { OpenAIImages, remoteIdFor } from './images/openai'
 import { ResultStore } from './images/results'
@@ -145,7 +145,7 @@ type Restarted = {
 }
 
 // A fresh start from what is on disk. `chats` are the chats that still exist.
-function restart(w: World, chats: string[] = [CHAT], now?: number): Restarted {
+function restart(w: World, chats: string[] = [CHAT]): Restarted {
   clearLocalResults()
   const results = new ResultStore(imagesDir())
   registerLocalResults(localImageIndex(results))
@@ -184,7 +184,7 @@ function restart(w: World, chats: string[] = [CHAT], now?: number): Restarted {
       jobs.forgetChat(c)
       store.deleteChat(c)
     },
-    prune: () => pruneImages(results, jobs.list(), (c, a) => artifacts.get(c, a), now)
+    prune: () => pruneImages(results, jobs.list(), (c, a) => artifacts.get(c, a))
   })
   starting = false
   if (w.calls.length !== before) external.push('OpenAI called')
@@ -488,18 +488,15 @@ describe('2.1 deletion (amendment 2, 6–8)', () => {
 })
 
 describe('2.1 retention and records', () => {
-  it('an image no job refers to is kept for the retention window, then removed', async () => {
+  it('an image no job refers to is never pruned (it may have been paid for)', async () => {
     const w = world()
     const { jobs, job } = start(w, crashAfterStore)
     await expect(send(jobs, job.id)).rejects.toBeInstanceOf(Crash)
     // The job records are lost (jobs.json unreadable and moved aside).
     rmSync(join(root, 'design', 'jobs.json'))
-    const created = w.results.entries()[0].createdAt
-    expect(restart(w, [CHAT], created + 1000).r.pruned).toEqual([])
+    expect(restart(w).r.pruned).toEqual([])
+    expect(restart(w).r.pruned).toEqual([])
     expect(w.results.ids()).toEqual([remoteIdFor(job.id)])
-    expect(restart(w, [CHAT], created + UNLINKED_RETENTION_MS + 1).r.pruned).toEqual([
-      remoteIdFor(job.id)
-    ])
   })
 
   it('a chat that cannot be read is kept', () => {

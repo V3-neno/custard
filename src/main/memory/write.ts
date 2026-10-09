@@ -57,7 +57,7 @@ const insideOf = (root: string, p: string): boolean => {
 // them safe (a folder can be a link, or be swapped for one). Folders are made
 // one level at a time and the note created exclusively, each checked to be
 // really inside the real vault. See docs/design/FILESYSTEM.md.
-function createNote(vault: string, full: string, text: string): void {
+export function createNote(vault: string, full: string, text: string): void {
   const realVault = realpathSync(vault)
   const guard: Guard = (real) =>
     insideOf(realVault, real) ? null : 'That path leads outside the vault, so nothing was written.'

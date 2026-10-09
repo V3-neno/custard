@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from 'fs'
 
 // settings.json holds the vault connection, chat model and memory and
 // security settings. It is written to a temporary file and renamed, so a
@@ -27,6 +27,14 @@ export function readSettingsFile(path: string): Record<string, unknown> {
 
 export function writeSettingsFile(path: string, data: Record<string, unknown>): void {
   const tmp = `${path}.${process.pid}.tmp`
-  writeFileSync(tmp, JSON.stringify(data))
+  // Flushed to disk before the rename, so a power cut can't leave the new
+  // name pointing at an empty or partial file.
+  const fd = openSync(tmp, 'w')
+  try {
+    writeSync(fd, JSON.stringify(data))
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
   renameSync(tmp, path)
 }

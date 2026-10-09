@@ -52,22 +52,20 @@ export function localImageIndex(results: ResultStore): LocalResultIndex {
   }
 }
 
-// How long a stored image no job refers to is kept (contract S2: not deleted
-// on sight). That happens only when the job records are lost (jobs.json
-// unreadable and moved aside, say); deleted chats remove theirs at once.
-export const UNLINKED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
-
 // Drops stored images Design no longer needs:
 // - kept while a job for it (by remote id, or by job id when the job was
 //   never linked) exists and that job's version is still pending;
-// - removed once its job's version is settled or gone;
-// - an image no job refers to at all is kept for UNLINKED_RETENTION_MS from
-//   when it was stored, then removed.
+// - removed once its job's version is settled (its files were copied into
+//   the version) or gone (the user deleted it);
+// - an image no job refers to at all is never removed automatically. That
+//   happens only when the job records are lost (jobs.json unreadable and
+//   moved aside, say), and such an image may have been paid for (contract
+//   S2: potentially paid results are never pruned). Deleted chats remove
+//   theirs at once (forgetImageJobs).
 export function pruneImages(
   results: ResultStore,
   jobs: Job[],
-  artifact: (chat: string, id: string) => Artifact | null,
-  now = Date.now()
+  artifact: (chat: string, id: string) => Artifact | null
 ): string[] {
   const known = new Map<string, Job>()
   for (const j of jobs) {
@@ -81,7 +79,7 @@ export function pruneImages(
   const keep = new Set<string>()
   for (const e of results.entries()) {
     const j = known.get(`remote:${e.remoteId}`) ?? (e.job ? known.get(`job:${e.job}`) : undefined)
-    if (j ? pending(j) : now - e.createdAt < UNLINKED_RETENTION_MS) keep.add(e.remoteId)
+    if (!j || pending(j)) keep.add(e.remoteId)
   }
   return results.prune((id) => keep.has(id))
 }
