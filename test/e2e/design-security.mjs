@@ -247,34 +247,31 @@ try {
   step('window.print()')
   await previewEval('setTimeout(window.__dPrint, 0); 1')
   await w.waitForTimeout(3000)
-  const printed = await Promise.race([
-    previewEval('1 + 1'),
-    new Promise((r) => setTimeout(() => r({ hung: true }), 3000))
-  ])
-  console.log('  after print:', JSON.stringify(printed))
-  check(
-    (await app.evaluate(
-      ({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((x) => !x.isDestroyed()).length
-    )) === 1,
-    'no print window opened'
-  )
-  const app2 = await Promise.race([
-    w.evaluate(() => 1 + 1),
-    new Promise((r) => setTimeout(() => r('timeout'), 2000))
-  ])
-  check(app2 === 2, 'the app is responsive after print()')
-  if (printed.hung) {
-    const st = await w
-      .waitForSelector('[data-preview-status=stopped]', { timeout: 30000 })
-      .then(() => 'stopped')
-      .catch(() => 'still showing')
-    console.log('  the preview renderer is blocked by print(); preview status:', st)
-    check(st === 'stopped', 'a preview blocked by print() is stopped and reported')
-  } else check(printed.value === 2, 'the preview keeps running after print()')
+  const within = (p, ms) =>
+    Promise.race([p, new Promise((r) => setTimeout(() => r('timeout'), ms))])
+  const mainOk =
+    (await within(
+      app.evaluate(() => 1 + 1),
+      5000
+    )) === 2
+  const rendererOk =
+    (await within(
+      w.evaluate(() => 1 + 1),
+      5000
+    )) === 2
+  const previewOk = mainOk && (await within(previewEval('1 + 1'), 3000))?.value === 2
+  console.log(`  after print: main ${mainOk}, app page ${rendererOk}, preview ${previewOk}`)
+  check(mainOk, "Custard's main process still answers after print()")
+  check(rendererOk, "Custard's window still answers after print()")
+  check(previewOk, 'the preview keeps running (print refused)')
+  if (!mainOk) throw new Error('main process blocked by print(); later steps skipped')
 
   step('A second preview shares nothing with the first')
-  await previewEval(
-    'localStorage.setItem("d-cross", "1"); indexedDB.open("d-cross").onsuccess = () => {}; 1'
+  await within(
+    previewEval(
+      'localStorage.setItem("d-cross", "1"); indexedDB.open("d-cross").onsuccess = () => {}; 1'
+    ),
+    3000
   )
   await turn('d plain test')
   await w.waitForSelector('[data-preview-status=ready]', { timeout: 15000 })
@@ -305,5 +302,7 @@ try {
   console.log('✕ crashed:', err)
   process.exitCode = 1
 } finally {
-  await app?.close().catch(() => {})
+  // A print dialog left open can wedge Electron's shutdown: don't wait on it.
+  await Promise.race([app?.close().catch(() => {}), new Promise((r) => setTimeout(r, 5000))])
+  app?.process().kill('SIGKILL')
 }
