@@ -16,7 +16,7 @@
 //   node test/e2e/widgets.mjs <out> <screenshot dir>
 // Linux only as written, with a display or xvfb-run. Needs the playwright package.
 import { _electron as electron } from 'playwright'
-import { createRequire } from 'module'
+import { appLaunch } from '../platform/launch.mjs'
 import fs from 'fs'
 import { execFileSync } from 'child_process'
 
@@ -73,8 +73,7 @@ const until = async (f, ms = 15000) => {
 
 async function launch() {
   const app = await electron.launch({
-    executablePath: createRequire(import.meta.url)('electron'),
-    args: [...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), '--password-store=basic', '.'],
+    ...appLaunch(),
     env: {
       ...process.env,
       ANTHROPIC_BASE_URL: 'http://127.0.0.1:8899',

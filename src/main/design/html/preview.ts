@@ -23,6 +23,7 @@ export const PREVIEW_HOST_SUFFIX = '.preview.invalid'
 const LOAD_TIMEOUT_MS = 10_000
 const MAX_ERRORS = 20
 const DEAD_PROXY = 'http://0.0.0.0:9'
+export const PREVIEW_PROXY_BYPASS = '<-loopback>'
 
 // What the page may load: its own files, data: and blob:. connect-src 'self'
 // lets it fetch its own JSON; nothing else is reachable anyway.
@@ -146,7 +147,10 @@ async function sandboxSession(
   ses.setDisplayMediaRequestHandler((_req, cb) => cb({}))
   ses.on('will-download', (e) => e.preventDefault())
   ses.setSpellCheckerEnabled(false)
-  await ses.setProxy({ proxyRules: DEAD_PROXY, proxyBypassRules: '' })
+  // '<-loopback>' removes Chromium's implicit proxy bypass for localhost and
+  // 127.0.0.0/8: without it, WebRTC's TURN-over-TCP (which webRequest never
+  // sees) reached loopback services directly (stabilization 4.3).
+  await ses.setProxy({ proxyRules: DEAD_PROXY, proxyBypassRules: PREVIEW_PROXY_BYPASS })
   return {
     ses,
     partition,
@@ -357,6 +361,14 @@ export async function showPreview(
   previews.add(wc.id)
   const errors: string[] = []
   lockPreview(wc, sb.origin, errors)
+  // Tab can enter the preview but never leaves it (the page keeps focus
+  // cycling through its own controls), so F6 hands focus back to the app,
+  // as in browsers. The page can't stop it: this runs before the page sees the key.
+  wc.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown' || input.key !== 'F6') return
+    e.preventDefault()
+    if (!win.isDestroyed()) win.webContents.focus()
+  })
   view.setBackgroundColor('#ffffff')
   view.setVisible(false)
   win.contentView.addChildView(view)
