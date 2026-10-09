@@ -52,7 +52,7 @@ Basic skills in Chat arrived with the starter vault in Phase 2. This phase build
 ## Integrations
 
 - **Plugin platform** (done, MVP): sandboxed plugins with a manifest, review and activation, permissions, write approvals, rollback and OAuth. See [plugins/README.md](plugins/README.md).
-- **Spotify** (done, now a plugin): search, now playing, devices, queue, open and transfer, with a `music` skill. See [SPOTIFY.md](SPOTIFY.md).
+- **Spotify** (done, now a plugin): search, now playing, devices, queue, open and transfer. See [SPOTIFY.md](SPOTIFY.md).
 - Later for plugins: UI panels, vault access through a reviewed capability, signed plugins from other people.
 
 ## Phase 6: Polish and reach

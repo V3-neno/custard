@@ -3,7 +3,7 @@
 //   node test/e2e/mock.mjs <out> <out>/plugin &   (with <out>/plugin a copy of plugin/
 //                                                    and <out>/vault a copy of vault-template/)
 //   node test/e2e/plugin-demo.mjs <out> <screenshot dir>
-// The script itself writes Nils Frahm under Focus in <out>/vault's Music Preferences.
+// The script itself writes a Music Preferences note (Nils Frahm under Focus) in <out>/vault.
 // Linux only as written (XDG_CONFIG_HOME isolates the app's data), with a display
 // or xvfb-run. Needs the playwright package, which isn't a dependency of this repo.
 import { _electron as electron } from 'playwright'
@@ -18,16 +18,12 @@ fs.writeFileSync(
   pluginJson,
   fs.readFileSync(pluginJson, 'utf8').replace(/"version": "[^"]+"/, '"version": "1.0.0"')
 )
-// The preference the demo expects the model to read from the vault.
-const prefs = OUT + '/vault/Areas/Music Preferences.md'
+// The preference the demo expects the model to read from the vault. The
+// starter vault has no music note, so the user's own note is written here.
+fs.mkdirSync(OUT + '/vault/Areas', { recursive: true })
 fs.writeFileSync(
-  prefs,
-  fs
-    .readFileSync(prefs, 'utf8')
-    .replace(
-      '- **Focus / deep work:** ',
-      '- **Focus / deep work:** Nils Frahm, Tycho, Ólafur Arnalds'
-    )
+  OUT + '/vault/Areas/Music Preferences.md',
+  '# Music Preferences\n\n- **Focus / deep work:** Nils Frahm, Tycho, Ólafur Arnalds\n'
 )
 const app = await electron.launch({
   executablePath: createRequire(import.meta.url)('electron'),

@@ -574,7 +574,7 @@ http
         // Appending to an existing note, which is turned off.
         append: [
           () =>
-            tool('vault_append', { path: 'Areas/Music Preferences.md', content: 'APPENDED-9001' }),
+            tool('vault_append', { path: 'Areas/README.md', content: 'APPENDED-9001' }),
           'Tried to append.'
         ],
         // Plugin widgets: each shows (or hides) one, then answers.

@@ -312,7 +312,7 @@ try {
   check(!fs.existsSync(`${OUT}/vault/Inbox/Declined.md`), 'the declined note was not')
 
   step('M5: appending to an existing note is off')
-  const prefs = `${OUT}/vault/Areas/Music Preferences.md`
+  const prefs = `${OUT}/vault/Areas/README.md`
   const prefsBefore = fs.readFileSync(prefs, 'utf8')
   await send('append test: add a line to my preferences')
   check(!(await nextCard(3000)), 'no approval is offered for an append')

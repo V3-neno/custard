@@ -36,9 +36,9 @@ export function createStarterVault(parent: string): string {
   return root
 }
 
-// Copies starter skills (and the notes they rely on) that an existing vault
+// Copies starter skills that an existing vault
 // doesn't have yet. Never overwrites: files that exist are left alone.
-const STARTER_SKILL_FILES = /^(Custard\/Skills\/|Areas\/Music Preferences\.md$)/
+const STARTER_SKILL_FILES = /^Custard\/Skills\//
 
 export function addMissingStarterSkills(vault: string): string[] {
   const added: string[] = []

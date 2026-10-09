@@ -90,7 +90,7 @@ Run with `npm run dev` on Windows, with an API key, a vault and a Spotify Premiu
    - Then **Connect**: approve in the browser, and Account shows _connected_.
    - If you used Spotify before this update, the Client ID and sign-in were carried over, but you still have to activate.
 6. **Tools are available.** In a new Chat, ask "What's playing on Spotify?" You see _Checked what is playing_ with the right track.
-7. **Ask for five songs using saved preferences.** Fill in `Areas/Music Preferences.md` (or let it ask you), then ask "Queue five songs for focused work." It reads the preferences note with the vault tools; the plugin itself has no vault access.
+7. **Ask for five songs using saved preferences.** Optionally write a note with your taste (for example `Areas/Music Preferences.md`; the starter vault has none), then ask "Queue five songs for focused work." It reads the preferences note with the vault tools; the plugin itself has no vault access.
 8. **Real tracks, queued on the intended device.**
    - Stages show one _Searched Spotify_ per song.
    - Then an approval card appears: _Spotify wants to: Spotify queue: 5 tracks_. Click **Allow**.
