@@ -92,17 +92,19 @@ falls back to another model or provider.
 
 - The SDK's automatic retries are off (`maxRetries: 0`, client and request).
 - Outcome mapping (`openai.ts` `mapError`):
-  - 4xx answered by OpenAI → refused, did not run, no image → job
-    **failed**, marked `confirmed` (Custard's own HTTP client saw the
-    refusal; stabilization plan interface 1). 401/403 → unconfigured, 404 →
-    unsupported, 429 → temporary, others rejected. **Billing of a refused
-    request is not documented** by OpenAI (E7), so nothing tells the user a
-    refusal was free;
   - refused by Custard before calling OpenAI (no key, no model, a bad
-    reference, stopped first) → failed, `confirmed`;
+    reference, stopped first) → job **failed**, dispatch `not-dispatched`,
+    repeat `safe`;
+  - 4xx answered by OpenAI → job **failed**, dispatch `rejected` (it was
+    sent; OpenAI refused it and made no image), repeat risk `unknown`:
+    OpenAI doesn't document whether a refused request is billed (E7), so a
+    repeat still warns. 401/403 → unconfigured, 404 → unsupported, 429 →
+    temporary, others rejected;
   - 5xx, dropped connection, timeout (10 minutes) or stopping the turn → it
-    may have run → job **unknown**; it is never resent, and the model is told
-    to ask the user first.
+    may have run → job **unknown**, repeat risk `unknown`; it is never resent,
+    and the model is told to ask the user first;
+  - OpenAI returned an image Custard couldn't save → job **unknown**, repeat
+    risk `may-duplicate` (it ran and was probably charged).
 - OpenAI keeps no copy to fetch later, so the provider writes the image to
   `userData/design/openai-images/<remoteId>/` (exclusive create, mode 0600,
   fsync, meta written last) before reporting success. `status()` and

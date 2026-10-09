@@ -362,7 +362,7 @@ describe('OpenAI Images: outcomes', () => {
   it('a 4xx means OpenAI refused it and it did not run', () => {
     expect(
       mapError(APIError.generate(400, { error: { message: 'bad prompt' } }, undefined, h), 'm')
-    ).toMatchObject({ kind: 'rejected', sent: false, confirmed: true })
+    ).toMatchObject({ kind: 'rejected', sent: false })
     expect(mapError(APIError.generate(401, undefined, 'nope', h), 'm')).toMatchObject({
       kind: 'unconfigured',
       sent: false
@@ -376,12 +376,14 @@ describe('OpenAI Images: outcomes', () => {
     })
   })
 
-  it('only refusals Custard itself saw are confirmed as not sent', async () => {
+  it('sets dispatch evidence only from what Custard saw (contract S1)', async () => {
+    // A 4xx is a response: dispatched and failed, repeat risk unknown,
+    // because OpenAI doesn't document whether a refused request is billed.
     for (const status of [400, 401, 403, 404, 409, 413, 422, 429])
       expect(
-        mapError(APIError.generate(status, undefined, 'no', h), 'm'),
+        mapError(APIError.generate(status, undefined, 'no', h), 'm').dispatch,
         String(status)
-      ).toMatchObject({ sent: false, confirmed: true })
+      ).toMatchObject({ state: 'rejected', repeat: { risk: 'unknown' } })
     for (const e of [
       APIError.generate(500, undefined, 'oops', h),
       APIError.generate(503, undefined, 'busy', h),
@@ -389,18 +391,26 @@ describe('OpenAI Images: outcomes', () => {
       new APIConnectionTimeoutError(),
       new Error('aborted')
     ])
-      expect((mapError(e, 'm') as { confirmed?: boolean }).confirmed).toBeUndefined()
-    // Before sending: no key, no model, a bad reference, stopped.
+      expect(mapError(e, 'm').dispatch).toMatchObject({
+        state: 'unknown',
+        repeat: { risk: 'unknown' }
+      })
+    // Refused here, before calling OpenAI: not dispatched, safe to repeat.
+    const notSent = { state: 'not-dispatched', repeat: { risk: 'safe' } }
     const noKey = provider({ apiKey: () => null }).p
-    await expect(noKey.submit(gen(), { idempotencyKey: 'c1', read: noRead })).rejects.toMatchObject(
-      { sent: false, confirmed: true }
-    )
+    expect(
+      (await noKey.submit(gen(), { idempotencyKey: 'c1', read: noRead }).catch((e) => e)).dispatch
+    ).toMatchObject(notSent)
     const stop = new AbortController()
     stop.abort()
     const { p, fake } = provider()
-    await expect(
-      p.submit(gen(), { idempotencyKey: 'c2', read: noRead, signal: stop.signal })
-    ).rejects.toMatchObject({ sent: false, confirmed: true })
+    expect(
+      (
+        await p
+          .submit(gen(), { idempotencyKey: 'c2', read: noRead, signal: stop.signal })
+          .catch((e) => e)
+      ).dispatch
+    ).toMatchObject(notSent)
     expect(fake.calls).toHaveLength(0)
   })
 
