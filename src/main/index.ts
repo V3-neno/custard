@@ -1,6 +1,7 @@
 import { app, dialog, shell, BrowserWindow } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
@@ -8,6 +9,7 @@ import { chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
 import { memory, registerMemoryHandlers } from './memory'
 import { handle } from './ipc'
+import { sameAppPage } from './appPage'
 import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
 import { isPluginContents } from './plugins/runtime'
 import { registerWidgetHandlers, widgets } from './widgets'
@@ -67,11 +69,20 @@ function createWindow(): void {
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  const devUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
+  const appUrl = devUrl ?? pathToFileURL(join(__dirname, '../renderer/index.html')).href
+
+  // The window stays on its own page: anything else that tries to take it
+  // over (a script, a redirect) would inherit window.custard.
+  const isAppPage = (url: string): boolean => sameAppPage(url, appUrl)
+  const stay = (e: { url: string; preventDefault: () => void }): void => {
+    if (!isAppPage(e.url)) e.preventDefault()
   }
+  mainWindow.webContents.on('will-navigate', stay)
+  mainWindow.webContents.on('will-redirect', stay)
+
+  if (devUrl) mainWindow.loadURL(devUrl)
+  else mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
 // This method will be called when Electron has finished
