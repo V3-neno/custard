@@ -17,7 +17,8 @@ import {
   runDesignTool,
   setDesignToolHandler,
   type DesignService,
-  type DesignToolContext
+  type DesignToolContext,
+  uniqueNames
 } from './tools'
 import { normalizeDesignSettings } from './settings'
 import { createArtifact, settleVersion } from './versions'
@@ -404,5 +405,16 @@ describe('design tools', () => {
     )
     expect(r.content).toMatch(/no such job in this chat/)
     expect(p.calls.cancel).toBe(0)
+  })
+})
+
+describe('result file names', () => {
+  it('keeps every file when a provider repeats a name', () => {
+    expect(uniqueNames(['image.png', 'image.png', 'IMAGE.png', 'clip'])).toEqual([
+      'image.png',
+      'image-2.png',
+      'IMAGE-3.png',
+      'clip'
+    ])
   })
 })

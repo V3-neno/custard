@@ -11,6 +11,7 @@ import {
   type RemoteStatus,
   type AuthorizationToken
 } from '../../../shared/design'
+import { MEDIA_DATA_BYTES } from '../../plugins/host'
 import type {
   ApprovalRequest,
   MediaAuthorization,
@@ -332,6 +333,13 @@ export class PluginMediaProvider implements MediaProvider {
     const r = await this.call('result', op, { remoteId: id } satisfies PluginMediaJobInput, signal)
     if (r.isError || r.outcome !== 'completed')
       throw new ResultError(short(r.content) || 'Getting the result failed.', true)
+    // The host drops data over MEDIA_DATA_BYTES (or holding a secret) before
+    // it gets here, so a missing result may just be too large. Said so,
+    // since it may have been paid for.
+    if (r.data === undefined)
+      throw new ResultError(
+        `${this.spec.name} returned no result Custard could accept. It may be larger than Custard accepts (${Math.floor(MEDIA_DATA_BYTES / (1024 * 1024))} MB of data). It may already have been charged.`
+      )
     const files = (r.data as { files?: unknown } | undefined)?.files
     if (!Array.isArray(files) || !files.length || files.length > RESULT_LIMITS.files)
       throw new ResultError(`${this.spec.name} returned a result Custard can't read.`)

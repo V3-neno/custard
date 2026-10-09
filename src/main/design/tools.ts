@@ -436,7 +436,11 @@ export function settleJobVersion(
         conversationId,
         artifact.id,
         version.id,
-        files.map((f, n) => ({ path: safeName(f.name, n), mime: f.mime, bytes: f.bytes }))
+        uniqueNames(files.map((f, n) => safeName(f.name, n))).map((path, n) => ({
+          path,
+          mime: files[n].mime,
+          bytes: files[n].bytes
+        }))
       )
       artifact = settleVersion(artifact, version.id, { status: 'succeeded', files: records })
     } else if (next.state === 'failed' || next.state === 'cancelled')
@@ -452,6 +456,21 @@ export function settleJobVersion(
 }
 
 // Provider file names are untrusted: keep a plain name, or number it.
+// Two result files with the same name (a provider's slip) are both kept,
+// the later ones as "image-2.png" and so on: the result may have been paid
+// for, so a name clash never discards it.
+export function uniqueNames(names: string[]): string[] {
+  const used = new Set<string>()
+  return names.map((name) => {
+    const dot = name.lastIndexOf('.')
+    const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, '']
+    let candidate = name
+    for (let k = 2; used.has(candidate.toLowerCase()); k++) candidate = `${stem}-${k}${ext}`
+    used.add(candidate.toLowerCase())
+    return candidate
+  })
+}
+
 function safeName(name: string, n: number): string {
   const base = name.split(/[\\/]/).pop() ?? ''
   const clean = base

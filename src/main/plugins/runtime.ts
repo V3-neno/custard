@@ -41,7 +41,10 @@ export async function lockedSession(partition: string): Promise<Session> {
   ses.setDevicePermissionHandler(() => false)
   ses.on('will-download', (e) => e.preventDefault())
   ses.setSpellCheckerEnabled(false)
-  await ses.setProxy({ proxyRules: 'http://0.0.0.0:9', proxyBypassRules: '' })
+  // '<-loopback>' removes Chromium's implicit proxy bypass for localhost and
+  // 127.0.0.0/8, which let a preview's WebRTC TURN-over-TCP reach loopback
+  // services (stabilization 4.3, Thread 4 R2). Same policy here.
+  await ses.setProxy({ proxyRules: 'http://0.0.0.0:9', proxyBypassRules: '<-loopback>' })
   locked.add(ses)
   return ses
 }
