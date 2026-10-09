@@ -1,14 +1,15 @@
 # Main window: sandbox investigation (stabilization, Amendment 5)
 
 Written 2026-10-09 by Thread 4, from `design-integration` at 9701117 plus
-Thread 4's commits. **Nothing in production was changed.** The production
-decision is Neno's.
+Thread 4's commits. This is the investigation that preceded the change. The
+window is now sandboxed (see SANDBOX.md "Main window"); the tables below
+describe the state before it.
 
 ## Four different things
 
 |                       | What it is                                                                   | State                                                                                                                                             |
 | --------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Main-window sandbox   | `webPreferences.sandbox` on the app's own window (`src/main/index.ts`)       | **Off** (`sandbox: false`)                                                                                                                        |
+| Main-window sandbox   | `webPreferences.sandbox` on the app's own window (`src/main/index.ts`)       | **Off** before the change; now on                                                                                                                 |
 | Preview sandbox       | Design's HTML preview views (`design/html/preview.ts`)                       | On; verified at kernel level in the packaged build (SANDBOX.md)                                                                                   |
 | Plugin sandbox        | Plugin and widget windows/views (`plugins/runtime.ts`, `sandboxPreferences`) | On (`sandbox: true`, no Node, locked session); behaviour verified packaged (widgets 65/65), kernel level not separately recorded                  |
 | Global `--no-sandbox` | A Chromium switch that turns the sandbox off for every process               | Not used by Custard. Added by Playwright unless `chromiumSandbox: true`, and needed when running as root. Every e2e run before this batch had it. |
