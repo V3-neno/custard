@@ -19,6 +19,7 @@ import { DEFAULT_IMAGE_MODEL, OPENAI_IMAGE_MODELS, OPENAI_IMAGES_ID } from './mo
 import { mapError, OpenAIImages, remoteIdFor, sniffImage, type OpenAIImagesDeps } from './openai'
 import { ResultStore } from './results'
 import { chosenModel } from './chosen'
+import { authorizations } from '../authorization'
 
 // Mock-tested only: a fake OpenAI client stands in for the API. Nothing here
 // talks to OpenAI.
@@ -102,6 +103,7 @@ const ref = (over: Partial<MediaReference> = {}): MediaReference => ({
   mime: 'image/png',
   bytes: PNG.length,
   attachmentId: 'att-1',
+  sha256: 'h',
   ...over
 })
 const noRead = async (): Promise<Uint8Array> => {
@@ -386,7 +388,7 @@ describe('OpenAI Images: outcomes', () => {
         requestedBy: { conversationId: 'c', messageIndex: 0 },
         target: { artifactId: 'a', versionId: 'v' }
       })
-      const after = await t.submit(job.id)
+      const after = await t.submit(job.id, undefined, authorizations.mint(t.submitBinding(job.id)))
       expect(after.state).toBe(expected)
       await expect(t.submit(job.id)).rejects.toThrow(/already sent/)
       expect(fake.calls).toHaveLength(1)
@@ -559,7 +561,11 @@ describe('OpenAI Images: restart', () => {
       requestedBy: { conversationId: CHAT, messageIndex: 0 },
       target: { artifactId: artifact.id, versionId: version.id }
     })
-    await before.jobs.submit(job.id)
+    await before.jobs.submit(
+      job.id,
+      undefined,
+      authorizations.mint(before.jobs.submitBinding(job.id))
+    )
     expect(fake.calls).toHaveLength(1)
 
     const after: DesignService = {

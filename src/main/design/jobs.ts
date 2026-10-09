@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto'
 import {
   MediaError,
+  type AuthorizationToken,
+  type DispatchEvidence,
   type Job,
   type MediaCapability,
   type MediaFile,
@@ -10,6 +12,12 @@ import {
   type RemoteStatus
 } from '../../shared/design'
 import { checkRequest } from './media'
+import {
+  AuthorizationError,
+  authorizations,
+  bindingFor,
+  type Authorizations
+} from './authorization'
 
 // Generation jobs: one per user request, tracked only while Custard is open
 // and only when asked. Nothing here runs on a timer, schedules anything,
@@ -38,6 +46,29 @@ export type JobDeps = {
   read?: (job: Job, ref: MediaReference) => Promise<Uint8Array>
   now?: () => number
   newId?: () => string
+  // Host-issued single-use approvals (contract S3). Defaults to the process
+  // registry; tests pass their own.
+  authorizations?: Authorizations
+}
+
+// A submission failure's evidence (contract S1). Only trusted Custard code
+// can establish not-dispatched; anything a plugin reports is a claim.
+function evidenceOf(err: unknown, plugin: boolean): DispatchEvidence {
+  if (err instanceof AuthorizationError)
+    return { state: 'not-dispatched', repeat: { risk: 'safe', basis: 'refused by Custard' } }
+  if (err instanceof MediaError) {
+    // Set only by trusted Custard code: built-in providers and the plugin
+    // adapter, which never derives it from what a plugin returned.
+    if (err.dispatch) return { ...err.dispatch }
+    // Before every provider sets `dispatch`: a built-in provider's
+    // `sent: false` is a response or a local refusal, so the job failed but
+    // a repeat may still duplicate; a plugin's is only its claim.
+    if (err.sent === false)
+      return plugin
+        ? { state: 'unknown', repeat: { risk: 'unknown' }, providerClaim: 'not sent' }
+        : { state: 'rejected', repeat: { risk: 'unknown' } }
+  }
+  return { state: 'unknown', repeat: { risk: 'unknown' } }
 }
 
 const TERMINAL = new Set<Job['state']>(['completed', 'failed', 'cancelled'])
@@ -60,6 +91,7 @@ export class JobTracker {
   private jobs = new Map<string, Job>()
   private now: () => number
   private newId: () => string
+  private auth: Authorizations
 
   constructor(
     private deps: JobDeps,
@@ -67,6 +99,7 @@ export class JobTracker {
   ) {
     this.now = deps.now ?? Date.now
     this.newId = deps.newId ?? randomUUID
+    this.auth = deps.authorizations ?? authorizations
     // Restoring tracks nothing; the user is offered a check instead. A job
     // that was being sent when Custard stopped may have been submitted.
     for (const j of saved) {
@@ -146,18 +179,37 @@ export class JobTracker {
     })
   }
 
-  // Sends a job once. After any doubt about whether it reached the provider,
-  // its state is unknown and only resubmit() can send it again.
-  async submit(id: string, signal?: AbortSignal): Promise<Job> {
+  // Sends a job once, with the single-use authorization minted when the user
+  // approved it (contract S3). After any doubt about whether it reached the
+  // provider, its state is unknown and only resubmit() can send it again.
+  async submit(id: string, signal?: AbortSignal, authorization?: AuthorizationToken): Promise<Job> {
     const { job, provider } = this.need(id)
     if (job.state !== 'not-submitted' || job.attemptedAt)
       throw new JobError('This job was already sent.')
+    const plugin = provider.info().source.kind === 'plugin'
+    const binding = this.submitBinding(id)
+    // Refused before anything is dispatched: nothing left Custard.
+    try {
+      // A built-in provider's dispatch boundary is here; a plugin's is the
+      // plugin host, which consumes the token itself (invokeMedia).
+      if (plugin) {
+        const why = this.auth.check(authorization, binding)
+        if (why) throw new AuthorizationError(`${why} Nothing was sent.`)
+      } else this.auth.consume(authorization, binding)
+    } catch (err) {
+      job.state = 'failed'
+      job.error = (err as Error).message
+      job.dispatch = evidenceOf(err, plugin)
+      return this.put(job)
+    }
     job.attemptedAt = this.now()
     this.put(job)
     try {
       const read = this.deps.read
       const r = await provider.submit(job.request, {
         idempotencyKey: job.idempotencyKey,
+        correlationId: job.id,
+        authorization: authorization as AuthorizationToken,
         signal,
         read: (ref) => {
           if (!read || !job.request.references.some((x) => x.attachmentId === ref.attachmentId))
@@ -167,14 +219,21 @@ export class JobTracker {
       })
       job.remoteId = r.remoteId
       job.tracking = true
+      job.dispatch = {
+        state: r.status.state === 'completed' ? 'completed' : 'unknown',
+        repeat: { risk: 'may-duplicate' }
+      }
       this.apply(job, r.status)
     } catch (err) {
-      const definitelyNotSent = err instanceof MediaError && err.sent === false
-      job.state = definitelyNotSent ? 'failed' : 'unknown'
+      const evidence = evidenceOf(err, plugin)
+      job.dispatch = evidence
+      job.state = evidence.state === 'unknown' ? 'unknown' : 'failed'
       if (err instanceof MediaError) job.errorKind = err.kind
-      job.error = definitelyNotSent
-        ? (err as Error).message
-        : `It's not known whether this reached the provider (${err instanceof Error ? err.message : String(err)}).`
+      const msg = err instanceof Error ? err.message : String(err)
+      job.error =
+        evidence.state === 'unknown'
+          ? `It's not known whether this reached the provider (${msg}).${evidence.providerClaim ? ` The plugin says: ${evidence.providerClaim}.` : ''}`
+          : msg
     }
     return this.put(job)
   }
@@ -264,15 +323,48 @@ export class JobTracker {
     return { job: this.put(job), files }
   }
 
-  // Asks the provider to cancel. Cancelled only when it confirms.
-  async cancel(id: string): Promise<Job> {
+  // The binding a submit authorization must match (contract S3).
+  submitBinding(id: string): ReturnType<typeof bindingFor> {
+    const { job, provider } = this.need(id)
+    return bindingFor('submit', {
+      jobId: job.id,
+      conversationId: job.requestedBy.conversationId,
+      source: provider.info().source,
+      request: job.request
+    })
+  }
+
+  // The binding a cancel authorization must match (contract S3).
+  cancelBinding(id: string): ReturnType<typeof bindingFor> {
+    const { job, provider } = this.need(id)
+    return bindingFor('cancel', {
+      jobId: job.id,
+      conversationId: job.requestedBy.conversationId,
+      source: provider.info().source,
+      request: job.request,
+      remoteId: job.remoteId
+    })
+  }
+
+  // Asks the provider to cancel, with a single-use authorization minted after
+  // the user's explicit intent. Cancelled only when it confirms.
+  async cancel(id: string, authorization?: AuthorizationToken): Promise<Job> {
     const { job, provider, cap } = this.need(id)
     if (!job.remoteId || TERMINAL.has(job.state)) throw new JobError('There is nothing to cancel.')
     if (!cap.cancel || !provider.cancel)
       throw new JobError(
         "This provider can't cancel a job. You can stop tracking it, but it will still run."
       )
-    const r = await provider.cancel(job.remoteId)
+    const binding = this.cancelBinding(id)
+    try {
+      if (provider.info().source.kind === 'plugin') {
+        const why = this.auth.check(authorization, binding)
+        if (why) throw new AuthorizationError(why)
+      } else this.auth.consume(authorization, binding)
+    } catch (err) {
+      throw new JobError(`${(err as Error).message} Nothing was cancelled.`)
+    }
+    const r = await provider.cancel(job.remoteId, authorization as AuthorizationToken)
     if (r === 'cancelled') {
       job.state = 'cancelled'
       job.tracking = false
@@ -309,7 +401,11 @@ export class JobTracker {
     const { job, cap } = this.need(id)
     if (!['failed', 'cancelled', 'unknown'].includes(job.state))
       throw new JobError('Only a failed, cancelled or unknown job can be sent again.')
-    const mayExist = job.state === 'unknown' || (job.state === 'failed' && !!job.remoteId)
+    // Only evidence that nothing could duplicate makes a repeat safe; a
+    // failure alone doesn't (contract S1).
+    const mayExist = job.dispatch
+      ? job.dispatch.repeat.risk !== 'safe'
+      : job.state === 'unknown' || (job.state === 'failed' && !!job.remoteId)
     const dedupes = mayExist && cap.idempotency && job.state === 'unknown'
     if (mayExist && !dedupes && !a.acknowledgeDuplicateRisk)
       throw new DuplicateRiskError(

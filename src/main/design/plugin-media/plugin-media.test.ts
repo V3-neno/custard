@@ -142,7 +142,8 @@ const ctx = (): DesignToolContext & { asked: string[] } => {
         name: 'ref.png',
         mime: 'image/png',
         bytes: 95,
-        attachmentId: id
+        attachmentId: id,
+        sha256: 'h'
       })),
     signal: new AbortController().signal,
     asked
@@ -419,15 +420,17 @@ describe('plugin media jobs', () => {
     expect((await fixtureJobs(host))[0]).toMatchObject({ references: 1 })
   })
 
-  it('a refusal before sending fails cleanly; a lost or garbled answer is unknown', async () => {
+  it("a plugin's refusal, a lost or a garbled answer are all unknown", async () => {
     const host = newHost()
     await install(host)
     const s = service(host)
-    expect((await submit(s, ctx(), 'please reject this')).outcome).toBe('failed')
+    // The plugin's "not sent" is only its claim (contract S1): unknown.
+    expect((await submit(s, ctx(), 'please reject this')).outcome).toBe('unknown')
+    expect(s.jobs.list(CHAT)[0].dispatch).toMatchObject({ providerClaim: 'not sent' })
     expect((await submit(s, ctx(), 'this gets lost')).outcome).toBe('unknown')
     expect((await submit(s, ctx(), 'garbled reply')).outcome).toBe('unknown')
     const states = s.jobs.list(CHAT).map((j) => j.state)
-    expect(states).toEqual(['failed', 'unknown', 'unknown'])
+    expect(states).toEqual(['unknown', 'unknown', 'unknown'])
     // Sending an unknown one again needs the user to accept a possible double charge.
     const lost = s.jobs.list(CHAT)[1]
     expect(() =>
@@ -457,7 +460,7 @@ describe('plugin media jobs', () => {
     const s = service(host)
     await submit(s, ctx(), 'cancel me')
     const [job] = s.jobs.list(CHAT)
-    const { job: after } = await jobAction(s, CHAT, 'cancel', job.id)
+    const { job: after } = await jobAction(s, CHAT, 'cancel', job.id, undefined, async () => true)
     expect(after.state).toBe('cancelled')
     expect(pluginAsks).toEqual([])
     expect((await fixtureJobs(host))[0].state).toBe('cancelled')
