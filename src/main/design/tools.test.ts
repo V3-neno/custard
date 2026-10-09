@@ -2,7 +2,13 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { defaultDesignSettings, type DesignEvent, type MediaProvider } from '../../shared/design'
+import {
+  defaultDesignSettings,
+  MediaError,
+  type DesignEvent,
+  type MediaErrorKind,
+  type MediaProvider
+} from '../../shared/design'
 import { JobTracker } from './jobs'
 import { ArtifactStore, JobStore, safeFilePath, StoreError } from './store'
 import {
@@ -171,6 +177,140 @@ describe('design tools', () => {
     const f = s.artifacts.file(CHAT, artifact.id, artifact.versions[0].id, 'clip.mp4')!
     expect(readFileSync(f.full).byteLength).toBe(8)
     expect(s.events.some((e) => e.type === 'artifact')).toBe(true)
+  })
+
+  it('a provider that finishes at submission has its files saved once, never resent', async () => {
+    const base = slowVideo()
+    let results = 0
+    const p: MediaProvider = {
+      ...base,
+      info: base.info,
+      submit: async (r, o) => ({ ...(await base.submit(r, o)), status: { state: 'completed' } }),
+      result: async (id) => {
+        results++
+        if (results === 1) throw new Error('reset')
+        return base.result(id)
+      }
+    }
+    const s = service(p)
+    const r = await runDesignTool(
+      s,
+      'design_media',
+      { operation: 'video.text-to-video', prompt: 'waves', durationSeconds: 5 },
+      ctx()
+    )
+    // The first fetch failed: the job is done, its version waits, nothing is resent.
+    expect(r.content).toMatch(/won't be sent again/)
+    const [job] = s.jobs.list(CHAT)
+    expect(job.state).toBe('completed')
+    expect(s.artifacts.list(CHAT)[0].versions[0].status).toBe('pending')
+    // As after a restart: a check fetches the result only.
+    await jobAction(s, CHAT, 'check', job.id)
+    expect(s.artifacts.list(CHAT)[0].versions[0].status).toBe('succeeded')
+    expect(base.calls.submit).toHaveLength(1)
+    expect(base.calls.status).toBe(0)
+    expect(results).toBe(2)
+  })
+
+  it('a refused prompt never blocks the next request; a temporary failure is cleared by success', async () => {
+    const base = slowVideo()
+    const fail: MediaErrorKind[] = ['rejected', 'temporary']
+    const p: MediaProvider = {
+      ...base,
+      info: base.info,
+      submit: async (r, o) => {
+        const kind = fail.shift()
+        if (kind)
+          throw new MediaError(kind, kind === 'rejected' ? 'Blocked prompt.' : 'Busy.', false)
+        return base.submit(r, o)
+      }
+    }
+    const s = service(p)
+    const go = (): ReturnType<typeof runDesignTool> =>
+      runDesignTool(
+        s,
+        'design_media',
+        { operation: 'video.text-to-video', prompt: 'waves', durationSeconds: 5 },
+        ctx()
+      )
+    expect((await go()).outcome).toBe('failed')
+    expect(s.jobs.list(CHAT)[0].errorKind).toBe('rejected')
+    expect(s.failures).toEqual([])
+    expect((await go()).outcome).toBe('failed')
+    expect(s.failures).toMatchObject([{ temporary: true, reason: 'Busy.' }])
+    // Asked again: still offered (with its own approval), and success clears it.
+    const c = ctx()
+    const r = await runDesignTool(
+      s,
+      'design_media',
+      { operation: 'video.text-to-video', prompt: 'waves', durationSeconds: 5 },
+      c
+    )
+    expect(r.outcome).toBe('completed')
+    expect(c.asked).toHaveLength(1)
+    expect(s.failures).toEqual([])
+  })
+
+  it('an unconfigured failure makes the operation unavailable for the session', async () => {
+    const base = slowVideo()
+    const p: MediaProvider = {
+      ...base,
+      info: base.info,
+      submit: async () => {
+        throw new MediaError('unconfigured', 'Bad key.', false)
+      }
+    }
+    const s = service(p)
+    const input = { operation: 'video.text-to-video', prompt: 'waves', durationSeconds: 5 }
+    await runDesignTool(s, 'design_media', input, ctx())
+    const c = ctx()
+    const r = await runDesignTool(s, 'design_media', input, c)
+    expect(r.outcome).toBe('not-run')
+    expect(r.content).toMatch(/\(failed\): Bad key/)
+    expect(c.asked).toEqual([])
+  })
+
+  it('a result that can never be used fails the job instead of being fetched again', async () => {
+    const base = slowVideo()
+    const p: MediaProvider = {
+      ...base,
+      info: base.info,
+      submit: async (r, o) => ({ ...(await base.submit(r, o)), status: { state: 'completed' } }),
+      result: async () => {
+        throw new MediaError('rejected', "Returned text/html, which it didn't declare.", true)
+      }
+    }
+    const s = service(p)
+    await runDesignTool(
+      s,
+      'design_media',
+      { operation: 'video.text-to-video', prompt: 'waves', durationSeconds: 5 },
+      ctx()
+    )
+    const [job] = s.jobs.list(CHAT)
+    expect(job.state).toBe('failed')
+    expect(job.error).toMatch(/can't be used: Returned text\/html/)
+    expect(s.artifacts.list(CHAT)[0].versions[0].status).toBe('failed')
+  })
+
+  it('a removed plugin says so', async () => {
+    const t = new JobTracker({ provider: () => null, save: () => {} }, [
+      {
+        id: 'j',
+        idempotencyKey: 'j',
+        providerId: 'plugin:x:y',
+        request: { operation: 'video.text-to-video', prompt: 'waves', references: [] },
+        requestedBy: { conversationId: CHAT, messageIndex: 0 },
+        target: { artifactId: 'a', versionId: 'v' },
+        state: 'running',
+        remoteId: 'r',
+        tracking: false,
+        checks: 0,
+        createdAt: 1,
+        updatedAt: 1
+      }
+    ])
+    await expect(t.check('j')).rejects.toThrow(/removed or turned off/)
   })
 
   it('declined: nothing is sent or saved', async () => {

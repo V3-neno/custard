@@ -165,6 +165,14 @@ function describeJob(job: Job): string {
   return `${where}${progress}.${job.error ? ` ${job.error}` : ''}`
 }
 
+// A submission that went through: earlier failures of this source no longer
+// describe it.
+function clearFailures(s: DesignService, op: MediaOperation, source: Source): void {
+  for (let n = s.failures.length - 1; n >= 0; n--)
+    if (s.failures[n].operation === op && sameSource(s.failures[n].source, source))
+      s.failures.splice(n, 1)
+}
+
 async function media(s: DesignService, input: unknown, ctx: DesignToolContext): Promise<ToolRun> {
   const i = (input ?? {}) as Record<string, unknown>
   const op = i.operation as MediaOperation
@@ -178,11 +186,13 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
     failures: s.failures
   })[op]
   const a = report.availability
-  if (a.status === 'unavailable')
+  // A temporary failure is shown, but doesn't refuse a new request: the user
+  // asked again, and the request still needs its own approval.
+  if (a.status === 'unavailable' && !(a.cause === 'failed' && a.temporary && a.via))
     return notRun(
       `${NAMES[op]} isn't available (${a.cause}): ${a.reason}${a.fix ? ` ${a.fix.text}` : ''}`
     )
-  const provider = providers.find((p) => sameSource(p.info().source, a.via))
+  const provider = providers.find((p) => sameSource(p.info().source, a.via!))
   const info = provider?.info()
   const cap = info?.capabilities.find((c) => c.operation === op)
   if (!provider || !info || !cap) return notRun('The provider is no longer available.')
@@ -279,13 +289,18 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
   }
   job = await s.jobs.submit(job.id, ctx.signal)
   s.emit({ type: 'job', conversationId: ctx.conversationId, job })
-  if (job.state === 'failed') {
+  // Only failures that say something about the provider are kept for the
+  // session. A refused prompt (rejected) says nothing about the next one, so
+  // it never makes the operation unavailable.
+  if (job.state === 'failed' && job.errorKind && job.errorKind !== 'rejected')
     s.failures.push({
       operation: op,
       source: info.source,
       reason: job.error ?? 'Failed.',
-      temporary: false
+      temporary: job.errorKind === 'temporary'
     })
+  else if (job.state !== 'failed' && job.state !== 'unknown') clearFailures(s, op, info.source)
+  if (job.state === 'failed') {
     artifact = settleVersion(artifact, versionId, {
       status: 'failed',
       error: job.error ?? 'Failed.'
@@ -293,6 +308,24 @@ async function media(s: DesignService, input: unknown, ctx: DesignToolContext): 
     s.artifacts.save(artifact)
     s.emit({ type: 'artifact', conversationId: ctx.conversationId, artifact })
     return { content: `${info.name} refused it: ${job.error}`, isError: true, outcome: 'failed' }
+  }
+  // Finished at submission (a synchronous provider): save the files now.
+  if (job.state === 'completed') {
+    const r = await jobAction(s, ctx.conversationId, 'check', job.id, ctx.signal)
+    const saved = s.artifacts
+      .get(ctx.conversationId, artifact.id)
+      ?.versions.find((v) => v.id === versionId)?.status
+    return saved === 'succeeded'
+      ? {
+          content: `Made by ${info.name}. Output ${artifact.id}, version ${versionId}.`,
+          isError: false,
+          outcome: 'completed'
+        }
+      : {
+          content: `${info.name} finished, but ${r.text} Check it again with design_jobs; it won't be sent again.`,
+          isError: true,
+          outcome: 'completed'
+        }
   }
   if (job.state === 'unknown')
     return {
@@ -322,7 +355,17 @@ export async function jobAction(
   let files: Awaited<ReturnType<JobTracker['check']>>['files']
   if (action === 'stop') next = s.jobs.stopTracking(jobId)
   else if (action === 'cancel') next = await s.jobs.cancel(jobId)
-  else ({ job: next, files } = await s.jobs.check(jobId, signal))
+  else {
+    // A completed job whose version is still waiting for its files.
+    const waiting =
+      job.state === 'completed' &&
+      s.artifacts
+        .get(conversationId, job.target.artifactId)
+        ?.versions.find((v) => v.id === job.target.versionId)?.status === 'pending'
+    ;({ job: next, files } = waiting
+      ? await s.jobs.collect(jobId, signal)
+      : await s.jobs.check(jobId, signal))
+  }
   let artifact = s.artifacts.get(conversationId, next.target.artifactId)
   const version = artifact?.versions.find((v) => v.id === next.target.versionId)
   if (artifact && version?.status === 'pending') {

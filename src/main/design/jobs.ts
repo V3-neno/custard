@@ -42,6 +42,20 @@ export type JobDeps = {
 
 const TERMINAL = new Set<Job['state']>(['completed', 'failed', 'cancelled'])
 
+// A result the provider says can never be used (MediaError 'rejected' or
+// 'unsupported' from result(): a wrong type, a refused file). Anything else,
+// such as an expired link or a network error, may work on a later check.
+const permanent = (err: unknown): err is MediaError =>
+  err instanceof MediaError && (err.kind === 'rejected' || err.kind === 'unsupported')
+
+function failResult(job: Job, err: MediaError): Job {
+  job.state = 'failed'
+  job.errorKind = err.kind
+  job.error = `The result can't be used: ${err.message}`
+  job.tracking = false
+  return job
+}
+
 export class JobTracker {
   private jobs = new Map<string, Job>()
   private now: () => number
@@ -88,7 +102,12 @@ export class JobTracker {
     const job = this.jobs.get(id)
     if (!job) throw new JobError('There is no such job.')
     const provider = this.deps.provider(job.providerId)
-    if (!provider) throw new JobError("The provider for this job isn't available now.")
+    if (!provider)
+      throw new JobError(
+        job.providerId.startsWith('plugin:')
+          ? "The plugin behind this job was removed or turned off, so it can't be checked. Saved outputs stay."
+          : "The provider for this job isn't available now."
+      )
     const info = provider.info()
     if (info.state !== 'ready')
       throw new JobError(`${info.name} isn't ready${info.needs ? `: ${info.needs}` : '.'}`)
@@ -152,6 +171,7 @@ export class JobTracker {
     } catch (err) {
       const definitelyNotSent = err instanceof MediaError && err.sent === false
       job.state = definitelyNotSent ? 'failed' : 'unknown'
+      if (err instanceof MediaError) job.errorKind = err.kind
       job.error = definitelyNotSent
         ? (err as Error).message
         : `It's not known whether this reached the provider (${err instanceof Error ? err.message : String(err)}).`
@@ -172,6 +192,11 @@ export class JobTracker {
     const { job, provider, cap } = this.need(id)
     if (!job.remoteId) throw new JobError('This job has no provider reference to check.')
     if (TERMINAL.has(job.state)) return { job }
+    // Checking an untracked job starts a new tracking session, with its own cap.
+    if (!job.tracking) {
+      job.tracking = true
+      job.checks = 0
+    }
     const wait = (cap.minPollSeconds ?? JOB_LIMITS.minPollSeconds) * 1000
     if (job.lastCheckAt && this.now() - job.lastCheckAt < wait)
       throw new JobError('Checked too recently; wait a little before checking again.')
@@ -199,6 +224,7 @@ export class JobTracker {
     try {
       files = await provider.result(job.remoteId, signal)
     } catch (err) {
+      if (permanent(err)) return { job: this.put(failResult(job, err)) }
       // Done at the provider; fetching the result can be tried again.
       job.state = 'running'
       job.error = `The result couldn't be fetched yet: ${err instanceof Error ? err.message : String(err)}`
@@ -211,6 +237,30 @@ export class JobTracker {
       return { job: this.put(job) }
     }
     this.apply(job, status)
+    return { job: this.put(job), files }
+  }
+
+  // A completed job's files, fetched once more: for a provider that finished
+  // at submission (a synchronous API) or a restart before the files were
+  // saved. Calls only result(): never status, never submit.
+  async collect(id: string, signal?: AbortSignal): Promise<{ job: Job; files?: MediaFile[] }> {
+    const { job, provider } = this.need(id)
+    if (job.state !== 'completed' || !job.remoteId)
+      throw new JobError('Only a completed job has a result to fetch.')
+    let files: MediaFile[]
+    try {
+      files = await provider.result(job.remoteId, signal)
+    } catch (err) {
+      if (permanent(err)) return { job: this.put(failResult(job, err)) }
+      job.error = `The result couldn't be fetched yet: ${err instanceof Error ? err.message : String(err)}`
+      return { job: this.put(job) }
+    }
+    if (!files.length) {
+      job.state = 'failed'
+      job.error = 'The provider finished but returned no files.'
+      return { job: this.put(job) }
+    }
+    job.error = undefined
     return { job: this.put(job), files }
   }
 
