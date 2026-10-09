@@ -89,6 +89,11 @@ const isRelativePath = (p: unknown): p is string =>
   !p.split(/[\\/]/).some((s) => s === '..' || s === '' || s.startsWith('.')) &&
   !/[:\0]/.test(p)
 
+// Custom schemes a plugin may open: an allowlist, because any app can
+// register a scheme and some can write files (obsidian://new), start tools
+// or run automations. Add one only after checking what its handler does.
+export const VETTED_SCHEMES = new Set(['spotify'])
+
 export function validOpenPrefix(p: unknown): p is string {
   if (typeof p !== 'string' || p.length > 200) return false
   const scheme = /^([a-z][a-z0-9+.-]*):/.exec(p)?.[1]
@@ -101,7 +106,7 @@ export function validOpenPrefix(p: unknown): p is string {
       return false
     }
   }
-  return p === `${scheme}:`
+  return VETTED_SCHEMES.has(scheme) && p === `${scheme}:`
 }
 
 const httpsUrl = (u: unknown): boolean => {
