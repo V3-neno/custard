@@ -303,6 +303,31 @@ describe('vault read', () => {
 
 // --- Safeguards ----------------------------------------------------------------
 
+describe('vault note creation (race-resistant)', () => {
+  it("re-checks the real place against the caller's guard just before creating", async () => {
+    mkdirSync(join(vault, 'Custard', 'Skills'), { recursive: true })
+    const r = await runVaultTool(
+      vault,
+      'vault_create_note',
+      { path: 'Custard/Skills/x/SKILL.md', content: 'hi' },
+      (real) => (real.includes(join('Custard', 'Skills')) ? 'No skills here.' : null)
+    )
+    expect(r).toMatchObject({ isError: true, outcome: 'not-run' })
+    expect(r.content).toMatch(/No skills here\. Nothing was written\./)
+    // The guard is asked before each missing folder is made too (2.2), so not
+    // even the empty folder is left in the protected place.
+    expect(readdirSync(join(vault, 'Custard', 'Skills'))).toEqual([])
+  })
+
+  it('creates a note normally and never replaces one', async () => {
+    expect((await run('vault_create_note', { path: 'a.md', content: 'one' })).isError).toBe(false)
+    expect(readFileSync(join(vault, 'a.md'), 'utf8')).toBe('one\n')
+    const again = await run('vault_create_note', { path: 'a.md', content: 'two' })
+    expect(again.isError).toBe(true)
+    expect(readFileSync(join(vault, 'a.md'), 'utf8')).toBe('one\n')
+  })
+})
+
 describe('vault safeguards', () => {
   it('never writes through a broken link, at the note or any folder above it', async () => {
     const outside = join(root, 'outside')

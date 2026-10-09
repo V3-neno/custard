@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 import type { MemorySettings } from '../shared/memory'
 import type {
   ChatLink,
@@ -14,8 +13,20 @@ import type {
   SendChatRequest
 } from '../shared/chat'
 import type { VaultInfo } from '../shared/vault'
+import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision } from '../shared/chat'
+import type {
+  Artifact,
+  ArtifactSummary,
+  CapabilityReport,
+  DesignEvent,
+  DesignSettings,
+  ExportResult,
+  Job,
+  ProviderListing,
+  SkillChange
+} from '../shared/design'
 import type {
   PluginReview,
   PluginStatus,
@@ -61,6 +72,8 @@ const custard = {
       ipcRenderer.invoke('plugins:setConfig', id, values),
     setAskEveryTime: (id: string, tool: string, ask: boolean): Promise<PluginStatus> =>
       ipcRenderer.invoke('plugins:setAskEveryTime', id, tool, ask),
+    setChatDesign: (id: string, on: boolean): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:setChatDesign', id, on),
     connect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:connect', id),
     disconnect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disconnect', id),
     resetSecrets: (id: string): Promise<PluginStatus> =>
@@ -82,6 +95,75 @@ const custard = {
         cb(u)
       ipcRenderer.on('memory:update', listener)
       return () => ipcRenderer.removeListener('memory:update', listener)
+    }
+  },
+  // Plugin widgets next to the message box (see main/widgets).
+  widgets: {
+    display: (d: WidgetDisplay): void => ipcRenderer.send('widgets:display', d),
+    bounds: (b: WidgetBounds): void => ipcRenderer.send('widgets:bounds', b),
+    dismiss: (instanceId: string): Promise<void> =>
+      ipcRenderer.invoke('widgets:dismiss', instanceId),
+    presentation: (instanceId: string, p: WidgetPresentation): Promise<void> =>
+      ipcRenderer.invoke('widgets:presentation', instanceId, p),
+    decide: (approvalId: string, allow: boolean): Promise<void> =>
+      ipcRenderer.invoke('widgets:decide', approvalId, allow),
+    onState: (cb: (view: WidgetView | null) => void): (() => void) => {
+      const listener = (_: unknown, v: WidgetView | null): void => cb(v)
+      ipcRenderer.on('widgets:state', listener)
+      return () => ipcRenderer.removeListener('widgets:state', listener)
+    }
+  },
+  // Design mode's outputs, jobs and settings (see main/design). Export is
+  // added by Workstream A as design.export.
+  design: {
+    subscribe: (): Promise<void> => ipcRenderer.invoke('design:subscribe'),
+    list: (chat: string): Promise<ArtifactSummary[]> => ipcRenderer.invoke('design:list', chat),
+    get: (chat: string, artifactId: string): Promise<Artifact | null> =>
+      ipcRenderer.invoke('design:get', chat, artifactId),
+    select: (chat: string, artifactId: string, versionId: string): Promise<Artifact> =>
+      ipcRenderer.invoke('design:select', chat, artifactId, versionId),
+    jobs: (chat: string): Promise<Job[]> => ipcRenderer.invoke('design:jobs', chat),
+    job: (
+      chat: string,
+      action: 'check' | 'cancel' | 'stop',
+      id: string
+    ): Promise<{ job: Job; text: string } | { error: string }> =>
+      ipcRenderer.invoke('design:job', chat, action, id),
+    settings: {
+      get: (): Promise<DesignSettings> => ipcRenderer.invoke('design:settings:get'),
+      set: (s: DesignSettings): Promise<void> => ipcRenderer.invoke('design:settings:set', s)
+    },
+    capabilities: (): Promise<CapabilityReport> => ipcRenderer.invoke('design:capabilities'),
+    providers: (): Promise<ProviderListing[]> => ipcRenderer.invoke('design:providers'),
+    // Workstream A registers these in main/design/html.
+    // The HTML of a version's index.html, for the Code view (text, ≤ 2 MB).
+    source: (chat: string, artifactId: string, versionId: string): Promise<string | null> =>
+      ipcRenderer.invoke('design:source', chat, artifactId, versionId),
+    // Whether the skills behind a version changed since it was made.
+    skillChanges: (chat: string, artifactId: string, versionId: string): Promise<SkillChange[]> =>
+      ipcRenderer.invoke('design:skills', chat, artifactId, versionId),
+    export: (chat: string, artifactId: string, versionId: string): Promise<ExportResult> =>
+      ipcRenderer.invoke('design:export', chat, artifactId, versionId),
+    preview: {
+      show: (p: {
+        chat: string
+        artifactId: string
+        versionId: string
+        width: number
+      }): Promise<void> => ipcRenderer.invoke('design:preview:show', p),
+      bounds: (r: { x: number; y: number; width: number; height: number }): void =>
+        ipcRenderer.send('design:preview:bounds', r),
+      hide: (): Promise<void> => ipcRenderer.invoke('design:preview:hide'),
+      onState: (cb: (s: unknown) => void): (() => void) => {
+        const listener = (_: unknown, s: unknown): void => cb(s)
+        ipcRenderer.on('design:preview:state', listener)
+        return () => ipcRenderer.removeListener('design:preview:state', listener)
+      }
+    },
+    onEvent: (cb: (e: DesignEvent) => void): (() => void) => {
+      const listener = (_: unknown, e: DesignEvent): void => cb(e)
+      ipcRenderer.on('design:event', listener)
+      return () => ipcRenderer.removeListener('design:event', listener)
     }
   },
   security: {
@@ -131,18 +213,10 @@ const custard = {
   }
 }
 
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('custard', custard)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.custard = custard
-}
+// The main window is sandboxed (src/main/index.ts): this preload may only
+// use what Electron's sandboxed preloads offer (contextBridge, ipcRenderer,
+// a reduced `process`), never Node modules. Context isolation is on, so the
+// API is only ever exposed through the bridge.
+contextBridge.exposeInMainWorld('custard', custard)
 
 export type CustardAPI = typeof custard

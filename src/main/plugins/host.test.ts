@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import vm from 'vm'
@@ -116,7 +116,7 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
     instructions: 'instructions.md',
     permissions: {
       network: ['api.example.com', 'auth.example.com'],
-      openExternal: ['demo:'],
+      openExternal: ['spotify:'],
       storage: true
     },
     config: {
@@ -151,7 +151,12 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
         effect: 'read',
         inputSchema: {
           type: 'object',
-          properties: { url: { type: 'string' }, auth: { type: 'boolean' } }
+          properties: {
+            url: { type: 'string' },
+            auth: { type: 'boolean' },
+            method: { type: 'string' },
+            body: { type: 'string' }
+          }
         }
       },
       {
@@ -170,7 +175,7 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
       {
         name: 'open',
         description: 'Open',
-        effect: 'read',
+        effect: 'write',
         inputSchema: { type: 'object', properties: { url: { type: 'string' } } }
       },
       {
@@ -197,9 +202,13 @@ export let actCalls = 0
 export default definePlugin({
   tools: {
     echo: ({ text }) => greet(text),
-    call_api: async ({ url, auth }, ctx) => {
-      const r = await ctx.fetch(url, { auth })
+    call_api: async ({ url, auth, method, body }, ctx) => {
+      const r = await ctx.fetch(url, { auth, method, body })
       return 'status ' + r.status + ' ' + (await r.text())
+    },
+    post: async ({ url }, ctx) => {
+      const r = await ctx.fetch(url, { method: 'POST', body: '{}' })
+      return 'status ' + r.status
     },
     act: ({ text }, ctx) => {
       (globalThis as any).actCalls = ((globalThis as any).actCalls ?? 0) + 1
@@ -268,13 +277,14 @@ beforeEach(() => {
 const ALL = [
   'network:api.example.com',
   'network:auth.example.com',
-  'open:demo:',
+  'open:spotify:',
   'storage',
   'account:auth.example.com',
   'account-token:auth.example.com',
   'account-api:api.example.com',
   'account-scope:read',
-  'action:act'
+  'action:act',
+  'action:open'
 ]
 
 async function activate(approved = ALL): Promise<string> {
@@ -293,7 +303,12 @@ const invoke = (
   approve: (r: ApprovalRequest) => Promise<boolean> = yes,
   signal = new AbortController().signal
 ): Promise<ToolOutcome> =>
-  host.invoke(name, input, { snapshot: snapshot ?? host.toolSet().snapshot, signal, approve })
+  host.invoke(name, input, {
+    snapshot: snapshot ?? host.toolSet('code').snapshot,
+    signal,
+    approve,
+    mode: 'code'
+  })
 
 describe('validation and review', () => {
   it('does not keep a build whose sources changed while bundling (L19)', async () => {
@@ -362,13 +377,13 @@ describe('activation and permissions', () => {
     await expect(host.activate('demo', r.buildId!, ALL.slice(1))).rejects.toThrow(
       /Approve these permissions/
     )
-    expect(host.toolSet().tools).toEqual([])
+    expect(host.toolSet('code').tools).toEqual([])
   })
 
   it('registers namespaced tools and instructions once active', async () => {
     writePlugin({})
     await activate()
-    const set = host.toolSet()
+    const set = host.toolSet('code')
     expect(set.tools.map((t) => t.name)).toContain('demo__echo')
     expect(set.tools.every((t) => /^[a-zA-Z0-9_-]{1,64}$/.test(t.name))).toBe(true)
     expect(set.instructions[0]).toContain('Use demo tools carefully.')
@@ -445,9 +460,9 @@ describe('invocation-time checks', () => {
   it('unregisters tools on disable and rejects stale calls without running them', async () => {
     writePlugin({})
     await activate()
-    const stale = host.toolSet().snapshot
+    const stale = host.toolSet('code').snapshot
     host.disable('demo')
-    expect(host.toolSet().tools).toEqual([])
+    expect(host.toolSet('code').tools).toEqual([])
     const r = await invoke('demo__act', { text: 'x' }, stale)
     expect(r).toEqual({
       content: 'The demo plugin is disabled, so this call was not run.',
@@ -459,7 +474,7 @@ describe('invocation-time checks', () => {
   it('rejects calls offered by an older build after an update', async () => {
     writePlugin({})
     await activate()
-    const stale = host.toolSet().snapshot
+    const stale = host.toolSet('code').snapshot
     writePlugin({}, manifest({ version: '1.0.1' }))
     const r = await host.review('demo')
     await host.activate('demo', r.buildId!, [])
@@ -590,8 +605,9 @@ describe('what became of a call', () => {
       'demo__act',
       { text: 'x' },
       {
-        snapshot: host.toolSet().snapshot,
+        snapshot: host.toolSet('code').snapshot,
         signal: new AbortController().signal,
+        mode: 'code',
         approve: no,
         preApproved: true
       }
@@ -670,31 +686,31 @@ describe('capabilities', () => {
   it('opens only declared link prefixes', async () => {
     writePlugin({})
     await activate()
-    expect((await invoke('demo__open', { url: 'demo:item/1' })).content).toBe('opened')
+    expect((await invoke('demo__open', { url: 'spotify:item/1' })).content).toBe('opened')
     expect((await invoke('demo__open', { url: 'file:///etc/passwd' })).content).toMatch(
       /may not open/
     )
-    expect(opened).toEqual(['demo:item/1'])
+    expect(opened).toEqual(['spotify:item/1'])
   })
 
   it('opens only links made of plain URL characters (L20)', async () => {
     writePlugin({})
     await activate()
     for (const url of [
-      'demo:x" --inspect',
-      "demo:x'y",
-      'demo:x\\..\\y',
-      'demo:x<y>',
-      'demo:x`y`',
-      'demo:x|y',
-      'demo:caf\u00e9',
-      'demo:x^y'
+      'spotify:x" --inspect',
+      "spotify:x'y",
+      'spotify:x\\..\\y',
+      'spotify:x<y>',
+      'spotify:x`y`',
+      'spotify:x|y',
+      'spotify:caf\u00e9',
+      'spotify:x^y'
     ])
       expect((await invoke('demo__open', { url })).content, url).toMatch(/may not open/)
     expect(
-      (await invoke('demo__open', { url: 'demo:track/4uLU6hMC?si=a%20b&x=1#t' })).content
+      (await invoke('demo__open', { url: 'spotify:track/4uLU6hMC?si=a%20b&x=1#t' })).content
     ).toBe('opened')
-    expect(opened).toEqual(['demo:track/4uLU6hMC?si=a%20b&x=1#t'])
+    expect(opened).toEqual(['spotify:track/4uLU6hMC?si=a%20b&x=1#t'])
   })
 
   it('refuses capabilities outside an active call', async () => {
@@ -1028,7 +1044,8 @@ describe('the Spotify reference plugin through the host', () => {
     'action:pause_playback',
     'action:resume_playback',
     'action:seek',
-    'action:adjust_volume'
+    'action:adjust_volume',
+    'widget:player'
   ]
   const track = {
     uri: `spotify:track:${'a'.repeat(22)}`,
@@ -1091,5 +1108,307 @@ describe('the Spotify reference plugin through the host', () => {
   it('opens only spotify: links', async () => {
     await invoke('spotify__open', {})
     expect(opened).toEqual(['spotify:'])
+  })
+})
+
+describe('widgets', () => {
+  const WIDGET = {
+    id: 'board',
+    title: 'Board',
+    description: 'A test board.',
+    widgetApi: 1,
+    entry: 'widget/board.ts',
+    tools: ['echo', 'act']
+  }
+  const BOARD = `import { defineWidget } from 'custard-plugin-sdk/widget'
+export default defineWidget({ mount(root) { root.textContent = 'board-7712' } })
+`
+  const DATA_INDEX = INDEX.replace(
+    'echo: ({ text }) => greet(text),',
+    "echo: ({ text }) => ({ content: greet(text), data: text === 'big' ? 'x'.repeat(70000) : { text } }),"
+  )
+
+  it('needs the widget permission, then lists and bundles it', async () => {
+    writePlugin({ 'widget/board.ts': BOARD }, manifest({ widgets: [WIDGET] }))
+    const review = await host.review('demo')
+    expect(review.errors).toEqual([])
+    await expect(host.activate('demo', review.buildId!, ALL)).rejects.toThrow(
+      /Approve these permissions/
+    )
+    expect(host.widgetCatalog('code')).toEqual([])
+    await host.activate('demo', review.buildId!, [...ALL, 'widget:board'])
+    const [entry] = host.widgetCatalog('code')
+    expect(entry).toMatchObject({ pluginId: 'demo', buildId: review.buildId, widget: WIDGET })
+    const code = host.widgetCode('demo', review.buildId!, 'board')!
+    expect(code).toContain('board-7712')
+    expect(code).toContain('custardWidgetHost')
+    expect(host.widgetCode('demo', review.buildId!, 'other')).toBeNull()
+    expect(host.toolWrites('demo', review.buildId!, 'act')).toBe(true)
+    expect(host.toolWrites('demo', review.buildId!, 'echo')).toBe(false)
+    expect(host.toolWrites('demo', review.buildId!, 'nope')).toBeNull()
+  })
+
+  it('tells listeners when a plugin changes, and a disabled plugin has no widgets', async () => {
+    writePlugin({ 'widget/board.ts': BOARD }, manifest({ widgets: [WIDGET] }))
+    const changed: string[] = []
+    host.onChange((id) => changed.push(id))
+    await activate([...ALL, 'widget:board'])
+    host.disable('demo')
+    expect(host.widgetCatalog('code')).toEqual([])
+    expect(changed).toEqual(['demo', 'demo'])
+  })
+
+  it('refuses a widget entry that is missing', async () => {
+    writePlugin({}, manifest({ widgets: [WIDGET] }))
+    const review = await host.review('demo')
+    expect(review.errors.join(' ')).toMatch(/widget\/board\.ts/)
+  })
+
+  it("passes a tool's data on, but not when it is too large or holds a secret", async () => {
+    writePlugin({ 'src/index.ts': DATA_INDEX })
+    await activate()
+    store.setSecret('demo', 'apiKey', 'sekret-99881')
+    expect((await invoke('demo__echo', { text: 'you' })).data).toEqual({ text: 'you' })
+    expect((await invoke('demo__echo', { text: 'big' })).data).toBeUndefined()
+    const leaked = await invoke('demo__echo', { text: 'sekret-99881' })
+    expect(leaked.data).toBeUndefined()
+    expect(leaked.content).not.toContain('sekret-99881')
+  })
+
+  it('needs Use in Chat and Design outside Code', async () => {
+    writePlugin({ 'widget/board.ts': BOARD }, manifest({ widgets: [WIDGET] }))
+    await activate([...ALL, 'widget:board'])
+    expect(host.widgetCatalog('code')).toHaveLength(1)
+    expect(host.widgetCatalog('chat')).toEqual([])
+    expect(host.widgetCatalog('design')).toEqual([])
+    host.setChatDesign('demo', true)
+    expect(host.widgetCatalog('chat')).toHaveLength(1)
+  })
+})
+
+describe('Use in Chat and Design', () => {
+  const chatInvoke = (
+    name: string,
+    input: unknown,
+    mode: 'chat' | 'design' | 'skills' | 'code',
+    snapshot = host.toolSet('code').snapshot,
+    approve: (r: ApprovalRequest) => Promise<boolean> = yes
+  ): Promise<ToolOutcome> =>
+    host.invoke(name, input, { snapshot, signal: new AbortController().signal, approve, mode })
+
+  it('is off for a newly activated plugin: Chat, Design and Skills get nothing', async () => {
+    writePlugin({})
+    await activate()
+    expect(host.status('demo').chatDesign).toBe('off')
+    for (const mode of ['chat', 'design', 'skills'] as const) {
+      expect(host.toolSet(mode)).toEqual({ tools: [], snapshot: new Map(), instructions: [] })
+      const r = await chatInvoke('demo__echo', { text: 'a' }, mode)
+      expect(r).toMatchObject({ outcome: 'not-run', isError: true })
+      expect(r.content).toMatch(/isn't turned on for Chat and Design/)
+    }
+    // Code's Plugins workspace, where plugins are built, doesn't need it.
+    expect(host.toolSet('code').tools.length).toBeGreaterThan(0)
+    expect((await chatInvoke('demo__echo', { text: 'a' }, 'code')).content).toBe('hello a')
+  })
+
+  it('refuses before anything runs or any approval is asked for', async () => {
+    writePlugin({})
+    await activate()
+    let asked = 0
+    const r = await chatInvoke('demo__act', { text: 'x' }, 'chat', undefined, async () => {
+      asked++
+      return true
+    })
+    expect(r.outcome).toBe('not-run')
+    expect(asked).toBe(0)
+    expect(runtimeStarts).toBe(1)
+    const r2 = await chatInvoke('demo__call_api', { url: 'https://api.example.com/x' }, 'design')
+    expect(r2.outcome).toBe('not-run')
+    expect(net).toEqual([])
+  })
+
+  it('lets the plugin run there once turned on, until turned off', async () => {
+    writePlugin({})
+    await activate()
+    expect(host.setChatDesign('demo', true).chatDesign).toBe('on')
+    const set = host.toolSet('chat')
+    expect(set.tools.map((t) => t.name)).toContain('demo__echo')
+    expect((await chatInvoke('demo__echo', { text: 'a' }, 'chat', set.snapshot)).content).toBe(
+      'hello a'
+    )
+    // A tool list offered while it was on doesn't outlive turning it off.
+    host.setChatDesign('demo', false)
+    expect(host.status('demo').chatDesign).toBe('off')
+    const r = await chatInvoke('demo__echo', { text: 'a' }, 'chat', set.snapshot)
+    expect(r.outcome).toBe('not-run')
+  })
+
+  it('checks again after the approval card, which can sit open', async () => {
+    writePlugin({})
+    await activate()
+    host.setChatDesign('demo', true)
+    const r = await chatInvoke('demo__act', { text: 'x' }, 'chat', undefined, async () => {
+      host.setChatDesign('demo', false)
+      return true
+    })
+    expect(r.outcome).toBe('not-run')
+    expect(r.content).toMatch(/isn't turned on for Chat and Design/)
+  })
+
+  it('asks again when an update reaches more: a host, a link, an account scope or an action', async () => {
+    const extra: [Record<string, unknown>, string[]][] = [
+      [
+        {
+          permissions: {
+            network: ['api.example.com', 'auth.example.com', 'new.example.com'],
+            openExternal: ['spotify:'],
+            storage: true
+          }
+        },
+        ['network:new.example.com']
+      ],
+      [
+        {
+          permissions: {
+            network: ['api.example.com', 'auth.example.com'],
+            openExternal: ['spotify:', 'https://example.com/'],
+            storage: true
+          }
+        },
+        ['open:https://example.com/']
+      ],
+      [
+        {
+          auth: {
+            ...(manifest().auth as Record<string, unknown>),
+            scopes: ['read', 'write']
+          }
+        },
+        ['account-scope:write']
+      ],
+      [
+        {
+          tools: [
+            ...(manifest().tools as unknown[]),
+            {
+              name: 'post',
+              description: 'Post',
+              effect: 'write',
+              inputSchema: { type: 'object', properties: { url: { type: 'string' } } }
+            }
+          ]
+        },
+        ['action:post']
+      ]
+    ]
+    for (const [over, added] of extra) {
+      host.uninstall('demo')
+      rmSync(join(src, 'demo'), { recursive: true, force: true })
+      writePlugin({})
+      await activate()
+      host.setChatDesign('demo', true)
+      writePlugin({}, manifest({ version: '1.0.1', ...over }))
+      const r = await host.review('demo')
+      expect(r.errors).toEqual([])
+      await host.activate('demo', r.buildId!, added)
+      expect(host.status('demo').chatDesign).toBe('changed')
+      expect(host.toolSet('chat').tools).toEqual([])
+      expect((await chatInvoke('demo__echo', { text: 'a' }, 'chat')).outcome).toBe('not-run')
+      expect(host.setChatDesign('demo', true).chatDesign).toBe('on')
+      expect((await chatInvoke('demo__echo', { text: 'a' }, 'chat')).content).toBe('hello a')
+    }
+  })
+
+  it('stays on for an update that reaches nothing new', async () => {
+    writePlugin({})
+    await activate()
+    host.setChatDesign('demo', true)
+    writePlugin({}, manifest({ version: '1.0.1' }))
+    const r = await host.review('demo')
+    await host.activate('demo', r.buildId!, [])
+    expect(host.status('demo').chatDesign).toBe('on')
+  })
+
+  it('is off for state saved before it existed, or saved wrong', async () => {
+    writePlugin({})
+    await activate()
+    const { chatDesign, ...old } = store.state('demo')
+    expect(chatDesign).toBeNull()
+    writeFileSync(join(base, 'data', 'demo', 'state.json'), JSON.stringify(old))
+    expect(host.status('demo').chatDesign).toBe('off')
+    // A string "includes" every substring: never read as a list.
+    writeFileSync(
+      join(base, 'data', 'demo', 'state.json'),
+      JSON.stringify({ ...old, chatDesign: ALL.join(' ') })
+    )
+    expect(host.status('demo').chatDesign).toBe('off')
+    expect(host.toolSet('chat').tools).toEqual([])
+  })
+
+  it('needs an activated plugin', () => {
+    writePlugin({})
+    expect(() => host.setChatDesign('demo', true)).toThrow(/activate/)
+  })
+})
+
+describe('read tools only GET or HEAD', () => {
+  const run = (name: string, input: unknown): Promise<ToolOutcome> =>
+    host.invoke(name, input, {
+      snapshot: host.toolSet('code').snapshot,
+      signal: new AbortController().signal,
+      approve: yes,
+      mode: 'code'
+    })
+
+  it('refuses any other method, or a body, without sending it', async () => {
+    writePlugin({})
+    await activate()
+    for (const [method, body] of [
+      ['POST', undefined],
+      ['put', undefined],
+      ['DELETE', undefined],
+      ['PATCH', '{}'],
+      ['GET', '{"a":1}']
+    ] as const) {
+      const r = await run('demo__call_api', {
+        url: 'https://api.example.com/x',
+        method,
+        ...(body ? { body } : {})
+      })
+      expect(r.isError).toBe(true)
+      expect(r.content).toMatch(/Read tools may only GET or HEAD/)
+    }
+    expect(net).toEqual([])
+  })
+
+  it('sends GET and HEAD', async () => {
+    writePlugin({})
+    await activate()
+    expect((await run('demo__call_api', { url: 'https://api.example.com/x' })).content).toBe(
+      'status 200 ok'
+    )
+    await run('demo__call_api', { url: 'https://api.example.com/y', method: 'head' })
+    expect(net.map((r) => [r.method, r.url.toString()])).toEqual([
+      ['GET', 'https://api.example.com/x'],
+      ['HEAD', 'https://api.example.com/y']
+    ])
+  })
+
+  it('leaves actions (write tools) free to POST', async () => {
+    const tools = [
+      ...(manifest().tools as unknown[]),
+      {
+        name: 'post',
+        description: 'Post',
+        effect: 'write',
+        inputSchema: { type: 'object', properties: { url: { type: 'string' } } }
+      }
+    ]
+    writePlugin({}, manifest({ tools }))
+    await activate([...ALL, 'action:post'])
+    expect((await run('demo__post', { url: 'https://api.example.com/z' })).content).toBe(
+      'status 200'
+    )
+    expect(net.map((r) => r.method)).toEqual(['POST'])
   })
 })

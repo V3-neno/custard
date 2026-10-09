@@ -45,7 +45,9 @@ export interface PluginContext {
   log(message: string): void
 }
 
-export type ToolResult = string | { content: string; isError?: boolean }
+// `data` is for the plugin's widgets only (see custard-plugin-sdk/widget): the
+// model sees `content`, never `data`. Keep it JSON and under 64 KB.
+export type ToolResult = string | { content: string; isError?: boolean; data?: unknown }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ToolHandler<I = any> = (

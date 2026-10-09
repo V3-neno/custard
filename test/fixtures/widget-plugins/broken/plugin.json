@@ -1,0 +1,37 @@
+{
+  "manifestVersion": 1,
+  "id": "broken",
+  "name": "Broken",
+  "description": "Test widgets that fail.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "src/index.ts",
+  "permissions": { "network": [], "openExternal": [], "storage": false },
+  "config": {},
+  "tools": [
+    {
+      "name": "noop",
+      "description": "Does nothing.",
+      "effect": "read",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    }
+  ],
+  "widgets": [
+    {
+      "id": "crash",
+      "title": "Crash",
+      "description": "Throws while mounting.",
+      "widgetApi": 1,
+      "entry": "widget/crash.ts",
+      "tools": []
+    },
+    {
+      "id": "hang",
+      "title": "Hang",
+      "description": "Never finishes mounting.",
+      "widgetApi": 1,
+      "entry": "widget/hang.ts",
+      "tools": ["noop"]
+    }
+  ]
+}

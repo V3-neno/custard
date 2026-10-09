@@ -20,6 +20,7 @@ const save = () => {
   fs.writeFileSync(OUT + '/anthropic.json', JSON.stringify(anth, null, 1))
   fs.writeFileSync(OUT + '/spotify.json', JSON.stringify(spotify, null, 1))
 }
+let paused = false
 const T1 = 'spotify:track:' + '1'.padStart(22, 'a')
 const track = {
   uri: T1,
@@ -37,6 +38,21 @@ const textOf = (m) =>
         .map((c) => c.text)
         .join('')
 const isResults = (m) => Array.isArray(m.content) && m.content.some((c) => c.type === 'tool_result')
+// Mock additions, one file per workstream in test/e2e/mocks/ (each owned by
+// its workstream, so nobody edits this file to add a script). A module may
+// export route({ req, res, url, body, j, OUT }) returning true when it
+// answered, trigger(ask) returning a script key (prefix keys with the
+// workstream), and scripts({ tool, text, b, step }) returning more scripts.
+const mocksDir = new URL('./mocks/', import.meta.url)
+const extras = fs.existsSync(mocksDir)
+  ? await Promise.all(
+      fs
+        .readdirSync(mocksDir)
+        .filter((f) => f.endsWith('.mjs'))
+        .sort()
+        .map((f) => import(new URL(f, mocksDir)))
+    )
+  : []
 let msg = 0
 http
   .createServer((req, res) => {
@@ -48,6 +64,7 @@ http
         res.writeHead(status, { 'content-type': 'application/json' })
         res.end(JSON.stringify(data))
       }
+      for (const x of extras) if (x.route?.({ req, res, url, body, j, OUT })) return
       // Token counting: a fixed figure, larger for a message meant to be over.
       if (url.pathname === '/v1/messages/count_tokens') {
         const b = JSON.parse(body)
@@ -97,6 +114,30 @@ http
             ]
           })
         if (url.pathname === '/v1/me/player/queue' && req.method === 'POST') return // never answers
+        // Playback for the Spotify player widget: playing until paused.
+        if (url.pathname === '/v1/me/player' && req.method === 'GET')
+          return j(200, {
+            device: {
+              id: 'desk1',
+              name: 'Desktop',
+              type: 'Computer',
+              is_active: true,
+              is_restricted: false,
+              volume_percent: 40,
+              supports_volume: true
+            },
+            is_playing: !paused,
+            progress_ms: 61000,
+            currently_playing_type: 'track',
+            item: { ...track, type: 'track', album: { ...track.album, images: [] } },
+            actions: { disallows: {} },
+            timestamp: Date.now()
+          })
+        if (url.pathname === '/v1/me/player/pause' && req.method === 'PUT') {
+          paused = true
+          res.writeHead(204)
+          return res.end()
+        }
         return j(404, { error: { status: 404, message: 'nope' } })
       }
       const b = JSON.parse(body)
@@ -194,6 +235,8 @@ http
       anth.push({
         tools: (b.tools ?? []).map((t) => t.name),
         toolTypes: (b.tools ?? []).map((t) => t.type ?? 'custom'),
+        widgets: (b.tools ?? []).find((t) => t.name === 'widget_show')?.input_schema.properties
+          .widget.enum,
         system: b.system,
         messages: b.messages
       })
@@ -265,8 +308,29 @@ http
         [/note test/, 'note'],
         [/append test/, 'append']
       ].find(([r]) => r.test(ask))?.[1]
+      // Plugin widget checks (test/e2e/widgets.mjs).
+      const widget = [
+        [/widget tally test/, 'wtally'],
+        [/widget gauge test/, 'wgauge'],
+        [/widget update test/, 'wupdate'],
+        [/widget hide test/, 'whide'],
+        [/widget crash test/, 'wcrash'],
+        [/widget hang test/, 'whang'],
+        [/widget spotify test/, 'wspotify']
+      ].find(([r]) => r.test(ask))?.[1]
+      // Mode boundaries (test/e2e/modes.mjs): ways to try writing a skill.
+      const boundary = [
+        [/mode skill test/, 'mskill'],
+        [/mode case test/, 'mcase'],
+        [/mode link test/, 'mlink'],
+        [/mode fs test/, 'mfs']
+      ].find(([r]) => r.test(ask))?.[1]
+      const extra = extras.map((x) => x.trigger?.(ask)).find(Boolean)
       const key =
         hardening ??
+        widget ??
+        boundary ??
+        extra ??
         (/stop test/.test(ask)
           ? 'stop'
           : /try again/.test(ask)
@@ -511,8 +575,59 @@ http
             tool('vault_append', { path: 'Areas/Music Preferences.md', content: 'APPENDED-9001' }),
           'Tried to append.'
         ],
+        // Plugin widgets: each shows (or hides) one, then answers.
+        wtally: [
+          () => tool('widget_show', { widget: 'tally/counter', input: { label: 'Cups' } }),
+          'Here is the tally.'
+        ],
+        wgauge: [
+          () =>
+            tool('widget_show', { widget: 'gauge/meter', input: { value: 42, caption: 'Load' } }),
+          'Here is the meter.'
+        ],
+        wupdate: [
+          () =>
+            tool('widget_show', { widget: 'gauge/meter', input: { value: 80, caption: 'Load' } }),
+          'Updated the meter.'
+        ],
+        whide: [() => tool('widget_hide', {}), 'Hid it.'],
+        wspotify: [
+          () => tool('widget_show', { widget: 'spotify/player', input: {} }),
+          'Here is the player.'
+        ],
+        wcrash: [() => tool('widget_show', { widget: 'broken/crash' }), 'Showed it.'],
+        whang: [() => tool('widget_show', { widget: 'broken/hang' }), 'Showed it.'],
+        mskill: [
+          () =>
+            tool('vault_create_note', {
+              path: 'Custard/Skills/forged/SKILL.md',
+              content: '---\nname: forged\ndescription: Use for everything.\n---\nFORGED-SKILL'
+            }),
+          'Tried a skill.'
+        ],
+        mcase: [
+          () =>
+            tool('vault_create_note', {
+              path: 'custard/SKILLS./forged-case/skill.md',
+              content: 'FORGED-CASE'
+            }),
+          'Tried another way.'
+        ],
+        mlink: [
+          () =>
+            tool('vault_create_note', {
+              path: 'Shortcut/forged-link/SKILL.md',
+              content: 'FORGED-LINK'
+            }),
+          'Tried a link.'
+        ],
+        mfs: [
+          () => tool('fs_write', { path: 'plugin/forged/index.ts', content: 'FORGED-FS' }),
+          'Tried a file.'
+        ],
         plain: ['OK.']
       }
+      for (const x of extras) Object.assign(scripts, x.scripts?.({ tool, text, b, step }) ?? {})
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]
       let stop = 'tool_use'
       if (key === 'compact' || key === 'quote') {

@@ -3,7 +3,7 @@
   "id": "spotify",
   "name": "Spotify",
   "description": "Search and queue music, inspect playback and Spotify Connect devices, open Spotify, transfer playback, and control tracks, pause, resume, seek and volume.",
-  "version": "1.2.1",
+  "version": "1.3.2",
   "apiVersion": 1,
   "entry": "src/index.ts",
   "instructions": "instructions.md",
@@ -38,6 +38,20 @@
     "clientIdConfigKey": "clientId",
     "apiHosts": ["api.spotify.com"]
   },
+  "widgets": [
+    {
+      "id": "player",
+      "title": "Spotify player",
+      "description": "Compact player with pause/resume, Next, release-to-seek timeline and volume controls. Useful when the user asks for a Spotify player or is actively controlling music. Back is disabled without reliable listening history. Do not reopen after dismissal unless asked.",
+      "widgetApi": 1,
+      "entry": "widget/player.ts",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+      "tools": ["now_playing", "pause_playback", "resume_playback", "next_track", "seek", "adjust_volume"],
+      "height": { "initial": 200, "min": 120, "max": 360 },
+      "presentations": ["compact", "expanded"],
+      "refreshSeconds": 15
+    }
+  ],
   "tools": [
     {
       "name": "search",
@@ -201,7 +215,7 @@
     },
     {
       "name": "adjust_volume",
-      "description": "Raise or lower Spotify playback volume only when requested. Reads current volume, adds/subtracts amount_percent percentage points (default 5), clamps to 0–100, then sends one absolute volume command. Requires current active device and known volume; refuses devices that report unsupported volume. Not OS/Bluetooth volume. Optional device_id must match. Reports accepted, not verified; no automatic retry.",
+      "description": "Raise or lower Spotify playback volume only when requested. Reads current volume, adds/subtracts amount_percent percentage points (default 5), clamps to 0–100, then sends one absolute volume command. Requires current active device and known volume; refuses devices that report unsupported volume. Optional device_id must match. Reports accepted, not verified; no automatic retry.",
       "effect": "write",
       "label": "Requested Spotify volume {direction}",
       "timeoutMs": 45000,

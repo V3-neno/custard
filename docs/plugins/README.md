@@ -5,6 +5,7 @@ Plugins add tools to Custard's assistant. They are developed in Code mode's **Pl
 - [API.md](API.md): the plugin API (`custard-plugin-sdk`), where plugin code runs, and testing
 - [MANIFEST.md](MANIFEST.md): `plugin.json`
 - [SECURITY.md](SECURITY.md): what is enforced, how, and what isn't
+- [WIDGETS.md](WIDGETS.md): plugin widgets, UI a plugin draws next to the message box
 - [TESTING.md](TESTING.md): automated tests, the manual checklist and the demo walkthrough
 
 ## Lifecycle

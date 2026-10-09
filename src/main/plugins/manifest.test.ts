@@ -18,7 +18,7 @@ export const goodManifest = (): Record<string, unknown> => ({
   entry: 'src/index.ts',
   permissions: {
     network: ['api.example.com', 'auth.example.com'],
-    openExternal: ['demo:'],
+    openExternal: ['spotify:'],
     storage: true
   },
   config: {
@@ -167,7 +167,7 @@ describe('manifest', () => {
     expect(permissionsOf(m)).toEqual([
       'network:api.example.com',
       'network:auth.example.com',
-      'open:demo:',
+      'open:spotify:',
       'storage',
       'account:auth.example.com',
       'account-token:auth.example.com',
@@ -236,5 +236,59 @@ describe('schema', () => {
     expect(checkSchema({ type: 'object', oneOf: [] })).toHaveLength(1)
     expect(checkSchema({ type: 'string', pattern: '(' })[0]).toMatch(/regular expression/)
     expect(checkSchema({ properties: {} })[0]).toMatch(/"type" is required/)
+  })
+})
+
+describe('manifest widgets', () => {
+  const widget = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'panel',
+    title: 'Panel',
+    description: 'A panel.',
+    widgetApi: 1,
+    entry: 'widget/panel.ts',
+    tools: ['search', 'act'],
+    ...over
+  })
+  const withWidgets = (...w: unknown[]): string[] => errorsFor((m) => (m.widgets = w))
+
+  it('accepts a well-formed widget and asks for its own permission', () => {
+    const m = goodManifest()
+    m.widgets = [
+      widget({
+        inputSchema: { type: 'object', properties: { q: { type: 'string' } } },
+        height: { initial: 100, min: 60, max: 200 },
+        presentations: ['compact', 'expanded'],
+        refreshSeconds: 30
+      })
+    ]
+    const r = parseManifest(m)
+    expect(r.errors).toEqual([])
+    expect(r.manifest!.widgets![0].id).toBe('panel')
+    expect(permissionsOf(r.manifest!)).toContain('widget:panel')
+  })
+
+  it('refuses a widget API this Custard does not support', () => {
+    expect(withWidgets(widget({ widgetApi: 2 })).join(' ')).toMatch(/widgetApi 2 is not supported/)
+  })
+
+  it("only lets a widget use its own plugin's tools", () => {
+    expect(withWidgets(widget({ tools: ['other__search'] })).join(' ')).toMatch(
+      /not one of this plugin's tools/
+    )
+  })
+
+  it('checks ids, entry, sizes, presentations, refresh and unknown fields', () => {
+    const all = [
+      withWidgets(widget({ id: 'Bad Id' })),
+      withWidgets(widget(), widget()),
+      withWidgets(widget({ entry: '../outside.ts' })),
+      withWidgets(widget({ height: { initial: 500 } })),
+      withWidgets(widget({ height: { min: 200, max: 100 } })),
+      withWidgets(widget({ presentations: ['huge'] })),
+      withWidgets(widget({ refreshSeconds: 1 })),
+      withWidgets(widget({ inputSchema: { type: 'string' } })),
+      withWidgets(widget({ html: '<b>' }))
+    ]
+    for (const errors of all) expect(errors.length).toBeGreaterThan(0)
   })
 })

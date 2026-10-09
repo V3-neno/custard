@@ -2,6 +2,7 @@ import { definePlugin, type PluginContext } from 'custard-plugin-sdk'
 import { SpotifyClient } from './client'
 import { SeenTracks, tools, type SpotifyDeps } from './tools'
 import { describeReady, readinessTimeout, waitForDevices } from './readiness'
+import { withWidgetData } from './widget-data'
 
 const seen = new SeenTracks()
 const deps = (ctx: PluginContext): SpotifyDeps => ({
@@ -27,7 +28,7 @@ async function wait(input: Input, ctx: PluginContext): Promise<{ content: string
 export default definePlugin({
   tools: {
     search: (i: Input, ctx) => tools(deps(ctx)).search(i),
-    now_playing: (i: Input, ctx) => tools(deps(ctx)).now_playing(i),
+    now_playing: async (i: Input, ctx) => withWidgetData(await tools(deps(ctx)).now_playing(i)),
     devices: (i: Input, ctx) => tools(deps(ctx)).devices(i),
     add_to_queue: (i: Input, ctx) => tools(deps(ctx)).add_to_queue(i),
     open: async (i: Input, ctx) => {

@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^custard-plugin-sdk\/testing$/, replacement: resolve('src/plugin-sdk/testing.ts') },
+      { find: /^custard-plugin-sdk\/widget$/, replacement: resolve('src/plugin-sdk/widget.ts') },
       { find: /^custard-plugin-sdk$/, replacement: resolve('src/plugin-sdk/index.ts') }
     ]
   },

@@ -1,0 +1,40 @@
+{
+  "manifestVersion": 1,
+  "id": "gauge",
+  "name": "Gauge",
+  "description": "A test meter drawn from the assistant's input.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "src/index.ts",
+  "permissions": { "network": [], "openExternal": [], "storage": false },
+  "config": {},
+  "tools": [
+    {
+      "name": "scale",
+      "description": "Explains the gauge's scale.",
+      "effect": "read",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+    }
+  ],
+  "widgets": [
+    {
+      "id": "meter",
+      "title": "Meter",
+      "description": "A dial showing a value from 0 to 100 with a caption. Pass the value and caption as input.",
+      "widgetApi": 1,
+      "entry": "widget/meter.ts",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "minimum": 0, "maximum": 100 },
+          "caption": { "type": "string", "maxLength": 60 }
+        },
+        "required": ["value"],
+        "additionalProperties": false
+      },
+      "tools": [],
+      "height": { "initial": 72, "min": 56, "max": 220 },
+      "presentations": ["compact", "expanded"]
+    }
+  ]
+}

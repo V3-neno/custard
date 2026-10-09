@@ -32,10 +32,11 @@ Each enabled plugin runs in its own hidden, sandboxed Chromium window:
 
 ```ts
 type ToolHandler<I> = (input: I, ctx: PluginContext) => ToolResult | Promise<ToolResult>
-type ToolResult = string | { content: string; isError?: boolean }
+type ToolResult = string | { content: string; isError?: boolean; data?: unknown }
 ```
 
 - Return a string for success, or `{ content, isError: true }` for a failure the model should see.
+- `data` is for the plugin's own widgets only (see [WIDGETS.md](WIDGETS.md)). The model and the chat get `content`, never `data`.
 - Throw `PluginError` for an expected failure; its message reaches the model as written. Any other thrown error is reported as "The plugin failed: …".
 - Results are capped at 50,000 characters and redacted: known secrets, `Bearer …` values and token-looking fields are replaced with `[redacted]`.
 - Each call has a timeout: the tool's `timeoutMs`, or 20 seconds by default and 60 seconds at most. On timeout or cancel, `ctx.signal` is aborted. If the plugin doesn't respond within 2 seconds after that (for example, a busy loop), its window is killed and restarted on the next call.
@@ -76,7 +77,7 @@ Tokens never enter plugin code, the model's context, the vault or logs. **Discon
 ## What API v1 does not have
 
 - No vault or file access.
-- No UI (panels, cards, buttons).
+- No UI in tool code. A plugin can draw UI only in a widget (see [WIDGETS.md](WIDGETS.md)).
 - No background work or timers outside a call.
 - No npm packages or Node modules.
 - No raw sockets.
