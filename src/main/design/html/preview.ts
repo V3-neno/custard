@@ -39,7 +39,10 @@ export const PREVIEW_CSP = [
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'none'",
-  "frame-ancestors 'self'"
+  "frame-ancestors 'self'",
+  // No allow-modals: print(), alert() and the like are refused (disableDialogs
+  // doesn't cover print). The flags also apply to data:, blob: and srcdoc frames.
+  'sandbox allow-scripts allow-same-origin'
 ].join('; ')
 
 const previews = new Set<number>()

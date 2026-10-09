@@ -75,7 +75,7 @@ box (as with widgets).
     handler can answer for that host.
 - CSP: the page's own origin plus `data:` and `blob:` for everything;
   inline scripts and styles allowed; `connect-src 'self'` so a page can
-  fetch its own JSON (still only the version's files); `form-action 'none'`;
+  fetch its own JSON (still only the version's files); `form-action 'none'`; `sandbox allow-scripts allow-same-origin` (no `allow-modals`, so `print()` and other dialogs are refused, in child frames too: `disableDialogs` doesn't cover print, found by Workstream D);
   `object-src 'none'`.
 - Navigation only within the version's own files; popups, downloads,
   permissions, device access, display capture and `beforeunload` prompts
