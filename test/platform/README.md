@@ -5,15 +5,15 @@ against a **packaged** build with Chromium's sandbox on, and hold the native
 Windows checks. Nothing here is part of the app, and nothing contacts a real
 provider.
 
-| File | What it is |
-| --- | --- |
-| `launch.mjs` | How e2e tests start Custard: the dev build, or `CUSTARD_EXE` (packaged, sandbox on unless root). Used by `design-security`, `widgets`, `preview-platform`, `media-sizes`. |
-| `packaged-linux.sh` | Linux runner: copies `dist/linux-unpacked`, starts the mock and the TLS front, runs one test as a non-root user in its own mount namespace. |
-| `tls-front.mjs` | Test-only TLS server. Packaged builds pin `api.anthropic.com` / `api.openai.com` (L13), so the test maps those names to 127.0.0.1 inside its namespace and trusts a throwaway CA. The app's pinning stays on. |
-| `sandbox-evidence.mjs` | 4.1: versions, flags, fuses and the kernel's view (seccomp, namespaces) of each process. Writes `<out>/sandbox-evidence.json`. |
-| `fixtures/bigmedia/` | 4.4: a media plugin that builds big or broken files inside its sandbox. Installed by `test/e2e/media-sizes.mjs`. |
-| `windows/fsafe-junctions.test.ts` | 4.2: fsafe with junctions and Windows path forms. Skips elsewhere. |
-| `vitest.platform.config.ts` | Runs the native checks: `npx vitest run --config test/platform/vitest.platform.config.ts`. |
+| File                              | What it is                                                                                                                                                                                                    |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `launch.mjs`                      | How e2e tests start Custard: the dev build, or `CUSTARD_EXE` (packaged, sandbox on unless root). Used by `design-security`, `widgets`, `preview-platform`, `media-sizes`.                                     |
+| `packaged-linux.sh`               | Linux runner: copies `dist/linux-unpacked`, starts the mock and the TLS front, runs one test as a non-root user in its own mount namespace.                                                                   |
+| `tls-front.mjs`                   | Test-only TLS server. Packaged builds pin `api.anthropic.com` / `api.openai.com` (L13), so the test maps those names to 127.0.0.1 inside its namespace and trusts a throwaway CA. The app's pinning stays on. |
+| `sandbox-evidence.mjs`            | 4.1: versions, flags, fuses and the kernel's view (seccomp, namespaces) of each process. Writes `<out>/sandbox-evidence.json`.                                                                                |
+| `fixtures/bigmedia/`              | 4.4: a media plugin that builds big or broken files inside its sandbox. Installed by `test/e2e/media-sizes.mjs`.                                                                                              |
+| `windows/fsafe-junctions.test.ts` | 4.2: fsafe with junctions and Windows path forms. Skips elsewhere.                                                                                                                                            |
+| `vitest.platform.config.ts`       | Runs the native checks: `npx vitest run --config test/platform/vitest.platform.config.ts`.                                                                                                                    |
 
 ## Linux, packaged, sandbox on
 
