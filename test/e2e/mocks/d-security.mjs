@@ -14,7 +14,9 @@ export function route({ url, req, OUT, j }) {
 
 const ASKS = [
   [/d escape test/, 'd_escape'],
-  [/d plain test/, 'd_plain']
+  [/d plain test/, 'd_plain'],
+  [/d ref test/, 'd_ref'],
+  [/d page test/, 'd_page']
 ]
 export const trigger = (ask) => ASKS.find(([r]) => r.test(ask))?.[1]
 
@@ -88,6 +90,25 @@ window.__dRisky = () => {
 
 export const scripts = ({ tool }) => ({
   d_escape: [() => tool('design_html', { name: 'Escape', html: ESCAPE }), 'Made the escape probe.'],
+  // design-attachments.mjs: an edit that names one of two attached images.
+  d_ref: [
+    () =>
+      tool('design_media', {
+        operation: 'image.edit',
+        prompt: 'make it amber',
+        references: ['Osprey-8890.png'],
+        name: 'Edited'
+      }),
+    'Edited.'
+  ],
+  d_page: [
+    () =>
+      tool('design_html', {
+        name: 'Page',
+        html: page('Page', '<p>A page made beside the attachments.</p>')
+      }),
+    'Made a page.'
+  ],
   d_plain: [
     () => tool('design_html', { name: 'Plain', html: page('Plain', '<p>Plain page</p>') }),
     'Made a plain page.'
