@@ -80,21 +80,43 @@ ext4/overlay, as root for e2e). macOS and Windows behaviour (junctions,
 `realpath.native`, NTFS file ids, no `O_NOFOLLOW`, read-only file deletion)
 is unverified.
 
-## Recovery and retention (2.1)
+## Recovery and retention (2.1, with Amendment 2)
 
-- OpenAI images stay in `design/openai-images/<remoteId>` until Design has
-  stored them on their version, or the job's chat is deleted; startup prunes
-  the rest. An image whose job never recorded it is matched by the job's
-  idempotency key, so it is kept and recovered instead of pruned.
-- A staging folder (`.staging-…`) left by a crash is finished on restart if
-  complete; an incomplete one is never used and is removed once no job needs
-  that id.
-- A version staging folder (`<version>.partial-…`) or an unrecorded version
-  folder is replaced by the next write for that pending version; otherwise it
-  goes when the chat is deleted.
-- Recovery records (`meta.json`, `jobs.json`) hold the job id, model, MIME
-  type, name and times: no API key (tested).
-- At startup, jobs of a chat that no longer exists (deleted before Custard
-  stopped) are forgotten with their outputs and stored images, so recovery
-  never brings a deleted chat back. A chat file that can't be read counts as
-  existing.
+Restart recovery is **local only**. There is no provider or plugin recovery
+hook: `reconcileDesign` (`src/main/design/recovery.ts`) runs once at
+startup, before any IPC handler is registered, and reads Custard's own files.
+It makes no provider network request, invokes no plugin tool and never
+resubmits (tested: the provider is a trap during reconciliation). Remote
+status checks stay in the user-started Check/tracking flow.
+
+- **Correlation id.** A stored OpenAI image records Custard's own job id in
+  `meta.json` (`job`). It is a local correlation id, not a provider
+  idempotency guarantee (OpenAI's Image API offers none here).
+- **Durability.** An entry is written whole in a staging folder (image and
+  meta fsynced), renamed into place, and the folder fsynced, before
+  `submit()` reports success.
+- **Linking.** A job saved as sent with no remote id is linked to its stored
+  image only if the entry's recorded job matches and the bytes still sniff as
+  the recorded image type (the same check made before storing). It is then
+  collected onto its version by the normal Check path (store limits, file
+  name checks, read-only files), so nothing bypasses artifact validation.
+- **Retention.** OpenAI images stay in `design/openai-images/<remoteId>` while
+  a job for them exists and its version is pending, matched by remote id or
+  by job id when the job was never linked. Startup prunes everything else.
+  A complete staging folder (`.staging-…`) left by a crash is finished on
+  restart; an incomplete one is never used and is removed once no job needs
+  that id. A version staging folder (`<version>.partial-…`) or an unrecorded
+  version folder is replaced by the next write for that pending version;
+  otherwise it goes when the chat is deleted.
+- **Unavoidable loss.** If Custard stops after OpenAI answered but before the
+  image reached disk, it can't be recovered: OpenAI keeps no copy. The job
+  stays unknown, and a repeat still asks with the duplicate-charge warning.
+- **Credentials.** Recovery records (`meta.json`, `jobs.json`) hold the job
+  id, model, MIME type, name and times: no API key (tested).
+- **Deletion.** A chat deleted while a submission or a result collection for
+  it is still running stays deleted: the tracker never saves a job of a chat
+  deleted during this run, and the outputs aren't rewritten (tests 6, 7).
+  At startup, jobs of a chat that no longer exists (a delete interrupted by a
+  crash) are forgotten with their outputs before anything is linked, and
+  their stored images are pruned (tests 7b, 8). A chat file that can't be
+  read counts as existing.

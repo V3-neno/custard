@@ -1,13 +1,13 @@
 import { app } from 'electron'
 import { join } from 'path'
-import type { Artifact, Job } from '../../../shared/design'
+import type { Artifact, Job, RemoteStatus } from '../../../shared/design'
 import { getApiKey } from '../../apiKey'
 import { openaiEndpoint } from '../../endpoints'
 import { getDesignSettings } from '../../store'
 import { registerProviders } from '../registry'
 import { chosenModel } from './chosen'
 import { OPENAI_IMAGES_ID } from './models'
-import { OpenAIImages, remoteIdFor } from './openai'
+import { OpenAIImages, remoteIdFor, sniffImage } from './openai'
 import { ResultStore } from './results'
 
 // Workstream B: the built-in OpenAI image provider, registered with
@@ -27,10 +27,28 @@ export function registerImages(): ResultStore {
   return results
 }
 
+// Startup, local only (stabilization 2.1, Amendment 2): the image stored on
+// this computer for a job that was being sent when Custard stopped, before
+// the job recorded it. Reads local files; no network, no plugin, no resend.
+export function localImageResult(
+  results: ResultStore
+): (job: Job) => { remoteId: string; status: RemoteStatus } | null {
+  return (job) => {
+    if (job.providerId !== OPENAI_IMAGES_ID) return null
+    const remoteId = remoteIdFor(job.idempotencyKey)
+    if (!results.recoverLocal(remoteId, job.id)) return null
+    // The same check submit() made before storing it: the bytes are the
+    // image type recorded, or the entry isn't used.
+    const stored = results.get(remoteId)
+    if (!stored || sniffImage(stored.file.bytes) !== stored.meta.mime) return null
+    return { remoteId, status: { state: 'completed' } }
+  }
+}
+
 // Drops stored images Design no longer needs. One is kept while a job for it
 // still exists and that job's version is still pending (its image hasn't been
 // written to the version yet). The job is matched by its recorded remote id
-// or, when Custard stopped before recording one, by its idempotency key, so
+// or, when Custard stopped before recording one, by the id derived from it, so
 // a paid image whose job wasn't linked yet is never pruned as an orphan.
 export function pruneImages(
   results: ResultStore,

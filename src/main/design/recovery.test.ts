@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -15,6 +16,8 @@ import type OpenAI from 'openai'
 import {
   defaultDesignSettings,
   type Job,
+  type MediaCapability,
+  type MediaProvider,
   type MediaRequest,
   type Version
 } from '../../shared/design'
@@ -23,7 +26,7 @@ import { ArtifactStore, JobStore } from './store'
 import { jobAction, type DesignService } from './tools'
 import { createArtifact } from './versions'
 import { reconcileDesign } from './recovery'
-import { pruneImages } from './images'
+import { localImageResult, pruneImages } from './images'
 import { DEFAULT_IMAGE_MODEL, OPENAI_IMAGES_ID } from './images/models'
 import { OpenAIImages, remoteIdFor } from './images/openai'
 import { ResultStore } from './images/results'
@@ -138,19 +141,30 @@ function start(
 
 // A fresh start from what is on disk: new stores, a new tracker, and the
 // same reconciliation the app runs. `chats` are the chats that still exist.
-async function restart(
+// Reconciliation must be local only, so during it the provider is a trap:
+// any use of it (status, result, submit, cancel) is recorded as external.
+function restart(
   w: World,
   chats: string[] = [CHAT]
-): Promise<{ s: DesignService; r: Awaited<ReturnType<typeof reconcileDesign>> }> {
+): { s: DesignService; r: ReturnType<typeof reconcileDesign>; external: string[] } {
   const results = new ResultStore(join(root, 'design', 'openai-images'))
   const artifacts = new ArtifactStore(join(root, 'design'))
   const store = new JobStore(join(root, 'design', 'jobs.json'))
+  const external: string[] = []
+  let reconciling = true
+  const before = w.calls.length
   const jobs = new JobTracker(
-    { provider: () => w.provider, save: (j) => store.save(j) },
+    {
+      provider: () => {
+        if (reconciling) external.push('provider looked up')
+        return w.provider
+      },
+      save: (j) => store.save(j)
+    },
     store.load()
   )
   const s = { ...w.service(jobs), artifacts }
-  const r = await reconcileDesign({
+  const r = reconcileDesign({
     jobs,
     chatExists: (c) => chats.includes(c),
     forgetChat: (c) => {
@@ -158,9 +172,12 @@ async function restart(
       jobs.forgetChat(c)
       store.deleteChat(c)
     },
+    localResult: localImageResult(results),
     prune: () => pruneImages(results, jobs.list(), (c, a) => artifacts.get(c, a))
   })
-  return { s, r }
+  reconciling = false
+  if (w.calls.length !== before) external.push('OpenAI called')
+  return { s, r, external }
 }
 
 const version = (s: DesignService, artifactId: string, versionId: string): Version | undefined =>
@@ -170,7 +187,8 @@ describe('2.1 crash points during a paid image request', () => {
   it('1. before submission: nothing was sent, nothing is sent on restart', async () => {
     const w = world()
     const { job } = start(w)
-    const { s, r } = await restart(w)
+    const { s, r, external } = restart(w)
+    expect(external).toEqual([])
     expect(s.jobs.get(job.id)?.state).toBe('not-submitted')
     expect(r.recovered).toEqual([])
     expect(w.calls).toHaveLength(0)
@@ -189,7 +207,8 @@ describe('2.1 crash points during a paid image request', () => {
     await new Promise((r) => setTimeout(r, 0))
     // Custard stops here: attemptedAt was saved before sending.
     expect(w.store.load()[0].attemptedAt).toBeDefined()
-    const { s, r } = await restart(w)
+    const { s, r, external } = restart(w)
+    expect(external).toEqual([])
     release()
     await sending.catch(() => {})
     expect(s.jobs.get(job.id)?.state).toBe('unknown')
@@ -207,7 +226,8 @@ describe('2.1 crash points during a paid image request', () => {
     const { jobs, job } = start(w)
     const after = await jobs.submit(job.id)
     expect(after.state).toBe('unknown')
-    const { s, r } = await restart(w)
+    const { s, r, external } = restart(w)
+    expect(external).toEqual([])
     const j = s.jobs.get(job.id)!
     expect(j.state).toBe('unknown')
     expect(r.recovered).toEqual([])
@@ -230,7 +250,8 @@ describe('2.1 crash points during a paid image request', () => {
     expect(saved.remoteId).toBeUndefined()
     expect(w.results.ids()).toEqual([remoteIdFor(job.id)])
 
-    const { s, r } = await restart(w)
+    const { s, r, external } = restart(w)
+    expect(external).toEqual([])
     expect(r.pruned).toEqual([])
     expect(r.recovered.map((x) => x.id)).toEqual([job.id])
     expect(s.jobs.get(job.id)).toMatchObject({ state: 'completed', remoteId: remoteIdFor(job.id) })
@@ -243,7 +264,7 @@ describe('2.1 crash points during a paid image request', () => {
     expect(version(s, artifactId, versionId)?.status).toBe('succeeded')
     expect(w.calls).toHaveLength(1)
     // Stored on its version, so the next start tidies the copy away.
-    const again = await restart(w)
+    const again = restart(w)
     expect(again.r.pruned).toEqual([remoteIdFor(job.id)])
   })
 
@@ -257,7 +278,8 @@ describe('2.1 crash points during a paid image request', () => {
       join(dir, remoteIdFor(job.id)),
       join(dir, `.staging-${remoteIdFor(job.id)}-0123456789ab`)
     )
-    const { s } = await restart(w)
+    const { s, external } = restart(w)
+    expect(external).toEqual([])
     expect(s.jobs.get(job.id)?.state).toBe('completed')
     expect(readdirSync(dir)).toEqual([remoteIdFor(job.id)])
   })
@@ -271,7 +293,8 @@ describe('2.1 crash points during a paid image request', () => {
     const half = join(dir, `.staging-${remoteIdFor(job.id)}-0123456789ab`)
     mkdirSync(half)
     writeFileSync(join(half, 'image'), PNG.slice(0, 4))
-    const { s } = await restart(w)
+    const { s, external } = restart(w)
+    expect(external).toEqual([])
     expect(s.jobs.get(job.id)?.state).toBe('unknown')
   })
 
@@ -282,7 +305,8 @@ describe('2.1 crash points during a paid image request', () => {
     const { jobs, job, artifactId, versionId } = start(w)
     await jobs.submit(job.id)
     expect(w.store.load()[0]).toMatchObject({ state: 'completed' })
-    const { s, r } = await restart(w)
+    const { s, r, external } = restart(w)
+    expect(external).toEqual([])
     expect(r.pruned).toEqual([])
     expect(version(s, artifactId, versionId)?.status).toBe('pending')
     await jobAction(s, CHAT, 'check', job.id)
@@ -302,7 +326,8 @@ describe('2.1 crash points during a paid image request', () => {
       bytes: f.bytes
     }))
     w.artifacts.writeFiles(CHAT, artifactId, versionId, files)
-    const { s } = await restart(w)
+    const { s, external } = restart(w)
+    expect(external).toEqual([])
     await jobAction(s, CHAT, 'check', job.id)
     expect(version(s, artifactId, versionId)?.status).toBe('succeeded')
     expect(s.artifacts.read(CHAT, artifactId, versionId, 'image.png')).toEqual(Buffer.from(PNG))
@@ -316,7 +341,8 @@ describe('2.1 reconciliation rules', () => {
     const { jobs, job } = start(w, (j) => !!j.remoteId)
     await expect(jobs.submit(job.id)).rejects.toBeInstanceOf(Crash)
     // The chat was deleted, then Custard stopped before its Design data went.
-    const { s, r } = await restart(w, [])
+    const { s, r, external } = restart(w, [])
+    expect(external).toEqual([])
     expect(r.forgotten).toEqual([CHAT])
     expect(r.recovered).toEqual([])
     expect(s.jobs.list()).toEqual([])
@@ -328,8 +354,9 @@ describe('2.1 reconciliation rules', () => {
   it('a chat that cannot be read is kept', async () => {
     const w = world()
     start(w)
-    const r = await reconcileDesign({
+    const r = reconcileDesign({
       jobs: new JobTracker({ provider: () => w.provider, save: () => {} }, w.store.load()),
+      localResult: () => null,
       chatExists: () => {
         throw new Error('unreadable')
       },
@@ -344,21 +371,22 @@ describe('2.1 reconciliation rules', () => {
     const w = world()
     const { jobs, job } = start(w, (j) => !!j.remoteId)
     await expect(jobs.submit(job.id)).rejects.toBeInstanceOf(Crash)
-    await restart(w)
+    restart(w)
     const meta = readFileSync(
       join(root, 'design', 'openai-images', remoteIdFor(job.id), 'meta.json'),
       'utf8'
     )
-    expect(JSON.parse(meta)).toMatchObject({ key: job.id, mime: 'image/png' })
+    expect(JSON.parse(meta)).toMatchObject({ job: job.id, mime: 'image/png' })
     for (const f of [meta, readFileSync(join(root, 'design', 'jobs.json'), 'utf8')])
       expect(f).not.toContain(KEY)
   })
 
-  it('recover() never sends and only touches unknown, unlinked jobs', async () => {
+  it('reconciliation never sends and only touches unknown, unlinked jobs', async () => {
     const w = world()
     const { jobs, job } = start(w)
     await jobs.submit(job.id)
-    const { r } = await restart(w)
+    const { r, external } = restart(w)
+    expect(external).toEqual([])
     expect(r.recovered).toEqual([])
     expect(w.calls).toHaveLength(1)
   })
@@ -372,7 +400,177 @@ describe('2.1 reconciliation rules', () => {
       1,
       'other'
     )
-    expect(w.results.recover(remoteIdFor('a'), 'a')).toBe(false)
-    expect(w.results.recover(remoteIdFor('a'), 'other')).toBe(true)
+    expect(w.results.recoverLocal(remoteIdFor('a'), 'a')).toBe(false)
+    expect(w.results.recoverLocal(remoteIdFor('a'), 'other')).toBe(true)
+  })
+})
+
+// A provider whose submit and result wait until released, so a chat can be
+// deleted while a call for it is still running.
+function slowProvider(): {
+  p: MediaProvider
+  submitted: () => void
+  resulted: () => void
+  calls: string[]
+} {
+  const calls: string[] = []
+  let submitted!: () => void
+  let resulted!: () => void
+  const p: MediaProvider = {
+    info: () => ({
+      id: 'slow',
+      name: 'Slow',
+      source: { kind: 'image-provider', provider: 'test', model: 'm' },
+      state: 'ready',
+      capabilities: [
+        {
+          operation: 'image.generate',
+          outputs: ['image/png'],
+          maxReferences: 0,
+          referenceTypes: [],
+          idempotency: false,
+          cancel: false,
+          maxPrompt: 1000
+        } as unknown as MediaCapability
+      ]
+    }),
+    submit: () => {
+      calls.push('submit')
+      return new Promise((r) => {
+        submitted = () => r({ remoteId: 'r1', status: { state: 'completed' } })
+      })
+    },
+    status: async () => {
+      calls.push('status')
+      return { state: 'completed' }
+    },
+    result: () => {
+      calls.push('result')
+      return new Promise((r) => {
+        resulted = () => r([{ name: 'image.png', mime: 'image/png', bytes: PNG }])
+      })
+    }
+  }
+  return { p, submitted: () => submitted(), resulted: () => resulted(), calls }
+}
+
+describe('2.1 deletion while work is running, and after', () => {
+  // The app's delete: the chat's outputs, then its jobs (index.ts).
+  const deleteChat = (artifacts: ArtifactStore, jobs: JobTracker, store: JobStore): void => {
+    artifacts.deleteChat(CHAT)
+    jobs.forgetChat(CHAT)
+    store.deleteChat(CHAT)
+  }
+
+  function setup(p: MediaProvider): {
+    jobs: JobTracker
+    store: JobStore
+    artifacts: ArtifactStore
+    job: Job
+  } {
+    const artifacts = new ArtifactStore(join(root, 'design'))
+    const store = new JobStore(join(root, 'design', 'jobs.json'))
+    const { artifact, version } = createArtifact({
+      conversationId: CHAT,
+      name: 'Kettle',
+      kind: 'image',
+      source: p.info().source,
+      skills: []
+    })
+    artifacts.save(artifact)
+    const jobs = new JobTracker({ provider: () => p, save: (j) => store.save(j) })
+    const job = jobs.create({
+      providerId: 'slow',
+      request: gen,
+      requestedBy: { conversationId: CHAT, messageIndex: 0 },
+      target: { artifactId: artifact.id, versionId: version.id }
+    })
+    return { jobs, store, artifacts, job }
+  }
+
+  it('6. chat deleted during submission: the late answer brings nothing back', async () => {
+    // (The app also refuses to delete a chat while it is answering, which is
+    // when design_media submits; this is the tracker's own guarantee.)
+    const slow = slowProvider()
+    const { jobs, store, artifacts, job } = setup(slow.p)
+    const sending = jobs.submit(job.id)
+    await new Promise((r) => setTimeout(r, 0))
+    deleteChat(artifacts, jobs, store)
+    slow.submitted()
+    await sending
+    expect(jobs.list()).toEqual([])
+    expect(store.load()).toEqual([])
+    expect(existsSync(join(root, 'design', CHAT))).toBe(false)
+  })
+
+  it('7. chat deleted while a result is being collected: nothing comes back', async () => {
+    const slow = slowProvider()
+    const { jobs, store, artifacts, job } = setup(slow.p)
+    const s: DesignService = {
+      artifacts,
+      jobs,
+      providers: () => [slow.p],
+      settings: () => defaultDesignSettings,
+      failures: [],
+      emit: () => {}
+    }
+    const sending = jobs.submit(job.id)
+    await new Promise((r) => setTimeout(r, 0))
+    slow.submitted()
+    await sending
+    const collecting = jobAction(s, CHAT, 'check', job.id)
+    await new Promise((r) => setTimeout(r, 0))
+    deleteChat(artifacts, jobs, store)
+    slow.resulted()
+    await collecting
+    expect(jobs.list()).toEqual([])
+    expect(store.load()).toEqual([])
+    expect(existsSync(join(root, 'design', CHAT))).toBe(false)
+  })
+
+  it('7b. chat deleted after an unlinked image was stored: the restart does not recover it', () => {
+    // Recovery itself runs before anything else at startup, so a delete
+    // can't interleave with it; a delete that was interrupted is finished
+    // first (reconcileDesign step 1).
+    const w = world()
+    const { jobs, job } = start(w, (j) => !!j.remoteId)
+    return expect(jobs.submit(job.id))
+      .rejects.toBeInstanceOf(Crash)
+      .then(() => {
+        const { s, r, external } = restart(w, [])
+        expect(external).toEqual([])
+        expect(r.recovered).toEqual([])
+        expect(s.jobs.list()).toEqual([])
+        expect(w.results.ids()).toEqual([])
+      })
+  })
+
+  it('8. restart after a completed, intentional deletion: nothing is resurrected', async () => {
+    const w = world()
+    const { jobs, job, artifactId } = start(w, (j) => !!j.remoteId)
+    await expect(jobs.submit(job.id)).rejects.toBeInstanceOf(Crash)
+    // Deleted in full while running (outputs and job records). The stored
+    // OpenAI copy isn't part of a chat's folder, so it is still on disk.
+    w.artifacts.deleteChat(CHAT)
+    w.store.deleteChat(CHAT)
+    expect(w.results.ids()).toEqual([remoteIdFor(job.id)])
+    const { s, r, external } = restart(w)
+    expect(external).toEqual([])
+    expect(r.recovered).toEqual([])
+    expect(s.jobs.list()).toEqual([])
+    expect(s.artifacts.get(CHAT, artifactId)).toBeNull()
+    expect(w.results.ids()).toEqual([])
+  })
+
+  it('a stored image that no longer matches its recorded type is not recovered', async () => {
+    const w = world()
+    const { jobs, job } = start(w, (j) => !!j.remoteId)
+    await expect(jobs.submit(job.id)).rejects.toBeInstanceOf(Crash)
+    const img = join(root, 'design', 'openai-images', remoteIdFor(job.id), 'image')
+    chmodSync(img, 0o600)
+    writeFileSync(img, 'not an image')
+    const { s, external } = restart(w)
+    expect(external).toEqual([])
+    expect(s.jobs.get(job.id)?.state).toBe('unknown')
   })
 })

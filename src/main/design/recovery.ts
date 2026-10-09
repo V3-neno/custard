@@ -1,4 +1,4 @@
-import type { Job } from '../../shared/design'
+import type { Job, RemoteStatus } from '../../shared/design'
 import type { JobTracker } from './jobs'
 
 // Startup reconciliation (stabilization 2.1). Runs once, after providers are
@@ -8,8 +8,9 @@ import type { JobTracker } from './jobs'
 //    outputs and job records (index.ts, conversations:delete); if Custard
 //    stopped in between, the jobs of a chat that no longer exists are
 //    forgotten now, so nothing below can bring them back.
-// 2. Link results stored locally before Custard stopped (JobTracker.recover).
-//    Lookups only: nothing is sent, retried or charged.
+// 2. Link results Custard itself stored before it stopped
+//    (JobTracker.reconcileLocal with a local-file lookup). No provider
+//    network request, no plugin tool, no resubmission.
 // 3. Tidy stored results Design no longer needs (images/index.ts), which
 //    keeps anything a surviving job may still need, linked or not.
 //
@@ -17,16 +18,20 @@ import type { JobTracker } from './jobs'
 // here by mistake.
 
 export type ReconcileDeps = {
-  jobs: Pick<JobTracker, 'list' | 'recover'>
+  jobs: Pick<JobTracker, 'list' | 'reconcileLocal'>
+  // Custard's own stored result for a job, read from local files only.
+  localResult: (job: Job) => { remoteId: string; status: RemoteStatus } | null
   chatExists: (conversationId: string) => boolean
   // The full deletion of a chat's Design data (designChatDeleted).
   forgetChat: (conversationId: string) => void
   prune?: () => string[]
 }
 
-export async function reconcileDesign(
-  d: ReconcileDeps
-): Promise<{ forgotten: string[]; recovered: Job[]; pruned: string[] }> {
+export function reconcileDesign(d: ReconcileDeps): {
+  forgotten: string[]
+  recovered: Job[]
+  pruned: string[]
+} {
   const forgotten: string[] = []
   for (const chat of new Set(d.jobs.list().map((j) => j.requestedBy.conversationId))) {
     let exists = true
@@ -39,7 +44,7 @@ export async function reconcileDesign(
     d.forgetChat(chat)
     forgotten.push(chat)
   }
-  const recovered = await d.jobs.recover()
+  const recovered = d.jobs.reconcileLocal(d.localResult)
   const pruned = d.prune?.() ?? []
   return { forgotten, recovered, pruned }
 }

@@ -203,10 +203,6 @@ export interface MediaProvider {
   // Resolves 'cancelled' only when the provider confirms it.
   cancel?(remoteId: string): Promise<'cancelled' | 'not-cancelled'>
   result(remoteId: string, signal?: AbortSignal): Promise<MediaFile[]>
-  // After a restart, for a job saved as sent but with no remote id: the job
-  // the provider knows by this idempotency key, or null. Must never submit,
-  // retry or charge anything; Custard calls it on its own at startup.
-  recover?(idempotencyKey: string): Promise<{ remoteId: string; status: RemoteStatus } | null>
 }
 
 // ---------------------------------------------------------------- jobs

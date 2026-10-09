@@ -33,7 +33,8 @@ import type { MediaFile } from '../../../shared/design'
 const REMOTE_ID = /^oai-img-[A-Za-z0-9_-]{1,64}$/
 const STAGING = /^\.staging-(oai-img-[A-Za-z0-9_-]{1,64})-[0-9a-f]{12}$/
 
-// `key` is the job's idempotency key (its id), so a stored image can be
+// `job` is Custard's own local job id (a correlation id, not an OpenAI
+// idempotency guarantee: OpenAI offers none here), so a stored image can be
 // matched to its job even when the job never recorded a remote id. Entries
 // written before it was added have none.
 export type StoredMeta = {
@@ -41,7 +42,7 @@ export type StoredMeta = {
   mime: string
   name: string
   createdAt: number
-  key?: string
+  job?: string
 }
 
 function syncDir(dir: string): void {
@@ -76,7 +77,7 @@ export class ResultStore {
   }
 
   // Writes the whole entry in a staging folder, then renames it into place.
-  put(remoteId: string, file: MediaFile, model: string, now = Date.now(), key?: string): void {
+  put(remoteId: string, file: MediaFile, model: string, now = Date.now(), job?: string): void {
     const dir = this.dir(remoteId)
     if (existsSync(dir)) throw new Error('This image is already stored.')
     mkdirSync(this.root, { recursive: true, mode: 0o700 })
@@ -100,7 +101,7 @@ export class ResultStore {
         mime: file.mime,
         name: file.name,
         createdAt: now,
-        ...(key ? { key } : {})
+        ...(job ? { job } : {})
       }
       write('meta.json', JSON.stringify(meta))
       syncDir(staging)
@@ -125,10 +126,10 @@ export class ResultStore {
   }
 
   // After a restart: is a complete image stored for this id (and, when the
-  // entry records one, this job key)? A complete staging folder left by a
-  // crash just before its rename is moved into place first. Reads and
-  // renames local files only.
-  recover(remoteId: string, key?: string): boolean {
+  // entry records one, this job)? A complete staging folder left by a crash
+  // just before its rename is moved into place first. Reads and renames
+  // local files only; never contacts a provider.
+  recoverLocal(remoteId: string, job?: string): boolean {
     this.dir(remoteId)
     if (!this.has(remoteId)) {
       for (const s of this.staging()) {
@@ -146,7 +147,7 @@ export class ResultStore {
     }
     const r = this.get(remoteId)
     if (!r) return false
-    return !key || !r.meta.key || r.meta.key === key
+    return !job || !r.meta.job || r.meta.job === job
   }
 
   remove(remoteId: string): void {

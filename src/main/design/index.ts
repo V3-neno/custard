@@ -21,7 +21,7 @@ import { mediaProvider, mediaProviders } from './registry'
 import { ArtifactStore, JobStore } from './store'
 import { jobAction, type DesignService } from './tools'
 import { registerHtml } from './html'
-import { pruneImages, registerImages } from './images'
+import { localImageResult, pruneImages, registerImages } from './images'
 import { reconcileDesign } from './recovery'
 import { registerPluginMedia } from './plugin-media'
 
@@ -106,20 +106,22 @@ export function registerDesignHandlers(): void {
   registerHtml()
   const images = registerImages()
   registerPluginMedia()
-  // Startup reconciliation (recovery.ts): interrupted chat deletions, then
-  // results stored before Custard stopped, then tidying. Local only.
+  // Startup reconciliation (recovery.ts), before any handler can run:
+  // interrupted chat deletions, then results Custard stored before it
+  // stopped, then tidying. Local files only: no provider request, no plugin
+  // tool, no resubmission.
   const s = design()
-  void reconcileDesign({
-    jobs: s.jobs,
-    chatExists: (chat) => getConversation(chat) !== null,
-    forgetChat: designChatDeleted,
-    prune: () => pruneImages(images, s.jobs.list(), (c, a) => s.artifacts.get(c, a))
-  })
-    .then((r) => {
-      for (const job of r.recovered)
-        s.emit({ type: 'job', conversationId: job.requestedBy.conversationId, job })
+  try {
+    reconcileDesign({
+      jobs: s.jobs,
+      chatExists: (chat) => getConversation(chat) !== null,
+      forgetChat: designChatDeleted,
+      localResult: localImageResult(images),
+      prune: () => pruneImages(images, s.jobs.list(), (c, a) => s.artifacts.get(c, a))
     })
-    .catch((err) => console.error('Design: startup reconciliation failed:', err))
+  } catch (err) {
+    console.error('Design: startup reconciliation failed:', err)
+  }
   handle('design:subscribe', (e) => {
     listeners.add(e.sender)
     e.sender.once('destroyed', () => listeners.delete(e.sender))

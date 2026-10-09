@@ -2,15 +2,17 @@
 
 From `claude/stab-2-persistence` (stabilization 2.1–2.3).
 
-1. **`src/shared/design.ts` (done on this branch, agreed interface §3.2).**
-   Added `MediaProvider.recover?(idempotencyKey)` exactly as the plan's
-   shared interface states, with a comment that it must never submit, retry
-   or charge. Nothing else in the file changed.
-2. **`src/main/design/images/openai.ts` (done on this branch).** Besides the
-   `results.put` call (which now passes the idempotency key), a small
-   `recover()` method was added at the end of the class, just above
-   `status()`. It only reads local files. Thread 3 owns the rest of the file;
-   expect a trivial merge.
+1. **Amendment 2: no shared interface change.** The earlier
+   `MediaProvider.recover?` hook is removed; `src/shared/design.ts` is
+   untouched on this branch. Recovery is local: `JobTracker.reconcileLocal(find)`
+   takes a local-file lookup (`images/index.ts localImageResult`), wired in
+   `design/index.ts` before any handler is registered.
+2. **`src/main/design/images/openai.ts`:** only the `results.put` call
+   changed (it passes the job id for local correlation). Nothing else.
+   **`src/main/design/jobs.ts` `put()` (integration-owned lines):** a job of a
+   chat deleted during this run is never saved again (`deletedChats`, filled
+   by `forgetChat`). Without it a submission or collection finishing after a
+   delete wrote the job back (tests 6 and 7 fail without it).
 3. **`src/main/design/images/index.ts` (owned).** `registerImages()` now
    returns the `ResultStore` and no longer prunes; pruning moved to
    `pruneImages()`, called from startup reconciliation in `design/index.ts`
