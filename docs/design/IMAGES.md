@@ -159,9 +159,10 @@ Nothing is switched automatically: with no provider chosen, Design says so.
 
 ## Skill guidance (for the image skill)
 
-The proposed skill is in [IMAGE-SKILL-PROPOSAL.md](IMAGE-SKILL-PROPOSAL.md),
-for Neno's review. It is not created or installed, and Design doesn't depend
-on it.
+An example image skill is published in
+[IMAGE-SKILL-PROPOSAL.md](IMAGE-SKILL-PROPOSAL.md) for users to create
+themselves if they want it. Custard doesn't ship it, and Design doesn't
+depend on it.
 
 ## Tests
 
