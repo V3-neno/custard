@@ -8,7 +8,7 @@ import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
 import { memory, registerMemoryHandlers } from './memory'
-import { handle } from './ipc'
+import { allowOnlyAppPage, handle } from './ipc'
 import { sameAppPage } from './appPage'
 import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
 import { isPluginContents } from './plugins/runtime'
@@ -78,6 +78,7 @@ function createWindow(): void {
   const stay = (e: { url: string; preventDefault: () => void }): void => {
     if (!isAppPage(e.url)) e.preventDefault()
   }
+  allowOnlyAppPage(appUrl)
   mainWindow.webContents.on('will-navigate', stay)
   mainWindow.webContents.on('will-redirect', stay)
 
