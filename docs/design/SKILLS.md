@@ -59,7 +59,7 @@ focus, and offers a changed skill ("Use the updated skill") or the
 explicit override ("Without this skill") by filling in the message box,
 never by sending or restyling. Details: [WORKSPACE.md](WORKSPACE.md#skills).
 
-## Example skills
+## Starter skills for Design
 
-- [Image making](IMAGE-SKILL-PROPOSAL.md): an optional skill for generated
-  images in Design. It isn't shipped; create it in your vault if you want it.
+- [Image making](IMAGE-SKILL-PROPOSAL.md) (`Custard/Skills/image-making`):
+  generated images in Design. Ships in the starter vault.

@@ -1,21 +1,22 @@
-# Example image skill (create it yourself if you want it)
+# Image skill (starter vault)
 
-An optional skill for making images in Design. **Custard doesn't ship it:**
-it isn't in the app or the starter vault, and Design works the same without
-it (the approval card, the job rules and the no-resend rule are enforced in
-code). Skills can't grant permissions ([SKILLS.md](SKILLS.md#permissions)),
-so this one can't either.
+A skill for making images in Design. It ships in the starter vault at
+`vault-template/Custard/Skills/image-making/SKILL.md`: new starter vaults
+get it, and an existing vault gets it when the user chooses to add the
+missing starter skills in Settings (nothing is overwritten). Design works the same without it (the approval card, the
+job rules and the no-resend rule are enforced in code). Skills can't grant
+permissions ([SKILLS.md](SKILLS.md#permissions)), so this one can't either.
 
-Neno reviewed it on 2026-10-09 and decided to publish it as an example for
-users to read, rather than bundle it.
+Neno reviewed it on 2026-10-09, first publishing it as an example, then
+choosing the starter vault the same day. The copy in `vault-template` is
+the source; the contents below match it.
 
 ## Using it
 
-1. Read it, and change anything you'd do differently.
-2. In your vault, create `Custard/Skills/image-making/SKILL.md` and paste the
-   file contents below into it. Or open the **Skills** mode and ask Custard
-   to create it from this page.
-3. Delete the folder to stop using it.
+- It applies in Design mode only (`modes: design`).
+- Edit it in your vault like any note; Custard never overwrites it.
+- Delete the folder to stop using it. Adding the missing starter skills
+  in Settings again would bring it back.
 
 ## What can go stale
 
