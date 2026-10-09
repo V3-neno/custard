@@ -53,6 +53,28 @@ is built against (Phase 2); none of it is implemented yet.
 - An infinite loop is contained and reported; the app stays responsive.
 - Nothing from a preview persists after it closes.
 
+## Tests (Workstream D)
+
+`test/e2e/design-security.mjs` with `test/e2e/mocks/d-security.mjs`, on top
+of A's probe in `design-workspace.mjs`. Linux, xvfb, mock model, 2026-10-09,
+against A's preview at ac9a4a2.
+
+| Check | Result |
+| --- | --- |
+| Own top frame, no opener | Pass |
+| https to a LAN address and to 127.0.0.1, `file:`, `custard-media:` | Refused |
+| `%2e%2e`, `..%2f` and `..%5c` paths through the preview origin | 404 (only recorded files are served) |
+| EventSource, `import()`, a blob worker's fetch, CSS `@import` and `@font-face` | Refused; nothing reached the mock server |
+| `navigator.clipboard.writeText`, `requestFullscreen` | Refused; clipboard and window unchanged |
+| `postMessage` from the page and a nested frame | Nothing reached the app window |
+| An `obsidian://` link click, `location = 'spotify:…'`, a `data:` navigation, `location =` to the mock server | No navigation; `shell.openExternal` never called |
+| Storage and cookies between the hidden check run and the visible preview | Not shared |
+| localStorage and IndexedDB between two previews | Not shared; one preview alive at a time |
+| **`window.print()`** | **Fails at ac9a4a2:** opens the system print dialog (GTK under xvfb), freezes the preview and wedged the app's shutdown. With `sandbox allow-scripts allow-same-origin` added to `PREVIEW_CSP` (no `allow-modals`), print is refused, and this suite (34 checks) and A's (67) pass. Sent to A. |
+
+Not tested: WebRTC (UDP isn't visible to the mock server), drag and drop out
+of the preview, and anything on Windows or macOS.
+
 ## Remaining risks
 
 - A Chromium sandbox escape would be a browser bug outside Custard's control;

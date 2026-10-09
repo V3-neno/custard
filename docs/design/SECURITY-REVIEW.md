@@ -11,7 +11,7 @@ macOS or against a live provider.
 | D1 | Plugin `open:` permission | **Gap.** Chat and Design can reach protected locations and local tools through an approved custom-scheme link. Fix needs Neno's decision. |
 | D2 | Tool routes in Chat and Design | Enforced in code, except D1 and the residual network route below. |
 | D3 | Link-swap race (`src/main/fsafe`) | Helper built and tested on Linux. Narrowed, not closed; residual risk below. Callers not switched yet. |
-| D4 | HTML preview sandbox | Waiting for Workstream A's branch. |
+| D4 | HTML preview sandbox | Tested against A at ac9a4a2: contained, except `window.print()` (opens the OS print dialog). One-line CSP fix sent to A. Results in `SANDBOX.md`. |
 | D5 | Reliability and privacy flows | Waiting for A, B and C. |
 
 ## D1: plugin "open links on this computer" (`open:`)
