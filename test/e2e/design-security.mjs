@@ -10,7 +10,7 @@
 //   xvfb-run -a node test/e2e/design-security.mjs <out> <screenshot dir>
 // Linux only as written. Needs the playwright package.
 import { _electron as electron } from 'playwright'
-import { createRequire } from 'module'
+import { appLaunch } from '../platform/launch.mjs'
 import fs from 'fs'
 import http from 'http'
 
@@ -62,8 +62,8 @@ let w
 let proc
 async function launch(cfg = CFG, extra = {}) {
   app = await electron.launch({
-    executablePath: createRequire(import.meta.url)('electron'),
-    args: [...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), '--password-store=basic', '.'],
+    // CUSTARD_EXE runs the same checks against a packaged build (test/platform/README.md).
+    ...appLaunch(),
     env: {
       ...process.env,
       ANTHROPIC_BASE_URL: 'http://127.0.0.1:8899',
@@ -73,6 +73,11 @@ async function launch(cfg = CFG, extra = {}) {
     }
   })
   proc = app.process()
+  if (process.env.CUSTARD_EXE)
+    check(
+      !(await app.evaluate(({ app }) => app.commandLine.hasSwitch('no-sandbox'))),
+      'packaged build running with the Chromium sandbox on'
+    )
   await app.evaluate(
     ({ safeStorage, dialog, shell, clipboard }, { vault }) => {
       safeStorage.setUsePlainTextEncryption?.(true)

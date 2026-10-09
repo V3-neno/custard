@@ -1,0 +1,61 @@
+# Native platform checklist (stabilization 4.2)
+
+No Windows or macOS machine was available to this batch, so **every native
+Windows and macOS result is unverified**. This is what to run there, and
+what each check should show. Record the machine, OS build, display scaling,
+Custard commit and Electron version with the results.
+
+Linux results (packaged, sandbox on) are in `docs/design/SANDBOX.md`.
+
+## Before you start (both)
+
+1. `npm ci`, then `npm i --no-save playwright`.
+2. Build the installer or unpacked app: `npm run build:win` (Windows) or
+   `npm run build:mac` (macOS), and install or open it from `dist/`.
+3. Use a fresh profile: quit Custard, rename its app-data folder
+   (`%APPDATA%\custard` on Windows, `~/Library/Application Support/custard`
+   on macOS).
+4. Use a throwaway vault folder and a throwaway output folder.
+5. No API key is needed for checks marked **no key**. Checks needing a model
+   use the mock: in a development checkout (`npm run dev` is not the packaged
+   build), set `ANTHROPIC_BASE_URL=http://127.0.0.1:8899` and run
+   `node test/e2e/interrupt-mock.mjs <out>`. Packaged builds ignore that
+   variable on purpose.
+
+## A. Scripted (Windows)
+
+| # | Run | Expect |
+| --- | --- | --- |
+| A1 | `npx vitest run --config test/platform/vitest.platform.config.ts` in a normal (non-admin) terminal | All pass. Copy the `[4.2]` lines it prints into the results. A failing case is a finding: report it, don't loosen it. |
+| A2 | The same in a terminal with Developer Mode on | The file-symlink case runs instead of skipping, and passes. |
+| A3 | `npx vitest run src/main/fsafe` | Linux-written tests; record which fail on Windows (symlink creation needs Developer Mode). |
+
+## B. Manual, packaged app (Windows; macOS where it says so)
+
+| # | Area | Steps | Expect |
+| --- | --- | --- | --- |
+| B1 | Sandbox | Open Task Manager → Details, add the "Command line" column. Make an HTML output in Design. | The preview's renderer has no `--no-sandbox`. Process Explorer shows it at Low/Untrusted integrity (AppContainer/restricted token). The main window renderer is expected to be unsandboxed today (`sandbox: false`). macOS: `ps -o command` shows no `--no-sandbox` for the preview. |
+| B2 | Export, new file | Export a version to an empty folder. | Files appear; Custard reports where. |
+| B3 | Export, replace | Export again to the same folder; accept the overwrite prompt. | Files replaced; no `.tmp` files left. Declining leaves the old files. |
+| B4 | Export through a junction | `mklink /J C:\tmp\out-link C:\Users\<you>\AppData\Roaming\custard`, then export to `C:\tmp\out-link`. | Refused (Custard's own data is protected), nothing written there. |
+| B5 | Export, new folder | Export into a folder path that doesn't exist yet. | Created; or a clear refusal. Record which. |
+| B6 | Vault note through a junction | In the vault, `mklink /J <vault>\Linked <vault>\Custard\Skills`. Ask Chat to create a note in `Linked`. | Refused: skill files can't be written from Chat. |
+| B7 | Long and odd names | Ask for a note named `CON`, `a.md.`, `a.md:x`, and one with 250 characters. | Each refused or written as a plain file in the vault; never a device, a stream, or a second name for an existing file. |
+| B8 | Scheme handler | With Spotify installed and the Spotify plugin active, use a write tool that opens a `spotify:` link. Then paste an `obsidian://` link into an HTML output and click it. | `spotify:` opens Spotify after the approval card. `obsidian://` does nothing. No other app opens. |
+| B9 | Scheme from a preview | In an HTML output: `<a href="ms-settings:">`, `<a href="file:///C:/">`, `location='calculator:'`. Click each. | Nothing opens. |
+| B10 | HiDPI preview position | Set display scaling to 150 %, then 125 %, then move the window to a monitor with different scaling. Open a preview; resize the window; toggle device widths. | The preview stays inside its frame at every step: no offset, no overlap of the app's own controls, no gap. Screenshot each. macOS: same on a Retina display and an external 1x display. |
+| B11 | Image | Generate or attach a large image (e.g. 4000 px PNG). Open it in the workspace, zoom, switch versions. | Renders sharply; the app stays responsive. |
+| B12 | Video | Play the slowmo fixture video, and a real 30 MB MP4/WebM if available. | Plays with sound muted by default; seeking works; no codec error. Record which formats fail (Electron ships proprietary codecs only in some builds). |
+| B13 | Restart persistence | Make an output with three versions, an image and a video; quit; reopen. | Everything is there, the last version selected, previews reload. Quit with Task Manager → End task during a generation: on reopen the job shows its true state and nothing is sent again. |
+| B14 | Keyboard | Tab from the composer into a preview, through it, then press F6. | F6 returns focus to the app. Record what Narrator reads for the preview. |
+| B15 | Drag out | Drag an image and a link from a preview onto the desktop and into the composer. | Nothing is created on the desktop; nothing is attached or sent. Record what happens. |
+| B16 | Downloads and print | In an HTML output: `<a download href="data:text/plain,x">`, `window.print()`. | No file saved, no print dialog. |
+| B17 | Plugin activation | Activate the Spotify plugin in the installed app. | It builds and activates (needs the esbuild fix in this batch; before it, activation failed in packaged builds with `spawn ENOTDIR`). |
+
+## C. macOS only
+
+| # | Steps | Expect |
+| --- | --- | --- |
+| C1 | `codesign -dv --entitlements - /Applications/Custard.app` | Record entitlements (unsigned dev builds have none). |
+| C2 | B4–B7 with `ln -s` symlinks instead of junctions | Same expectations. |
+| C3 | Gatekeeper first launch | Record the prompt; notarization is off in `electron-builder.yml`. |
