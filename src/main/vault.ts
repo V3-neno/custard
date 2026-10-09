@@ -7,6 +7,7 @@ import { MEMORY_NOTE } from '../shared/vault'
 import { modes, type Mode } from '../shared/chat'
 import { SKILLS_DIR } from './modes/extensions'
 import type { ToolRun } from './turn'
+import { FsafeError, writeNew, type Guard } from './fsafe'
 import { search, SearchError, SEARCH_LIMITS } from './vault/search'
 import { ReadError, readPart, toVaultPath, READ_LIMITS } from './vault/read'
 
@@ -254,7 +255,15 @@ async function list(vault: string, folder: unknown): Promise<string> {
 
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
-async function create(vault: string, path: unknown, content: unknown): Promise<ToolRun> {
+// Note creation goes through the race-resistant helper: the real place it
+// lands must still be inside the real vault (and pass the caller's guard,
+// such as a mode's skills protection) when the file is created.
+async function create(
+  vault: string,
+  path: unknown,
+  content: unknown,
+  guard?: Guard
+): Promise<ToolRun> {
   const full = resolveInVault(vault, path)
   if (typeof content !== 'string') throw new VaultError('Content is required.')
   if (existsSync(full))
@@ -270,9 +279,25 @@ async function create(vault: string, path: unknown, content: unknown): Promise<T
       outcome: 'failed'
     }
   }
+  const realVault = realpathSync(vault)
   try {
-    await fsp.writeFile(full, content.endsWith('\n') ? content : `${content}\n`, { flag: 'wx' })
+    await writeNew(full, content.endsWith('\n') ? content : `${content}\n`, {
+      guard: (real) =>
+        !inside(realVault, real)
+          ? 'That path leads outside the vault, so nothing was written.'
+          : (guard?.(real) ?? null)
+    })
   } catch (err) {
+    if (err instanceof FsafeError)
+      return {
+        content: /already exists/.test(err.message)
+          ? "A note already exists at that path, and existing notes can't be changed. Choose a new path."
+          : /nothing was/i.test(err.message)
+            ? err.message
+            : `${err.message} Nothing was written.`,
+        isError: true,
+        outcome: 'not-run'
+      }
     if ((err as NodeJS.ErrnoException).code === 'EEXIST')
       return {
         content:
@@ -339,7 +364,13 @@ export function previewNote(vault: string, input: unknown): { label: string; det
   }
 }
 
-export async function runVaultTool(vault: string, name: string, input: unknown): Promise<ToolRun> {
+export async function runVaultTool(
+  vault: string,
+  name: string,
+  input: unknown,
+  // Checked against the real place a new note lands, just before creating it.
+  guard?: Guard
+): Promise<ToolRun> {
   const i = (input ?? {}) as Record<string, unknown>
   if (!(await reachable(vault)))
     return {
@@ -356,7 +387,7 @@ export async function runVaultTool(vault: string, name: string, input: unknown):
       case 'vault_read':
         return { content: await readPart(vault, i), isError: false }
       case 'vault_create_note':
-        return await create(vault, i.path, i.content)
+        return await create(vault, i.path, i.content, guard)
       case 'vault_append':
         // Off for now: changing shared notes is deferred.
         return {

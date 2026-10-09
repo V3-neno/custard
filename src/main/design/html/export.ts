@@ -1,9 +1,8 @@
-import { randomBytes } from 'crypto'
 import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from 'fs'
-import { open, rename, rm } from 'fs/promises'
 import { basename, dirname, join, resolve } from 'path'
 import type { ExportResult } from '../../../shared/design'
 import { safeFilePath, type ArtifactStore } from '../store'
+import { FsafeError, writeNew, writeReplace } from '../../fsafe'
 
 // Export: the user's own copy of one version, made by Custard (never by the
 // page), wherever the user picks, except inside Custard's protected places.
@@ -16,10 +15,9 @@ import { safeFilePath, type ArtifactStore } from '../store'
 // the user confirms) writes a fresh file beside it and renames it into
 // place, which replaces a link rather than following it.
 //
-// The writes go through `Writer`, whose shape matches Workstream D's
-// race-resistant helper (src/main/fsafe: writeNew, writeReplace with a
-// guard on the real target). Until it is on this branch the local fallback
-// below is used; its known gap is in docs/design/WORKSPACE.md.
+// The writes go through `Writer`, by default Workstream D's race-resistant
+// helper (src/main/fsafe: writeNew, writeReplace with a guard on the real
+// target). Its residual risk (D3) is in docs/design/SECURITY-REVIEW.md.
 
 export type Guard = (realTarget: string) => string | null
 export type Writer = {
@@ -58,44 +56,8 @@ export function realTarget(full: string): string {
   }
 }
 
-// Fallback writer: exclusive create with O_NOFOLLOW where the platform has
-// it, and the parent's real path checked against the guard just before.
-const guarded = (path: string, guard?: Guard): string => {
-  const real = join(realpathSync(dirname(path)), basename(path))
-  const why = guard?.(real)
-  if (why) throw new ExportRefused(why)
-  return real
-}
-async function createExclusive(path: string, data: Uint8Array): Promise<void> {
-  const { constants } = await import('fs')
-  const flags =
-    constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0)
-  const fh = await open(path, flags, 0o644)
-  try {
-    await fh.writeFile(data)
-  } finally {
-    await fh.close()
-  }
-}
-export const localWriter: Writer = {
-  writeNew: async (path, data, { guard }) => {
-    const real = guarded(path, guard)
-    await createExclusive(real, data)
-    return real
-  },
-  writeReplace: async (path, data, { guard }) => {
-    const real = guarded(path, guard)
-    const temp = join(dirname(real), `.${basename(real)}.custard-${randomBytes(6).toString('hex')}`)
-    try {
-      await createExclusive(temp, data)
-      guarded(path, guard)
-      await rename(temp, real)
-    } finally {
-      await rm(temp, { force: true })
-    }
-    return real
-  }
-}
+// The default writer: Workstream D's race-resistant helper.
+export const localWriter: Writer = { writeNew, writeReplace }
 
 const slug = (s: string): string =>
   s
@@ -184,7 +146,7 @@ export async function exportVersion(
     await w.writeNew(target, files[0].bytes, { guard: deps.refuse })
     return { ok: true, path: target, files: 1 }
   } catch (err) {
-    if (err instanceof ExportRefused || (err as Error)?.constructor?.name === 'FsafeError')
+    if (err instanceof ExportRefused || err instanceof FsafeError)
       return { ok: false, error: (err as Error).message }
     const code = (err as NodeJS.ErrnoException)?.code
     return {

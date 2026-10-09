@@ -622,7 +622,14 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
             outcome: 'not-run'
           }
       }
-      return runVaultTool(vault, c.name, c.input)
+      // The mode's protection is checked again on the real place the note
+      // lands, just before it is created.
+      return runVaultTool(vault, c.name, c.input, (real) => {
+        const t = extensionTarget(real, vault, protectedRoots())
+        return t && !(t === 'skill' && policy.authorSkills)
+          ? extensionRefusal(t, modeName(policy.mode))
+          : null
+      })
     }
     if (kindOf(c.name) === 'design')
       return runDesignTool(design(), c.name, c.input, {
