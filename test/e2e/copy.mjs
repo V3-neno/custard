@@ -36,8 +36,18 @@ try {
   await w.waitForSelector('.markdown pre', { timeout: 30000 })
   const button = w.locator('.markdown button[aria-label=Copy]')
   check((await button.count()) === 1, 'the code block has a Copy button')
+  // An icon at the top right of the block (Neno's reference), not a text pill.
+  const [b, pre] = await Promise.all([
+    button.boundingBox(),
+    w.locator('.markdown pre').boundingBox()
+  ])
+  check(
+    pre.x + pre.width - (b.x + b.width) < 24 && b.y - pre.y < 24 && b.width < 32,
+    'the Copy button is a small icon at the top right of the block'
+  )
+  check((await button.locator('svg').count()) === 1, 'the Copy button is an icon')
   await button.click()
-  await w.waitForSelector('.markdown button:has-text("Copied")')
+  await w.waitForSelector('.markdown button[aria-label=Copied]')
   const copied = await app.evaluate(({ clipboard }) => clipboard.readText())
   check(
     copied === 'Build a tea timer.\nUse the forge style.',
