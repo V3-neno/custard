@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from 'fs'
 import { basename, dirname, join, resolve } from 'path'
 import type { ExportResult } from '../../../shared/design'
 import { safeFilePath, type ArtifactStore } from '../store'
-import { FsafeError, writeNew, writeReplace } from '../../fsafe'
+import { FsafeError, makeDirs, writeNew, writeReplace } from '../../fsafe'
 
 // Export: the user's own copy of one version, made by Custard (never by the
 // page), wherever the user picks, except inside Custard's protected places.
@@ -125,9 +125,13 @@ export async function exportVersion(
       }
       try {
         for (const f of files) {
-          const full = join(target, ...f.path)
-          if (f.path.length > 1) mkdirSync(dirname(full), { recursive: true })
-          await w.writeNew(full, f.bytes, { guard: deps.refuse })
+          // Subfolders one level at a time inside the folder just made, each
+          // checked (fsafe makeDirs), not with mkdir -p.
+          const folderOf =
+            f.path.length > 1 ? makeDirs(made, f.path.slice(0, -1), { guard: deps.refuse }) : made
+          await w.writeNew(join(folderOf, f.path[f.path.length - 1]), f.bytes, {
+            guard: deps.refuse
+          })
         }
       } catch (err) {
         // A half-written export folder is removed; it was made just now.

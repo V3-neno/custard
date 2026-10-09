@@ -161,6 +161,9 @@ export class OpenAIImages implements MediaProvider {
     request: MediaRequest,
     options: {
       idempotencyKey: string
+      // Custard's job id (contract S2), recorded with the stored image.
+      // Always set by JobTracker; optional only for direct calls in tests.
+      correlationId?: string
       signal?: AbortSignal
       read: (ref: MediaReference) => Promise<Uint8Array>
     }
@@ -255,7 +258,15 @@ export class OpenAIImages implements MediaProvider {
       }
     const file: MediaFile = { name: `image.${format === 'jpeg' ? 'jpg' : format}`, mime, bytes }
     try {
-      this.deps.results.put(remoteId, file, model.id, (this.deps.now ?? Date.now)())
+      this.deps.results.put(
+        remoteId,
+        file,
+        model.id,
+        (this.deps.now ?? Date.now)(),
+        // Custard's own job id (contract S2), so a restart can link this
+        // image to its job from local files (images/index.ts).
+        options.correlationId
+      )
     } catch (err) {
       // Made and probably charged, but not saved: say so rather than fail
       // quietly. It can't be fetched again from OpenAI.

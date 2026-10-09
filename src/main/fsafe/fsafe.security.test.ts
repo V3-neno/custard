@@ -5,15 +5,24 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   symlinkSync,
-  writeFileSync,
-  promises as fsp
+  writeFileSync
 } from 'fs'
 import { tmpdir } from 'os'
 import { join, sep } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FsafeError, writeNew, writeReplace, type Guard } from '.'
+import {
+  FsafeError,
+  FsafeExistsError,
+  io,
+  makeDirs,
+  writeNew,
+  writeNewSync,
+  writeReplace,
+  type Guard
+} from '.'
 
 // Finding D3 (docs/design/SECURITY-REVIEW.md): the link-swap race. These run
 // on Linux with real symlinks. The races are simulated by swapping a folder
@@ -66,13 +75,13 @@ describe('writeNew', () => {
   it('writes nothing into a folder swapped for a link after the check', async () => {
     const dir = join(work, 'out')
     mkdirSync(dir)
-    const open = fsp.open.bind(fsp)
-    vi.spyOn(fsp, 'open').mockImplementation((async (...args: Parameters<typeof fsp.open>) => {
+    const open = io.open
+    vi.spyOn(io, 'open').mockImplementation((...args) => {
       // The race: the checked folder becomes a link into the protected one.
       renameSync(dir, join(work, 'gone'))
       symlinkSync(secret, dir)
       return open(...args)
-    }) as typeof fsp.open)
+    })
     await expect(writeNew(join(dir, 'x.md'), 'evil', { guard: guardOut })).rejects.toThrow(
       /folder changed/
     )
@@ -80,26 +89,107 @@ describe('writeNew', () => {
     expect(readdirSync(secret)).toEqual([])
   })
 
-  it('residual risk: a swap that is undone before the check can leave an EMPTY file', async () => {
-    const dir = join(work, 'out')
-    mkdirSync(dir)
-    const open = fsp.open.bind(fsp)
-    vi.spyOn(fsp, 'open').mockImplementation((async (...args: Parameters<typeof fsp.open>) => {
+  // D3 / 2.3: the swap undone before Custard checks. The stray file can't be
+  // found by path any more; on Linux the open handle still names it.
+  const swapAndBack = (dir: string): void => {
+    const open = io.open
+    vi.spyOn(io, 'open').mockImplementation((...args) => {
       renameSync(dir, join(work, 'gone'))
       symlinkSync(secret, dir)
-      const fh = await open(...args)
+      const fd = open(...args)
       // Swapped back before Custard checks.
       renameSync(dir, join(work, 'link'))
       renameSync(join(work, 'gone'), dir)
-      return fh
-    }) as typeof fsp.open)
-    await expect(writeNew(join(dir, 'x.md'), 'evil', { guard: guardOut })).rejects.toThrow(
-      /folder changed/
+      return fd
+    })
+  }
+
+  it.runIf(process.platform === 'linux')(
+    'a swap undone before the check: refused, and the empty stray file is removed (Linux)',
+    async () => {
+      const dir = join(work, 'out')
+      mkdirSync(dir)
+      swapAndBack(dir)
+      await expect(writeNew(join(dir, 'x.md'), 'evil', { guard: guardOut })).rejects.toThrow(
+        /folder changed/
+      )
+      expect(readdirSync(secret)).toEqual([])
+      expect(readdirSync(dir)).toEqual([])
+    }
+  )
+
+  it('residual risk off Linux: the same swap can leave an EMPTY file, never content', async () => {
+    // Simulates a platform without /proc/self/fd.
+    const real = process.platform
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    try {
+      const dir = join(work, 'out')
+      mkdirSync(dir)
+      swapAndBack(dir)
+      await expect(writeNew(join(dir, 'x.md'), 'evil', { guard: guardOut })).rejects.toThrow(
+        /folder changed/
+      )
+      expect(readdirSync(secret)).toEqual(['x.md'])
+      expect(readFileSync(join(secret, 'x.md'), 'utf8')).toBe('')
+    } finally {
+      Object.defineProperty(process, 'platform', { value: real })
+    }
+  })
+
+  it('an existing name is reported as such (sync and async)', async () => {
+    writeFileSync(join(work, 'a.md'), 'old')
+    expect(() => writeNewSync(join(work, 'a.md'), 'new')).toThrow(FsafeExistsError)
+    await expect(writeNew(join(work, 'a.md'), 'new')).rejects.toBeInstanceOf(FsafeExistsError)
+  })
+
+  it('refuses names that are paths', () => {
+    expect(() => writeNewSync(join(work, '..'), 'x')).toThrow(FsafeError)
+  })
+})
+
+describe('makeDirs (in place of mkdir -p)', () => {
+  it('makes nested folders and returns the real deepest one', () => {
+    const made = makeDirs(work, ['a', 'b', 'c'])
+    expect(made).toBe(join(realpathSync(work), 'a', 'b', 'c'))
+    expect(lstatSync(made).isDirectory()).toBe(true)
+  })
+
+  it('accepts existing folders', () => {
+    mkdirSync(join(work, 'a'))
+    expect(makeDirs(work, ['a', 'b'])).toBe(join(realpathSync(work), 'a', 'b'))
+  })
+
+  it('follows an existing link only where the guard allows its real target', () => {
+    symlinkSync(secret, join(work, 'linked'))
+    expect(() => makeDirs(work, ['linked', 'x'], { guard: guardOut })).toThrow('protected')
+    expect(readdirSync(secret)).toEqual([])
+    mkdirSync(join(base, 'fine'))
+    symlinkSync(join(base, 'fine'), join(work, 'ok'))
+    expect(makeDirs(work, ['ok', 'x'], { guard: guardOut })).toBe(
+      join(realpathSync(base), 'fine', 'x')
     )
-    // Detected and nothing written, but the stray file can't be found by
-    // path any more, so it stays (empty).
-    expect(readdirSync(secret)).toEqual(['x.md'])
-    expect(readFileSync(join(secret, 'x.md'), 'utf8')).toBe('')
+  })
+
+  it('refuses a file where a folder should be', () => {
+    writeFileSync(join(work, 'f'), '')
+    expect(() => makeDirs(work, ['f', 'x'])).toThrow(/not a folder/)
+  })
+
+  it('a parent swapped for a link while folders are made: refused, nothing made inside', () => {
+    mkdirSync(join(work, 'a'))
+    const mkdir = io.mkdir
+    vi.spyOn(io, 'mkdir').mockImplementation((p, mode) => {
+      if (p.endsWith(`${sep}b`)) {
+        renameSync(join(work, 'a'), join(work, 'gone'))
+        symlinkSync(secret, join(work, 'a'))
+      }
+      return mkdir(p, mode)
+    })
+    expect(() => makeDirs(work, ['a', 'b', 'c'], { guard: guardOut })).toThrow(/folder changed/)
+    // Residual: the empty folder "b" was made where the link pointed, but
+    // nothing was made inside it.
+    expect(readdirSync(secret)).toEqual(['b'])
+    expect(readdirSync(join(secret, 'b'))).toEqual([])
   })
 })
 
@@ -127,6 +217,49 @@ describe('writeReplace', () => {
     ).rejects.toThrow('protected')
     expect(readdirSync(secret)).toEqual([])
   })
+
+  it('a folder swapped for a link while replacing: refused, the original kept', async () => {
+    const dir = join(work, 'out')
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'x.md'), 'keep')
+    writeFileSync(join(secret, 'x.md'), 'secret')
+    const open = io.open
+    vi.spyOn(io, 'open').mockImplementation((...args) => {
+      renameSync(dir, join(work, 'gone'))
+      symlinkSync(secret, dir)
+      return open(...args)
+    })
+    await expect(writeReplace(join(dir, 'x.md'), 'evil', { guard: guardOut })).rejects.toThrow(
+      /folder changed/
+    )
+    expect(readdirSync(secret)).toEqual(['x.md'])
+    expect(readFileSync(join(secret, 'x.md'), 'utf8')).toBe('secret')
+    expect(readFileSync(join(work, 'gone', 'x.md'), 'utf8')).toBe('keep')
+  })
+
+  it.runIf(process.platform === 'linux')(
+    'a swap undone while replacing: the empty temp file is removed too (Linux)',
+    async () => {
+      const dir = join(work, 'out')
+      mkdirSync(dir)
+      writeFileSync(join(dir, 'x.md'), 'keep')
+      const open = io.open
+      vi.spyOn(io, 'open').mockImplementation((...args) => {
+        renameSync(dir, join(work, 'gone'))
+        symlinkSync(secret, dir)
+        const fd = open(...args)
+        renameSync(dir, join(work, 'link'))
+        renameSync(join(work, 'gone'), dir)
+        return fd
+      })
+      await expect(writeReplace(join(dir, 'x.md'), 'evil', { guard: guardOut })).rejects.toThrow(
+        /folder changed/
+      )
+      expect(readdirSync(secret)).toEqual([])
+      expect(readdirSync(dir)).toEqual(['x.md'])
+      expect(readFileSync(join(dir, 'x.md'), 'utf8')).toBe('keep')
+    }
+  )
 
   it('refuses a folder at the target', async () => {
     mkdirSync(join(work, 'd'))

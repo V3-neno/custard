@@ -10,7 +10,7 @@ macOS or against a live provider.
 | --- | --- | --- |
 | D1 | Plugin `open:` permission | **Fixed** on design-batch (dffbfd7) after Neno chose "Allowlist" (2026-10-09): vetted schemes only (today `spotify:`), and only write tools can open links. Tests in `open.security.test.ts` pass. |
 | D2 | Tool routes in Chat and Design | Enforced in code, except D1 and the residual network route below. |
-| D3 | Link-swap race (`src/main/fsafe`) | Helper built and tested on Linux. Narrowed, not closed; residual risk below. Export and `vault_create_note` use it on design-integration (4acb584); memory captures don't (Custard-chosen names). |
+| D3 | Link-swap race (`src/main/fsafe`) | Narrowed, not closed. Stabilization 2.3: the empty stray file is now removed on Linux; folders are made with checked `makeDirs` instead of `mkdir -p`; memory captures, the vault id and capture deletion use it too. Residual risk (macOS/Windows empty file, any-platform empty folder) awaits Neno's acceptance: see `FILESYSTEM.md`. |
 | D4 | HTML preview sandbox | Contained. `window.print()` opened the OS print dialog at ac9a4a2; A fixed it with a CSP sandbox directive (90b1dde). `design-security.mjs` 40/40 on design-integration plus A's fix. Results in `SANDBOX.md`. |
 | D5 | Reliability and privacy flows | Tested across A, B and C (below). D5a fixed by integration (a99419c). |
 
@@ -111,23 +111,34 @@ it over, so a link at the target is replaced, not followed. Asking before
 overwriting stays with the caller.
 
 Tests (`src/main/fsafe/fsafe.security.test.ts`, Linux, real symlinks)
-simulate the swap at the moment of opening.
+simulate the swap at the moment of opening (and of each `mkdir`).
 
-**Residual risk.** Node has no `openat()`, so the window can't be closed. If
-a parent folder is swapped for a link and swapped back between steps 2 and 3,
-the write is refused but an **empty** file can stay where the link pointed.
-No content is written there. On Windows, junctions and NTFS file ids should
-behave the same way but haven't been run there. Native Windows verification
-is outstanding.
+**Stabilization 2.3 (2026-10-09).**
 
-**Who switched over.** At integration (4acb584), A's export uses `fsafe`
-as its default writer, and `vault_create_note` creates notes with
-`writeNew`: the real place must still be inside the real vault and pass the
-mode's skills and plugin protection, checked again on that real place.
-Memory captures keep their exclusive-create writes (names Custard chooses
-under `Custard/Captures`), so the gap in `docs/plugins/SECURITY.md`
-("File-check races") still applies to them. Folders made with
-`mkdir -p` before a write are not covered by `fsafe`.
+- A swap that is undone before Custard checks used to leave an empty file
+  where the link pointed. On Linux the open handle still names that file
+  (`/proc/self/fd`), so it is now removed, only while it is the same, still
+  empty file. Tested. macOS and Windows have no equivalent reachable from
+  Node, so there it can still be left (empty).
+- `mkdir -p` before a write is replaced by `makeDirs`: one level at a time
+  from a real base, each level checked (real folder, expected real path,
+  guard). A protected folder is now refused before it is made (before, an
+  empty `Custard/Skills/x` folder could be created and then the note
+  refused). A swap-and-undo during `makeDirs` can still leave one empty
+  folder where the link pointed; nothing is ever made inside it.
+- **Who uses it now:** export (files and subfolders), `vault_create_note`
+  (folders and note), memory captures and the vault id file (folders and
+  note), and capture deletion (unlinks by the real parent, checked inside
+  the real vault). The plugin Overview note (`memory/plugins.ts`) still uses
+  `mkdir -p` + `wx`: requested from the integration owner.
+
+**Residual risk** (the full table, attacker preconditions and alternatives
+are in `docs/design/FILESYSTEM.md`). Node has no `openat()`/`mkdirat()`, so
+the window can't be closed without native code. No content is ever written
+to a redirected place. Left: an empty file (macOS, Windows) or an empty
+folder (all platforms) where a swapped link pointed. This needs Neno's
+acceptance, or one of the alternatives in `FILESYSTEM.md`; it is **not**
+described as closed. Windows and macOS are unverified.
 
 ## D5: reliability and privacy across A, B and C
 

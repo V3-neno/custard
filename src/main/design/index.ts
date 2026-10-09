@@ -22,7 +22,9 @@ import { ArtifactStore, JobStore } from './store'
 import { jobAction, type DesignService } from './tools'
 import { authorizations } from './authorization'
 import { registerHtml } from './html'
-import { registerImages } from './images'
+import { forgetImageJobs, pruneImages, registerImages } from './images'
+import type { ResultStore } from './images/results'
+import { reconcileDesign } from './reconcile'
 import { registerPluginMedia } from './plugin-media'
 
 // Design's main-process service: stored outputs, jobs, settings, the
@@ -96,8 +98,12 @@ export function capabilityReport(): CapabilityReport {
 
 // A chat's outputs and job records go with it. Jobs already at a provider
 // keep running there; deleting here can't cancel them.
+let imageResults: ResultStore | null = null
+
 export function designChatDeleted(chat: string): void {
   const s = design()
+  // Stored provider results of the chat's jobs, linked or not, go too.
+  if (imageResults) forgetImageJobs(imageResults, s.jobs.list(chat))
   s.artifacts.deleteChat(chat)
   s.jobs.forgetChat(chat)
   authorizations.forgetChat(chat)
@@ -108,8 +114,24 @@ const MEDIA_TYPES = /^(image\/(png|jpeg|webp|gif)|video\/(mp4|webm))$/
 
 export function registerDesignHandlers(): void {
   registerHtml()
-  registerImages()
+  const images = registerImages()
   registerPluginMedia()
+  // Startup reconciliation (reconcile.ts), before any handler can run:
+  // interrupted chat deletions, then results Custard stored before it
+  // stopped, then tidying. Local files only: no provider request, no plugin
+  // tool, no resubmission.
+  imageResults = images
+  const s = design()
+  try {
+    reconcileDesign({
+      service: s,
+      chatExists: (chat) => getConversation(chat) !== null,
+      forgetChat: designChatDeleted,
+      prune: () => pruneImages(images, s.jobs.list(), (c, a) => s.artifacts.get(c, a))
+    })
+  } catch (err) {
+    console.error('Design: startup reconciliation failed:', err)
+  }
   handle('design:subscribe', (e) => {
     listeners.add(e.sender)
     e.sender.once('destroyed', () => listeners.delete(e.sender))

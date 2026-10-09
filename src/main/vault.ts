@@ -1,13 +1,13 @@
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { existsSync, promises as fsp, lstatSync, readdirSync, readFileSync, realpathSync } from 'fs'
-import { dirname, isAbsolute, join, relative } from 'path'
+import { dirname, isAbsolute, join, relative, sep } from 'path'
 import { resolveInVault, VaultPathError } from './memory/paths'
 import { CAPTURES, readCaptures } from './memory/write'
 import { MEMORY_NOTE } from '../shared/vault'
 import { modes, type Mode } from '../shared/chat'
 import { SKILLS_DIR } from './modes/extensions'
 import type { ToolRun } from './turn'
-import { FsafeError, writeNew, type Guard } from './fsafe'
+import { FsafeError, makeDirs, writeNew, type Guard } from './fsafe'
 import { search, SearchError, SEARCH_LIMITS } from './vault/search'
 import { ReadError, readPart, toVaultPath, READ_LIMITS } from './vault/read'
 
@@ -270,23 +270,32 @@ async function create(
     throw new VaultError(
       "A note already exists at that path, and existing notes can't be changed. Choose a new path."
     )
+  const realVault = realpathSync(vault)
+  const allowed: Guard = (real) =>
+    !inside(realVault, real)
+      ? 'That path leads outside the vault, so nothing was written.'
+      : (guard?.(real) ?? null)
+  // Missing folders are made one level at a time, each checked the same way
+  // as the note (fsafe makeDirs), not with mkdir -p.
   try {
-    await fsp.mkdir(dirname(full), { recursive: true })
+    makeDirs(vault, relative(vault, dirname(full)).split(sep).filter(Boolean), { guard: allowed })
   } catch (err) {
+    if (err instanceof FsafeError)
+      return {
+        content: /nothing was/i.test(err.message)
+          ? err.message
+          : `${err.message} Nothing was written.`,
+        isError: true,
+        outcome: 'not-run'
+      }
     return {
       content: `Couldn't create the folder: ${errorText(err)}`,
       isError: true,
       outcome: 'failed'
     }
   }
-  const realVault = realpathSync(vault)
   try {
-    await writeNew(full, content.endsWith('\n') ? content : `${content}\n`, {
-      guard: (real) =>
-        !inside(realVault, real)
-          ? 'That path leads outside the vault, so nothing was written.'
-          : (guard?.(real) ?? null)
-    })
+    await writeNew(full, content.endsWith('\n') ? content : `${content}\n`, { guard: allowed })
   } catch (err) {
     if (err instanceof FsafeError)
       return {

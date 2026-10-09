@@ -12,6 +12,7 @@ import {
   type RemoteStatus
 } from '../../shared/design'
 import { checkRequest } from './media'
+import { localResults } from './recovery'
 import {
   AuthorizationError,
   authorizations,
@@ -89,6 +90,8 @@ function failResult(job: Job, err: MediaError): Job {
 
 export class JobTracker {
   private jobs = new Map<string, Job>()
+  // Chats deleted while Custard runs (ids are never reused).
+  private deletedChats = new Set<string>()
   private now: () => number
   private newId: () => string
   private auth: Authorizations
@@ -111,6 +114,37 @@ export class JobTracker {
       this.jobs.set(job.id, job)
       if (job.state !== j.state || j.tracking) deps.save(job)
     }
+    this.linkLocal()
+  }
+
+  // Restore, local only (contract S2): a job saved as sent but with no
+  // remote id, whose result Custard's own built-in store saved before it
+  // stopped (recovery.ts localResults, found by the job's correlation id).
+  // It is linked and marked completed. No provider is asked, no plugin runs,
+  // nothing is sent or tracked, and no authorization exists to dispatch
+  // anything (tokens are never saved). A job not found stays unknown;
+  // checking it remotely stays the user's explicit action. Run by the
+  // constructor, and again by startup reconciliation in case a store
+  // registered later.
+  linkLocal(): Job[] {
+    const found: Job[] = []
+    for (const j of [...this.jobs.values()]) {
+      if (j.state !== 'unknown' || j.remoteId || !j.attemptedAt) continue
+      let r: { remoteId: string } | null = null
+      try {
+        r = localResults(j.providerId)?.find(j.id) ?? null
+      } catch {
+        r = null
+      }
+      if (!r) continue
+      const job: Job = { ...j, remoteId: r.remoteId, tracking: false }
+      job.state = 'completed'
+      job.error = undefined
+      job.errorKind = undefined
+      job.dispatch = { state: 'completed', repeat: { risk: 'may-duplicate' } }
+      found.push(this.put(job))
+    }
+    return found
   }
 
   get(id: string): Job | undefined {
@@ -126,6 +160,9 @@ export class JobTracker {
 
   private put(job: Job): Job {
     job.updatedAt = this.now()
+    // A job whose chat was deleted while a call for it was still running
+    // (a submission, a check) is never saved again, so it can't come back.
+    if (this.deletedChats.has(job.requestedBy.conversationId)) return { ...job }
     this.jobs.set(job.id, job)
     this.deps.save({ ...job })
     return { ...job }
@@ -374,6 +411,7 @@ export class JobTracker {
 
   // A deleted chat's jobs leave the list (they keep running at the provider).
   forgetChat(conversationId: string): void {
+    this.deletedChats.add(conversationId)
     for (const [id, j] of this.jobs)
       if (j.requestedBy.conversationId === conversationId) this.jobs.delete(id)
   }

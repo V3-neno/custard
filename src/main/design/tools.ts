@@ -7,6 +7,7 @@ import {
   type DesignSettings,
   type DesignToolName,
   type Job,
+  type MediaFile,
   type MediaOperation,
   type MediaProvider,
   type MediaReference,
@@ -405,6 +406,27 @@ export async function jobAction(
       ? await s.jobs.collect(jobId, signal)
       : await s.jobs.check(jobId, signal))
   }
+  settleJobVersion(s, conversationId, next, files)
+  s.emit({ type: 'job', conversationId, job: next })
+  const text =
+    action === 'stop'
+      ? `Stopped tracking job ${next.id}. It keeps running at the provider.`
+      : files?.length
+        ? `${describeJob(next)} The result is saved as a new version.`
+        : describeJob(next)
+  return { job: next, text }
+}
+
+// A job's outcome on its pending version: its files stored (the normal
+// save path: name cleaning, store limits, read-only files), or its failure
+// or cancellation recorded. Used by checks and by startup reconciliation
+// (reconcile.ts), so a recovered result goes through the same validation.
+export function settleJobVersion(
+  s: Pick<DesignService, 'artifacts' | 'emit'>,
+  conversationId: string,
+  next: Job,
+  files?: MediaFile[]
+): void {
   let artifact = s.artifacts.get(conversationId, next.target.artifactId)
   const version = artifact?.versions.find((v) => v.id === next.target.versionId)
   if (artifact && version?.status === 'pending') {
@@ -426,14 +448,6 @@ export async function jobAction(
       s.emit({ type: 'artifact', conversationId, artifact })
     }
   }
-  s.emit({ type: 'job', conversationId, job: next })
-  const text =
-    action === 'stop'
-      ? `Stopped tracking job ${next.id}. It keeps running at the provider.`
-      : files?.length
-        ? `${describeJob(next)} The result is saved as a new version.`
-        : describeJob(next)
-  return { job: next, text }
 }
 
 // Provider file names are untrusted: keep a plain name, or number it.
