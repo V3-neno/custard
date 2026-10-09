@@ -1,4 +1,5 @@
-// Code blocks (drafted prompts, skills, code) have a one-click Copy button.
+// Code blocks (drafted prompts, skills, code) have a one-click Copy button,
+// and long ones start collapsed under Show more.
 // Against test/e2e/interrupt-mock.mjs; usage as for web.mjs:
 //   node test/e2e/copy.mjs <out> <screenshot dir>
 // Linux only as written, with a display or xvfb-run. Needs the playwright package.
@@ -53,7 +54,46 @@ try {
     copied === 'Build a tea timer.\nUse the forge style.',
     `one click copies the block's text exactly (${JSON.stringify(copied)})`
   )
+  check(
+    (await w.locator('.markdown button:text-is("Show more")').count()) === 0,
+    'a short block has no Show more'
+  )
   await w.screenshot({ path: SHOTS + '/copy.png' })
+
+  // A long block starts collapsed; Copy takes all of it either way.
+  const full = Array.from({ length: 40 }, (_, i) => `Step ${i + 1}: keep the forge style.`).join(
+    '\n'
+  )
+  await w.fill('textarea', 'long copy test')
+  await w.keyboard.press('Enter')
+  await w.waitForSelector('.markdown pre >> nth=1', { timeout: 30000 })
+  const longPre = w.locator('.markdown pre').nth(1)
+  const block = longPre.locator('..')
+  const more = block.locator('button:text-is("Show more")')
+  await more.waitFor({ timeout: 5000 })
+  const clipped = (el) => el.scrollHeight > el.clientHeight + 1
+  check(await longPre.evaluate(clipped), 'a long block starts collapsed')
+  check((await more.count()) === 1, 'a long block has Show more')
+  await block.locator('button[aria-label=Copy]').click()
+  await block.locator('button[aria-label=Copied]').waitFor()
+  check(
+    (await app.evaluate(({ clipboard }) => clipboard.readText())) === full,
+    'Copy on a collapsed block copies all of it'
+  )
+  await w.screenshot({ path: SHOTS + '/copy-collapsed.png' })
+  await app.evaluate(({ clipboard }) => clipboard.writeText(''))
+  await more.click()
+  await block.locator('button:text-is("Show less")').waitFor()
+  check(!(await longPre.evaluate(clipped)), 'Show more expands it')
+  await block.locator('button[aria-label=Copy]').waitFor()
+  await block.locator('button[aria-label=Copy]').click()
+  await block.locator('button[aria-label=Copied]').waitFor()
+  check(
+    (await app.evaluate(({ clipboard }) => clipboard.readText())) === full,
+    'Copy on an expanded block copies all of it'
+  )
+  await block.locator('button:text-is("Show less")').click()
+  check(await longPre.evaluate(clipped), 'Show less collapses it again')
 } finally {
   await app.close()
   console.log('e2e done, exit', process.exitCode ?? 0)

@@ -264,6 +264,7 @@ http
         [/forged test/, 'forged'],
         [/note test/, 'note'],
         [/append test/, 'append'],
+        [/long copy test/, 'copylong'],
         [/copy test/, 'copy']
       ].find(([r]) => r.test(ask))?.[1]
       const key =
@@ -514,6 +515,14 @@ http
         ],
         // A drafted prompt in a code block, for the Copy button (copy.mjs).
         copy: ['Here is the prompt:\n\n```\nBuild a tea timer.\nUse the forge style.\n```'],
+        // A long one, which starts collapsed under "Show more".
+        copylong: [
+          'Here is the long prompt:\n\n```\n' +
+            Array.from({ length: 40 }, (_, i) => `Step ${i + 1}: keep the forge style.`).join(
+              '\n'
+            ) +
+            '\n```'
+        ],
         plain: ['OK.']
       }
       const s = scripts[key][Math.min(step, scripts[key].length - 1)]
