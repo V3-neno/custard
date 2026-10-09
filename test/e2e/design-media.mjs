@@ -8,7 +8,8 @@
 //   - that card is the only one (Neno's decision: Design card only); the
 //     job completes and the stored video plays from custard-media://
 //     (inline and from a result link)
-//   - a refused prompt fails cleanly; cancel is confirmed by the plugin
+//   - a plugin's own "not sent" stays outcome unknown (Custard can't confirm
+//     it); cancel asks on its own card and is confirmed by the plugin
 //   - disabling the plugin keeps saved video and says why new jobs can't run
 // Usage, from the repo root after `npx electron-vite build`:
 //   node test/e2e/interrupt-mock.mjs <out> &   (with <out>/plugin and <out>/vault as for memory.mjs)
@@ -130,6 +131,31 @@ const turn = async (t, answer = 'Allow') => {
   return { asked, text }
 }
 
+// A turn that answers every card with Allow, returning each card's text.
+const turnAll = async (t) => {
+  await send(t)
+  const texts = []
+  for (;;) {
+    const next = await Promise.race([
+      card()
+        .first()
+        .waitFor({ timeout: 8000 })
+        .then(() => 'card')
+        .catch(() => 'none'),
+      idle().then(() => 'idle')
+    ])
+    if (next !== 'card') break
+    texts.push(await card().first().innerText())
+    await card().first().getByRole('button', { name: 'Allow', exact: true }).click()
+    await card()
+      .first()
+      .waitFor({ state: 'detached', timeout: 8000 })
+      .catch(() => {})
+  }
+  await idle()
+  return texts
+}
+
 try {
   step('Setup: key and vault')
   await w.click('button[title=Settings]')
@@ -228,15 +254,19 @@ try {
     )
 
     step('Refused and cancelled jobs')
-    await turn('c cancel test')
+    const cards = await turnAll('c cancel test')
+    check(
+      cards.length === 2 && /cancel a job/i.test(cards[1]) && /provider confirms/.test(cards[1]),
+      `the cancel asks on its own card (${cards.length} cards)`
+    )
     check(
       lastResults().some((r) => /cancelled/.test(r)),
       `a cancel is confirmed (${lastResults().at(-1)?.slice(0, 80)})`
     )
     await turn('c reject test')
     check(
-      lastResults().some((r) => /refused/.test(r)),
-      `a refused prompt fails (${lastResults().at(-1)?.slice(0, 80)})`
+      lastResults().some((r) => /not known/.test(r) && /plugin says: not sent/.test(r)),
+      `a plugin's own "not sent" stays unknown (${lastResults().at(-1)?.slice(0, 120)})`
     )
     // A refused prompt doesn't turn the provider off for the session.
     await turn('c video test')

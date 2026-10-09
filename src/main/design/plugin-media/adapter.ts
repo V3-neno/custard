@@ -8,9 +8,16 @@ import {
   type PluginMediaJobInput,
   type PluginMediaSpec,
   type PluginMediaSubmitInput,
-  type RemoteStatus
+  type RemoteStatus,
+  type AuthorizationToken
 } from '../../../shared/design'
-import type { ApprovalRequest, MediaEntry, MediaRole, ToolOutcome } from '../../plugins/host'
+import type {
+  ApprovalRequest,
+  MediaAuthorization,
+  MediaEntry,
+  MediaRole,
+  ToolOutcome
+} from '../../plugins/host'
 import {
   checkType,
   decodeInline,
@@ -35,7 +42,8 @@ const NOT_DISPATCHED = {
 //           start (and charge for) work.
 //   status  the declared read tool. Never submits.
 //   result  the declared read tool. Never submits; files are checked here.
-//   cancel  the declared tool, only when the user asks to cancel.
+//   cancel  the declared write tool, only with the single-use authorization
+//           minted after the user's explicit go-ahead for that job.
 //
 // Everything a plugin returns is untrusted and checked before use.
 
@@ -46,7 +54,7 @@ export type PluginMediaDeps = {
     o: {
       signal: AbortSignal
       approve: (r: ApprovalRequest) => Promise<boolean>
-      preApproved?: boolean
+      authorization?: MediaAuthorization
     }
   ) => Promise<ToolOutcome>
   hosts: (pluginId: string) => string[]
@@ -153,13 +161,18 @@ export class PluginMediaProvider implements MediaProvider {
     op: string,
     input: unknown,
     signal: AbortSignal | undefined,
-    preApproved = false
+    authorization?: MediaAuthorization
   ): Promise<ToolOutcome> {
     return this.deps.invoke(
       { pluginId: this.entry.pluginId, providerId: this.spec.id, operation: op, role, input },
-      // Anything not pre-approved that the host would ask about is refused:
-      // Design has no second card to show here.
-      { signal: signal ?? new AbortController().signal, approve: denyApproval, preApproved }
+      // Anything without an authorization that the host would ask about is
+      // refused: Design has no second card to show here. The host consumes
+      // the authorization (contract S3).
+      {
+        signal: signal ?? new AbortController().signal,
+        approve: denyApproval,
+        ...(authorization ? { authorization } : {})
+      }
     )
   }
 
@@ -167,6 +180,8 @@ export class PluginMediaProvider implements MediaProvider {
     request: MediaRequest,
     o: {
       idempotencyKey: string
+      correlationId: string
+      authorization: AuthorizationToken
       signal?: AbortSignal
       read: (ref: MediaRequest['references'][number]) => Promise<Uint8Array>
     }
@@ -183,7 +198,18 @@ export class PluginMediaProvider implements MediaProvider {
     let total = 0
     const references: { name: string; mime: string; base64: string }[] = []
     for (const ref of request.references) {
-      const bytes = await o.read(ref)
+      let bytes: Uint8Array
+      try {
+        bytes = await o.read(ref)
+      } catch (err) {
+        // Custard's own read refused it (gone, or changed since approval).
+        throw new MediaError(
+          'rejected',
+          `${err instanceof Error ? err.message : String(err)} Nothing was sent.`,
+          false,
+          NOT_DISPATCHED
+        )
+      }
       total += bytes.length
       if (
         total > MEDIA_INPUT_LIMITS.referenceBytes ||
@@ -212,18 +238,35 @@ export class PluginMediaProvider implements MediaProvider {
         : {}),
       ...(request.format ? { format: request.format } : {})
     }
-    const r = await this.call('submit', request.operation, input, o.signal, true)
-    // TODO(Thread 1): confirm every 'not-run' here comes from a host check
-    // before plugin code ran, never from the plugin's own result.
+    const r = await this.call('submit', request.operation, input, o.signal, {
+      action: 'submit',
+      token: o.authorization,
+      jobId: o.correlationId,
+      request
+    })
+    // 'not-run' only ever comes from the host's own checks before plugin
+    // code ran (refused authorization, disabled plugin, schema, a runtime
+    // that never received the call); a plugin's result can't produce it
+    // (runtime.ts sets notSent only itself). Verified for contract S1.
     if (r.outcome === 'not-run')
       throw new MediaError('unconfigured', short(r.content), false, NOT_DISPATCHED)
     if (r.outcome === 'unknown' || r.interrupted)
       throw new MediaError('temporary', short(r.content) || 'The plugin was cut off.', 'unknown')
     if (r.isError) {
-      // Only the plugin can say its service never got the request: a claim,
-      // never evidence (contract S1), so the outcome stays unknown.
-      const sent = (r.data as { sent?: unknown } | undefined)?.sent === false ? false : 'unknown'
-      throw new MediaError('rejected', short(r.content) || 'The plugin reported an error.', sent)
+      // The plugin ran: whatever it says, Custard can't establish that its
+      // service never got the request, or that a repeat is safe. Its "not
+      // sent" is kept as a claim only (contract S1).
+      const claimed = (r.data as { sent?: unknown } | undefined)?.sent === false
+      throw new MediaError(
+        'rejected',
+        short(r.content) || 'The plugin reported an error.',
+        'unknown',
+        {
+          state: 'unknown',
+          repeat: { risk: 'unknown' },
+          ...(claimed ? { providerClaim: 'not sent' } : {})
+        }
+      )
     }
     const d = r.data as Record<string, unknown> | undefined
     const status = readStatus(d?.status)
@@ -248,16 +291,24 @@ export class PluginMediaProvider implements MediaProvider {
     return s
   }
 
-  async cancel(remoteId: string): Promise<'cancelled' | 'not-cancelled'> {
+  // Changes the job at the provider: runs only with the cancel authorization
+  // minted after the user's explicit go-ahead, which the host consumes.
+  async cancel(
+    remoteId: string,
+    authorization: AuthorizationToken
+  ): Promise<'cancelled' | 'not-cancelled'> {
     const { op, id } = unwrapId(remoteId)
     if (!this.cap(op).tools.cancel) return 'not-cancelled'
-    // The user asked for this cancel; it can't start or charge for anything.
     const r = await this.call(
       'cancel',
       op,
       { remoteId: id } satisfies PluginMediaJobInput,
       undefined,
-      true
+      {
+        action: 'cancel',
+        token: authorization,
+        remoteId
+      }
     )
     if (r.isError || r.outcome !== 'completed') return 'not-cancelled'
     return readStatus(r.data)?.state === 'cancelled' ? 'cancelled' : 'not-cancelled'

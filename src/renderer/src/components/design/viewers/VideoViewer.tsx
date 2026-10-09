@@ -30,6 +30,8 @@ function JobPanel({ chat, jobId }: { chat: string; jobId: string }): React.JSX.E
   const [job, setJob] = useState<Job | null>(null)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
+  // Cancelling changes the job at the provider, so it takes a second click.
+  const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -48,6 +50,7 @@ function JobPanel({ chat, jobId }: { chat: string; jobId: string }): React.JSX.E
   const act = async (action: 'check' | 'cancel' | 'stop'): Promise<void> => {
     setBusy(true)
     setNote(null)
+    setConfirming(false)
     try {
       const r = await window.custard.design.job(chat, action, jobId)
       if ('error' in r) setNote(r.error)
@@ -87,20 +90,37 @@ function JobPanel({ chat, jobId }: { chat: string; jobId: string }): React.JSX.E
           <button className={chip} disabled={busy} onClick={() => act('check')}>
             Check now
           </button>
-          <button className={chip} disabled={busy} onClick={() => act('cancel')}>
-            Cancel job
-          </button>
+          {confirming ? (
+            <>
+              <button className={chip} disabled={busy} onClick={() => act('cancel')}>
+                Yes, ask the provider to cancel
+              </button>
+              <button className={chip} disabled={busy} onClick={() => setConfirming(false)}>
+                Keep it
+              </button>
+            </>
+          ) : (
+            <button className={chip} disabled={busy} onClick={() => setConfirming(true)}>
+              Cancel job
+            </button>
+          )}
           {job.tracking && (
             <button
               className={chip}
               disabled={busy}
               onClick={() => act('stop')}
-              title="Custard stops checking; the job keeps running at the provider."
+              title="Custard stops checking. The job keeps running, and may be charged, at the provider."
             >
               Stop tracking
             </button>
           )}
         </div>
+      )}
+      {confirming && (
+        <p className="text-xs text-ash-400">
+          This asks the provider to cancel the job. It counts as cancelled only when the provider
+          confirms, and whether it is still charged depends on the provider.
+        </p>
       )}
       {note && <p className="text-xs text-ash-500">{note}</p>}
     </div>

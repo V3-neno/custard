@@ -9,7 +9,19 @@ import {
   type PluginStatus,
   type TestReport
 } from '../../shared/plugins'
-import type { PluginMediaSpec } from '../../shared/design'
+import type {
+  AuthorizationToken,
+  MediaRequest,
+  PluginMediaSpec,
+  PluginMediaSubmitInput
+} from '../../shared/design'
+import {
+  AuthorizationError,
+  authorizations,
+  bindingFor,
+  sha256,
+  type Authorizations
+} from '../design/authorization'
 import { formatLabel } from '../../shared/vault'
 import { WIDGET_LIMITS, type WidgetSpec } from '../../shared/widgets'
 import { resolveInside } from '../workspace/paths'
@@ -84,6 +96,9 @@ export type HostDeps = {
   openExternal: (url: string) => Promise<void>
   openBrowser: (url: string) => Promise<void>
   askByDefault: () => boolean
+  // Single-use media authorizations (contract S3); the process registry by
+  // default, tests pass their own.
+  authorizations?: Authorizations
   transport?: () => Transport | undefined
 }
 
@@ -131,6 +146,27 @@ export const mediaTools = (m: PluginManifest): Set<string> =>
 
 export type MediaRole = 'submit' | 'status' | 'result' | 'cancel'
 
+// The user's go-ahead for one media write (contract S3): the opaque token
+// minted after Design's card or the cancel confirmation, plus what it is
+// for, which the host checks against what it is about to send. The token is
+// consumed here, at the dispatch boundary, whatever happens next.
+export type MediaAuthorization =
+  | {
+      action: 'submit'
+      token: AuthorizationToken
+      // Custard's job id (correlation id).
+      jobId: string
+      // The request as approved; the plugin input must be exactly this, with
+      // each reference's bytes matching its approved sha256.
+      request: MediaRequest
+    }
+  | {
+      action: 'cancel'
+      token: AuthorizationToken
+      // Custard's full job reference, "<operation>|<plugin's id>".
+      remoteId: string
+    }
+
 export type MediaEntry = {
   pluginId: string
   pluginName: string
@@ -140,6 +176,36 @@ export type MediaEntry = {
   // set and, with an account, signed in.
   ready: boolean
   needs?: string
+}
+
+// Whether a media submission's plugin input differs from the approved
+// request: every field, and each reference's bytes by sha256, in order.
+function submitDiffers(operation: string, input: unknown, r: MediaRequest): string | null {
+  const i = (input ?? {}) as Partial<PluginMediaSubmitInput>
+  if (operation !== r.operation || i.operation !== r.operation)
+    return 'The operation changed since it was approved'
+  if (i.prompt !== r.prompt) return 'The request changed since it was approved'
+  const same = (x: unknown, y: unknown): boolean => JSON.stringify(x) === JSON.stringify(y)
+  if (
+    !same(i.size ?? null, r.size ? { width: r.size.width, height: r.size.height } : null) ||
+    (i.durationSeconds ?? null) !== (r.durationSeconds ?? null) ||
+    (i.format ?? null) !== (r.format ?? null)
+  )
+    return 'The request changed since it was approved'
+  const refs = i.references ?? []
+  if (refs.length !== r.references.length)
+    return 'The files to send changed since they were approved'
+  for (const [n, ref] of refs.entries()) {
+    let bytes: Buffer
+    try {
+      bytes = Buffer.from(String(ref.base64), 'base64')
+    } catch {
+      return 'The files to send changed since they were approved'
+    }
+    if (sha256(bytes) !== r.references[n].sha256)
+      return 'The files to send changed since they were approved'
+  }
+  return null
 }
 
 // A tool's `data` for widgets: plain JSON, bounded, and dropped if it holds a
@@ -883,8 +949,10 @@ export class PluginHost {
   // Runs one of a media provider's declared tools for Design, through the
   // same checks as any tool call (invoke). The tool must be the one the
   // active build declares for this provider, operation and role, so Design
-  // can't reach any other tool this way. `preApproved` is Design's own
-  // approval of this exact call (see docs/design/MEDIA-PLUGINS.md).
+  // can't reach any other tool this way. `authorization` is the user's
+  // go-ahead for this exact write (see MediaAuthorization and
+  // docs/design/MEDIA-PLUGINS.md); without it a write asks through
+  // `approve`, which Design refuses.
   async invokeMedia(
     a: {
       pluginId: string
@@ -896,7 +964,7 @@ export class PluginHost {
     o: {
       signal: AbortSignal
       approve: (r: ApprovalRequest) => Promise<boolean>
-      preApproved?: boolean
+      authorization?: MediaAuthorization
     }
   ): Promise<ToolOutcome> {
     const st = this.d.store.state(a.pluginId)
@@ -914,7 +982,95 @@ export class PluginHost {
     const snapshot: ToolSnapshot = new Map([
       [name, { pluginId: a.pluginId, buildId: st.active.buildId }]
     ])
-    return this.invoke(name, a.input, { ...o, snapshot, dataLimit: MEDIA_DATA_BYTES })
+    let preApproved = false
+    if (o.authorization) {
+      // Used up first, so a refusal below can't leave it reusable.
+      const refused = this.consumeMediaAuthorization(a, o.authorization, {
+        pluginId: a.pluginId,
+        buildId: st.active.buildId,
+        providerId: spec.id
+      })
+      if (refused) return notRun(refused)
+      preApproved = true
+    }
+    return this.run(
+      name,
+      a.input,
+      { signal: o.signal, approve: o.approve, preApproved, snapshot, dataLimit: MEDIA_DATA_BYTES },
+      true
+    )
+  }
+
+  // Consumes a media authorization against what is about to be sent, from
+  // the active build. Why it doesn't cover this call, or null when it does.
+  private consumeMediaAuthorization(
+    a: { operation: string; role: MediaRole; input: unknown },
+    auth: MediaAuthorization,
+    current: { pluginId: string; buildId: string; providerId: string }
+  ): string | null {
+    const nothing = 'so nothing was sent.'
+    const source = { kind: 'plugin' as const, ...current }
+    let actual: ReturnType<typeof bindingFor>
+    let unseen: ('conversationId' | 'jobId' | 'references')[]
+    if (a.role === 'submit' && auth.action === 'submit') {
+      const differs = submitDiffers(a.operation, a.input, auth.request)
+      if (differs) return this.spend(auth.token, `${differs}, ${nothing}`)
+      actual = bindingFor('submit', {
+        jobId: auth.jobId,
+        conversationId: '',
+        source,
+        request: auth.request
+      })
+      unseen = ['conversationId']
+    } else if (a.role === 'cancel' && auth.action === 'cancel') {
+      const sep = auth.remoteId.indexOf('|')
+      const theirs = (a.input as { remoteId?: unknown } | null)?.remoteId
+      if (
+        sep <= 0 ||
+        auth.remoteId.slice(0, sep) !== a.operation ||
+        theirs !== auth.remoteId.slice(sep + 1)
+      )
+        return this.spend(auth.token, `That approval was for another job, ${nothing}`)
+      actual = bindingFor('cancel', {
+        jobId: '',
+        conversationId: '',
+        source,
+        request: {
+          operation: a.operation as MediaRequest['operation'],
+          prompt: '',
+          references: []
+        },
+        remoteId: auth.remoteId
+      })
+      unseen = ['conversationId', 'jobId', 'references']
+    } else
+      return this.spend(
+        auth.token,
+        a.role === 'status' || a.role === 'result'
+          ? `A status or result check can't use an approval, ${nothing}`
+          : `That approval was for something else, ${nothing}`
+      )
+    try {
+      this.authorizations().consume(auth.token, actual, unseen)
+    } catch (err) {
+      if (err instanceof AuthorizationError) return err.message
+      throw err
+    }
+    return null
+  }
+
+  // Uses a token up without dispatching anything, and says why.
+  private spend(token: AuthorizationToken, why: string): string {
+    try {
+      this.authorizations().consume(token, {} as never, [])
+    } catch {
+      // Always throws: an empty binding matches nothing.
+    }
+    return why
+  }
+
+  private authorizations(): Authorizations {
+    return this.d.authorizations ?? authorizations
   }
 
   widgetCode(id: string, buildId: string, widgetId: string): string | null {
@@ -981,6 +1137,9 @@ export class PluginHost {
     return values
   }
 
+  // A tool call from the assistant or a widget. A media provider's tools
+  // aren't reachable this way, whatever the snapshot says: only Design's job
+  // flow runs them, through invokeMedia.
   async invoke(
     name: string,
     input: unknown,
@@ -991,9 +1150,23 @@ export class PluginHost {
       // The user already approved this exact call (a repeat of an action
       // whose outcome was unknown), so don't ask again.
       preApproved?: boolean
+    }
+  ): Promise<ToolOutcome> {
+    return this.run(name, input, o, false)
+  }
+
+  private async run(
+    name: string,
+    input: unknown,
+    o: {
+      snapshot: ToolSnapshot
+      signal: AbortSignal
+      approve: (r: ApprovalRequest) => Promise<boolean>
+      preApproved?: boolean
       // Media calls only (invokeMedia): a larger bound on `data`.
       dataLimit?: number
-    }
+    },
+    media: boolean
   ): Promise<ToolOutcome> {
     const offered = o.snapshot.get(name)
     const split = splitToolName(name)
@@ -1018,6 +1191,8 @@ export class PluginHost {
     if (typeof c === 'string') return notRun(c)
     const tool = c.manifest.tools.find((t) => t.name === split.tool)
     if (!tool) return notRun('This plugin has no such tool.')
+    if (!media && mediaTools(c.manifest).has(tool.name))
+      return notRun("This tool is only run by Design's media jobs, so nothing was done.")
     const errors = validate(tool.inputSchema, input ?? {})
     if (errors.length) return notRun(`Invalid input: ${errors.slice(0, 5).join('; ')}`)
 

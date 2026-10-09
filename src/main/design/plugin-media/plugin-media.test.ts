@@ -1,13 +1,25 @@
-import { cpSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import vm from 'vm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { defaultDesignSettings, type Job, type MediaProvider } from '../../../shared/design'
-import { PluginHost, type ApprovalRequest, type RuntimeFactory } from '../../plugins/host'
+import {
+  defaultDesignSettings,
+  type Job,
+  type MediaProvider,
+  type MediaRequest,
+  type AuthorizationToken
+} from '../../../shared/design'
+import {
+  PluginHost,
+  type ApprovalRequest,
+  type MediaAuthorization,
+  type RuntimeFactory
+} from '../../plugins/host'
 import { parseManifest, permissionsOf } from '../../plugins/manifest'
 import { PluginStore } from '../../plugins/store'
 import { DuplicateRiskError, JobTracker } from '../jobs'
+import { authorizations, bindingFor, sha256 } from '../authorization'
 import { ArtifactStore, JobStore } from '../store'
 import { jobAction, runDesignTool, type DesignService, type DesignToolContext } from '../tools'
 import { pluginMediaProviders, providerIdOf, readStatus, type PluginMediaDeps } from './adapter'
@@ -113,7 +125,7 @@ function service(host: PluginHost, saved: Job[] = []): DesignService & { jobStor
       {
         provider: (id) => providers().find((p) => p.info().id === id) ?? null,
         save: (j) => jobStore.save(j),
-        read: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]),
+        read: async () => REF_BYTES,
         now: () => (clock += 2000)
       },
       saved
@@ -125,6 +137,9 @@ function service(host: PluginHost, saved: Job[] = []): DesignService & { jobStor
     jobStore
   }
 }
+
+// What the test attachment contains, and its hash as its record carries it.
+const REF_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])
 
 const ctx = (): DesignToolContext & { asked: string[] } => {
   const asked: string[] = []
@@ -143,7 +158,7 @@ const ctx = (): DesignToolContext & { asked: string[] } => {
         mime: 'image/png',
         bytes: 95,
         attachmentId: id,
-        sha256: 'h'
+        sha256: sha256(REF_BYTES)
       })),
     signal: new AbortController().signal,
     asked
@@ -241,6 +256,11 @@ describe('media manifest', () => {
       'a write tool as status',
       withCap((c) => ((c.tools as Record<string, string>).status = 'submit')),
       /tools\.status: submit must be a read tool/
+    ],
+    [
+      'a read tool as cancel (cancelling changes the job at the provider)',
+      withCap((c) => ((c.tools as Record<string, string>).cancel = 'jobs')),
+      /tools\.cancel: jobs must be a write tool \(it changes the job at the provider\)/
     ],
     [
       'an unknown tool',
@@ -464,6 +484,231 @@ describe('plugin media jobs', () => {
     expect(after.state).toBe('cancelled')
     expect(pluginAsks).toEqual([])
     expect((await fixtureJobs(host))[0].state).toBe('cancelled')
+  })
+
+  it('a cancel without confirmation sends nothing; the model gets its own card', async () => {
+    const host = newHost()
+    await install(host)
+    const s = service(host)
+    await submit(s, ctx(), 'cancel me')
+    const [job] = s.jobs.list(CHAT)
+    await expect(jobAction(s, CHAT, 'cancel', job.id)).rejects.toThrow(/not confirmed/)
+    await expect(
+      jobAction(s, CHAT, 'cancel', job.id, undefined, async () => false)
+    ).rejects.toThrow(/not confirmed/)
+    // A token minted for another job doesn't cancel this one.
+    const other = authorizations.mint({ ...s.jobs.cancelBinding(job.id), jobId: 'other' })
+    await expect(s.jobs.cancel(job.id, other)).rejects.toThrow(/different job/)
+    expect((await fixtureJobs(host))[0].state).not.toBe('cancelled')
+    const c = ctx()
+    const r = await runDesignTool(s, 'design_jobs', { action: 'cancel', job: job.id }, c)
+    expect(r.content).toMatch(/cancelled/)
+    expect(c.asked).toHaveLength(1)
+    expect(c.asked[0]).toMatch(/cancel a job[\s\S]*only if the provider confirms/)
+    expect(pluginAsks).toEqual([])
+  })
+
+  it('stop tracking is local', async () => {
+    const host = newHost()
+    await install(host)
+    const s = service(host)
+    await submit(s, ctx(), 'keep going')
+    const [job] = s.jobs.list(CHAT)
+    const r = await runDesignTool(s, 'design_jobs', { action: 'stop', job: job.id }, ctx())
+    expect(r.content).toMatch(/keeps running/)
+    expect((await fixtureJobs(host))[0].state).not.toBe('cancelled')
+  })
+
+  it('a plugin update between the card and the send refuses it, as not dispatched', async () => {
+    const host = newHost()
+    await install(host)
+    const s = service(host)
+    const c = ctx()
+    c.approve = async () => {
+      const f = join(base, 'plugin', 'slowmo', 'src', 'index.ts')
+      writeFileSync(f, readFileSync(f, 'utf8') + '\n// changed\n')
+      const v = await host.validate('slowmo')
+      await host.activate('slowmo', v.buildId!, permissionsOf(v.manifest!))
+      return true
+    }
+    await submit(s, c, 'anything')
+    const [job] = s.jobs.list(CHAT)
+    expect(job).toMatchObject({ state: 'failed', dispatch: { state: 'not-dispatched' } })
+    expect(job.error).toMatch(/build/)
+    expect(await fixtureJobs(host)).toEqual([])
+  })
+
+  describe('the host consumes a media authorization at dispatch', () => {
+    const request: MediaRequest = {
+      operation: 'video.text-to-video',
+      prompt: 'bound',
+      references: [],
+      durationSeconds: 2
+    }
+    const input = {
+      operation: 'video.text-to-video',
+      prompt: 'bound',
+      idempotencyKey: 'job-1',
+      durationSeconds: 2
+    }
+    const call = (
+      host: PluginHost,
+      role: 'submit' | 'status' | 'result' | 'cancel',
+      i: unknown,
+      authorization?: MediaAuthorization
+    ): ReturnType<PluginHost['invokeMedia']> =>
+      host.invokeMedia(
+        {
+          pluginId: 'slowmo',
+          providerId: 'video',
+          operation: 'video.text-to-video',
+          role,
+          input: i
+        },
+        {
+          signal: new AbortController().signal,
+          approve: async (r) => {
+            pluginAsks.push(r)
+            return false
+          },
+          ...(authorization ? { authorization } : {})
+        }
+      )
+    const mint = (buildId: string, over: Partial<MediaRequest> = {}): AuthorizationToken =>
+      authorizations.mint(
+        bindingFor('submit', {
+          jobId: 'job-1',
+          conversationId: CHAT,
+          source: { kind: 'plugin', pluginId: 'slowmo', buildId, providerId: 'video' },
+          request: { ...request, ...over }
+        })
+      )
+
+    it('refuses mutation, another build, another role, replay and no token', async () => {
+      const host = newHost()
+      await install(host)
+      const { buildId } = host.mediaCatalog()[0]
+      const sub = (token: ReturnType<typeof mint>, r = request): MediaAuthorization => ({
+        action: 'submit',
+        token,
+        jobId: 'job-1',
+        request: r
+      })
+      // Argument mutated after approval (input differs from the approved request).
+      expect(
+        (await call(host, 'submit', { ...input, prompt: 'other' }, sub(mint(buildId)))).content
+      ).toMatch(/request changed/)
+      // The approved request itself differs from what was minted.
+      expect(
+        (
+          await call(
+            host,
+            'submit',
+            { ...input, prompt: 'x' },
+            sub(mint(buildId), { ...request, prompt: 'x' })
+          )
+        ).content
+      ).toMatch(/request changed/)
+      // Minted for an older build.
+      expect(await call(host, 'submit', input, sub(mint('old')))).toMatchObject({
+        outcome: 'not-run'
+      })
+      // A submit token used for status, or a forged one.
+      const t = mint(buildId)
+      expect((await call(host, 'status', { remoteId: 'x' }, sub(t))).content).toMatch(
+        /status or result/
+      )
+      expect((await call(host, 'submit', input, sub(t))).content).toMatch(/no valid approval/)
+      expect((await call(host, 'submit', input, sub('forged' as never))).content).toMatch(
+        /no valid approval/
+      )
+      // No token: the plugin's own card would be needed, and Design refuses it.
+      expect((await call(host, 'submit', input)).outcome).toBe('not-run')
+      expect(pluginAsks).toHaveLength(1)
+      expect(await fixtureJobs(host)).toEqual([])
+      // The right one runs once; a replay is refused even after the result.
+      const good = mint(buildId)
+      expect((await call(host, 'submit', input, sub(good))).outcome).toBe('completed')
+      expect((await call(host, 'submit', input, sub(good))).content).toMatch(/no valid approval/)
+      expect(await fixtureJobs(host)).toHaveLength(1)
+    })
+
+    it('binds references by content: a replaced file is refused', async () => {
+      const host = newHost()
+      await install(host)
+      const { buildId } = host.mediaCatalog()[0]
+      const ref = {
+        kind: 'image' as const,
+        name: 'ref.png',
+        mime: 'image/png',
+        bytes: 10,
+        attachmentId: 'att-1',
+        sha256: sha256(REF_BYTES)
+      }
+      const r: MediaRequest = { ...request, operation: 'video.image-to-video', references: [ref] }
+      const token = authorizations.mint(
+        bindingFor('submit', {
+          jobId: 'job-1',
+          conversationId: CHAT,
+          source: { kind: 'plugin', pluginId: 'slowmo', buildId, providerId: 'video' },
+          request: r
+        })
+      )
+      const swapped = Buffer.from('other bytes').toString('base64')
+      const res = await host.invokeMedia(
+        {
+          pluginId: 'slowmo',
+          providerId: 'video',
+          operation: 'video.image-to-video',
+          role: 'submit',
+          input: {
+            ...input,
+            operation: 'video.image-to-video',
+            references: [{ name: 'ref.png', mime: 'image/png', base64: swapped }]
+          }
+        },
+        {
+          signal: new AbortController().signal,
+          approve: async () => false,
+          authorization: { action: 'submit', token, jobId: 'job-1', request: r }
+        }
+      )
+      expect(res.content).toMatch(/files to send changed/)
+      expect(await fixtureJobs(host)).toEqual([])
+    })
+
+    it('an uncertain outcome never makes the token reusable', async () => {
+      const host = newHost()
+      await install(host)
+      const s = service(host)
+      await submit(s, ctx(), 'this gets lost')
+      const [job] = s.jobs.list(CHAT)
+      expect(job.state).toBe('unknown')
+      // The tracker refuses to send it again, and so would the host.
+      await expect(s.jobs.submit(job.id)).rejects.toThrow(/already sent/)
+      expect((await fixtureJobs(host)).length).toBeLessThanOrEqual(1)
+    })
+  })
+
+  it("media tools can't be reached as plain tools, even pre-approved", async () => {
+    const host = newHost()
+    await install(host)
+    const { buildId } = host.mediaCatalog()[0]
+    expect(host.toolSet().tools.map((t) => t.name)).not.toContain('slowmo__submit')
+    for (const name of ['slowmo__submit', 'slowmo__cancel', 'slowmo__status']) {
+      const r = await host.invoke(
+        name,
+        { remoteId: 'x', operation: 'video.text-to-video', prompt: 'p', idempotencyKey: 'k' },
+        {
+          snapshot: new Map([[name, { pluginId: 'slowmo', buildId }]]),
+          signal: new AbortController().signal,
+          approve: async () => true,
+          preApproved: true
+        }
+      )
+      expect(r.content).toMatch(/only run by Design/)
+    }
+    expect(await fixtureJobs(host)).toEqual([])
   })
 
   it('survives a restart: tracking off, then checked to completion with no resubmission', async () => {
