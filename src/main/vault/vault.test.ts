@@ -314,7 +314,9 @@ describe('vault note creation (race-resistant)', () => {
     )
     expect(r).toMatchObject({ isError: true, outcome: 'not-run' })
     expect(r.content).toMatch(/No skills here\. Nothing was written\./)
-    expect(readdirSync(join(vault, 'Custard', 'Skills', 'x'))).toEqual([])
+    // The guard is asked before each missing folder is made too (2.2), so not
+    // even the empty folder is left in the protected place.
+    expect(readdirSync(join(vault, 'Custard', 'Skills'))).toEqual([])
   })
 
   it('creates a note normally and never replaces one', async () => {

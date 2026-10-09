@@ -80,6 +80,35 @@ export class JobTracker {
     }
   }
 
+  // Startup, after providers are registered: a job saved as sent but with no
+  // remote id asks its provider whether it has a result for the job's key
+  // (MediaProvider.recover; only providers that keep a local copy offer it).
+  // A job found is linked and takes the provider's state; nothing is sent,
+  // retried or tracked. One not found stays unknown.
+  async recover(): Promise<Job[]> {
+    const found: Job[] = []
+    for (const j of [...this.jobs.values()]) {
+      if (j.state !== 'unknown' || j.remoteId || !j.attemptedAt) continue
+      const provider = this.deps.provider(j.providerId)
+      if (!provider?.recover) continue
+      let r: Awaited<ReturnType<NonNullable<MediaProvider['recover']>>>
+      try {
+        r = await provider.recover(j.idempotencyKey)
+      } catch {
+        continue
+      }
+      // Forgotten (its chat deleted) while this was being looked up.
+      if (!r || !this.jobs.has(j.id)) continue
+      const job: Job = { ...this.jobs.get(j.id)!, remoteId: r.remoteId }
+      job.error = undefined
+      job.errorKind = undefined
+      this.apply(job, r.status)
+      job.tracking = false
+      found.push(this.put(job))
+    }
+    return found
+  }
+
   get(id: string): Job | undefined {
     const j = this.jobs.get(id)
     return j && { ...j }

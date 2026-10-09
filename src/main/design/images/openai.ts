@@ -255,7 +255,13 @@ export class OpenAIImages implements MediaProvider {
       }
     const file: MediaFile = { name: `image.${format === 'jpeg' ? 'jpg' : format}`, mime, bytes }
     try {
-      this.deps.results.put(remoteId, file, model.id, (this.deps.now ?? Date.now)())
+      this.deps.results.put(
+        remoteId,
+        file,
+        model.id,
+        (this.deps.now ?? Date.now)(),
+        options.idempotencyKey
+      )
     } catch (err) {
       // Made and probably charged, but not saved: say so rather than fail
       // quietly. It can't be fetched again from OpenAI.
@@ -266,6 +272,18 @@ export class OpenAIImages implements MediaProvider {
       )
     }
     return { remoteId, status: { state: 'completed' } }
+  }
+
+  // After a restart, for a job saved as sent but with no remote id: Custard
+  // stopped after the image was stored and before the job recorded it.
+  // Local only (Thread 2, 2.1): never contacts OpenAI, never sends again.
+  async recover(
+    idempotencyKey: string
+  ): Promise<{ remoteId: string; status: RemoteStatus } | null> {
+    const remoteId = remoteIdFor(idempotencyKey)
+    return this.deps.results.recover(remoteId, idempotencyKey)
+      ? { remoteId, status: { state: 'completed' } }
+      : null
   }
 
   // Local only: OpenAI has nothing to check.

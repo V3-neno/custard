@@ -21,7 +21,8 @@ import { mediaProvider, mediaProviders } from './registry'
 import { ArtifactStore, JobStore } from './store'
 import { jobAction, type DesignService } from './tools'
 import { registerHtml } from './html'
-import { registerImages } from './images'
+import { pruneImages, registerImages } from './images'
+import { reconcileDesign } from './recovery'
 import { registerPluginMedia } from './plugin-media'
 
 // Design's main-process service: stored outputs, jobs, settings, the
@@ -103,8 +104,22 @@ const MEDIA_TYPES = /^(image\/(png|jpeg|webp|gif)|video\/(mp4|webm))$/
 
 export function registerDesignHandlers(): void {
   registerHtml()
-  registerImages()
+  const images = registerImages()
   registerPluginMedia()
+  // Startup reconciliation (recovery.ts): interrupted chat deletions, then
+  // results stored before Custard stopped, then tidying. Local only.
+  const s = design()
+  void reconcileDesign({
+    jobs: s.jobs,
+    chatExists: (chat) => getConversation(chat) !== null,
+    forgetChat: designChatDeleted,
+    prune: () => pruneImages(images, s.jobs.list(), (c, a) => s.artifacts.get(c, a))
+  })
+    .then((r) => {
+      for (const job of r.recovered)
+        s.emit({ type: 'job', conversationId: job.requestedBy.conversationId, job })
+    })
+    .catch((err) => console.error('Design: startup reconciliation failed:', err))
   handle('design:subscribe', (e) => {
     listeners.add(e.sender)
     e.sender.once('destroyed', () => listeners.delete(e.sender))
