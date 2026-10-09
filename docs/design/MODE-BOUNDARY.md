@@ -35,33 +35,77 @@ The boundary is therefore **not complete** while any such plugin can be enabled.
 
 Plugin code with network access to a host can cause whatever side effects that host's API allows. The host enforces _which plugin_, _which hosts_, _which tools ask_, and (with option A or C) _which HTTP methods_. It cannot see what a request means. Every option below makes the boundary depend on a classification by the user, and on the plugin's code doing what its review showed.
 
-## Options
+## Options (Amendment 4 format; none is built)
 
-### A. Opt-in per plugin, plus read tools limited to GET/HEAD (recommended)
+None of these proves that plugin code can't start implementation work. Plugin
+code with network access to a host can do anything that host's API allows,
+whatever its tools are called or labelled. What each option changes is which
+plugins and which kinds of request can run from Chat and Design at all, and
+on whose say-so. Domain or host labels ("coding", "agent") are not used: a
+host can offer many services, and labels prove nothing.
 
-- New per-plugin setting, held by Custard (not the manifest): **"Use in Chat and Design"**. Shown at activation and in Settings → Plugins with the text "Only for plugins that don't create plugins or skills, send prompts to coding or agent services, or start implementation work."
-- Off: the plugin's tools, widgets and media providers aren't offered or run in Chat, Design or Skills. Checked in the host on every call (not just when listing), so a stale tool list, a widget, or `invokeMedia` can't reach it.
-- Tied to the plugin, re-asked when its network hosts or account change (a new host could be an agent service).
-- In every mode, read tools may only send GET/HEAD (enforced in `fetchFor`). Writes still go through cards.
-- **Compatibility:** Spotify (and any other active plugin) is off in Chat/Design until the user turns it on once. Spotify's read tools use GET only, so they keep working. A plugin whose read tool POSTs must relabel it as write.
-- **Guarantees:** a plugin the user didn't opt in can't run anything from Chat or Design by any path. A read tool can't send a body-carrying request.
-- **Still trusts:** the user's classification; that opted-in plugin code matches its review; that GETs to approved hosts don't start work.
+### A. Per-plugin "Use in Chat and Design" grant, plus read tools limited to GET/HEAD (recommended)
+
+1. **Host enforces:** a plugin without the grant has no tool, widget or
+   media provider offered or run in Chat, Design or Skills. Checked in the
+   host on every call (`invoke`, widget calls, `invokeMedia`), not only when
+   the list is built, so a stale list or another path can't reach it. In
+   every mode, `fetchFor` refuses any method but GET and HEAD from a tool
+   declared `read`.
+2. **Still trusts plugin code:** that a granted plugin's code does what its
+   review showed. GET requests to approved hosts can still have side effects
+   at those hosts (a webhook URL, a badly designed API). Write tools still
+   rely on the user's card.
+3. **Compatibility:** every active plugin (today Spotify) stops working in
+   Chat, Design and Skills until the user turns the grant on once. Spotify's
+   read tools only use GET, so they keep working. A plugin whose read tool
+   POSTs must relabel it `write`.
+4. **Requirement:** expresses the user's trust; it doesn't satisfy the
+   requirement by proof. It closes the default path (nothing new reaches
+   Chat/Design without the user's say) and removes the no-card read-tool
+   route for body-carrying requests. It doesn't weaken anything that exists.
+5. **New tools and updates:** the grant belongs to the plugin, but is asked
+   again when an update adds a network host, account scope or write tool
+   (anything that changes what it can reach or do). Updates that only change
+   code under the same permissions keep it (that's the existing review step's
+   job). Unknown tools are refused in every mode already.
 
 ### B. Opt-out flag "Starts work in coding or agent services"
 
-- Same enforcement as A, inverted: plugins work everywhere unless the user marks them.
-- **Compatibility:** nothing changes for existing plugins.
-- **Guarantees:** only what the user remembered to mark is kept out. A new agent plugin is in Chat/Design by default. Weaker than A.
+1. **Host enforces:** the same exclusion as A, but only for plugins the user
+   marked.
+2. **Still trusts:** that the user marks every such plugin, plus everything
+   A trusts.
+3. **Compatibility:** none for existing plugins.
+4. **Requirement:** weakens it: a new agent plugin is in Chat/Design by
+   default until someone notices.
+5. **New tools and updates:** an update that adds an agent host isn't
+   noticed unless the user re-marks the plugin.
 
-### C. Chat and Design get plugin read tools only (GET/HEAD enforced)
+### C. Chat and Design run plugin read tools only (GET/HEAD enforced)
 
-- No plugin write tools, widget actions or `openExternal` in Chat/Design. Writes only in Code's Plugins workspace. Design media stays (it is Design's own approved route).
-- **Compatibility:** Spotify loses queue, playback controls and its player's buttons in Chat.
-- **Guarantees:** no plugin call from Chat/Design can send a body-carrying request. Still trusts that GETs don't start work.
+1. **Host enforces:** no plugin write tool, widget action, account write or
+   `openExternal` from Chat or Design; read tools limited to GET/HEAD. Design
+   media keeps its own approved route.
+2. **Still trusts:** that GETs to approved hosts don't start work.
+3. **Compatibility:** Spotify loses queueing and playback control (and its
+   player's buttons) in Chat.
+4. **Requirement:** the closest the host can get without per-plugin trust,
+   but still not proof (GET side effects).
+5. **New tools and updates:** a new write tool is never available in
+   Chat/Design; a new read tool is, limited to GET/HEAD.
 
 ### D. Document only
 
-- Keep current behaviour and record the bypass as a known gap. The boundary stays **not complete**.
+1. **Host enforces:** nothing new.
+2. **Still trusts:** every enabled plugin, including its read tools' POSTs.
+3. **Compatibility:** none.
+4. **Requirement:** not met; the bypass stays and the boundary is reported
+   as not complete. Model instructions are not counted as a control.
+5. **New tools and updates:** offered in Chat/Design as soon as enabled.
+
+A and C can be combined (grant required, and Chat/Design limited to reads),
+at the cost of both compatibility impacts.
 
 ## External links and status/result calls (item 1.5)
 
