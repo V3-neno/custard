@@ -359,20 +359,20 @@ describe('OpenAI Images: submitting', () => {
 
 describe('OpenAI Images: outcomes', () => {
   const h = new Headers()
-  it('a 4xx means OpenAI refused it and it did not run', () => {
+  it('a 4xx means OpenAI refused it: it was sent, and made no image', () => {
     expect(
       mapError(APIError.generate(400, { error: { message: 'bad prompt' } }, undefined, h), 'm')
-    ).toMatchObject({ kind: 'rejected', sent: false })
+    ).toMatchObject({ kind: 'rejected', sent: true })
     expect(mapError(APIError.generate(401, undefined, 'nope', h), 'm')).toMatchObject({
       kind: 'unconfigured',
-      sent: false
+      sent: true
     })
     expect(mapError(APIError.generate(403, undefined, 'verify', h), 'm').message).toMatch(
       /organization verification/
     )
     expect(mapError(APIError.generate(429, undefined, 'slow down', h), 'm')).toMatchObject({
       kind: 'temporary',
-      sent: false
+      sent: true
     })
   })
 
@@ -381,9 +381,9 @@ describe('OpenAI Images: outcomes', () => {
     // because OpenAI doesn't document whether a refused request is billed.
     for (const status of [400, 401, 403, 404, 409, 413, 422, 429])
       expect(
-        mapError(APIError.generate(status, undefined, 'no', h), 'm').dispatch,
+        mapError(APIError.generate(status, undefined, 'no', h), 'm'),
         String(status)
-      ).toMatchObject({ state: 'rejected', repeat: { risk: 'unknown' } })
+      ).toMatchObject({ sent: true, dispatch: { state: 'rejected', repeat: { risk: 'unknown' } } })
     for (const e of [
       APIError.generate(500, undefined, 'oops', h),
       APIError.generate(503, undefined, 'busy', h),

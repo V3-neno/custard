@@ -90,8 +90,9 @@ const refusedHere = (kind: MediaError['kind'], message: string): MediaError =>
     repeat: { risk: 'safe', basis: 'Custard refused it before calling OpenAI.' }
   })
 
+// `sent: true`: a 4xx is a response, so the request did leave (amendment 1).
 const refusedByOpenAI = (kind: MediaError['kind'], message: string, status: number): MediaError =>
-  new MediaError(kind, message, false, {
+  new MediaError(kind, message, true, {
     state: 'rejected',
     repeat: {
       risk: 'unknown',
