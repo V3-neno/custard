@@ -47,7 +47,28 @@ export const hashSources = (files: SourceFile[]): string =>
 
 type Esbuild = typeof import('esbuild')
 let esbuild: Esbuild | null = null
-const load = async (): Promise<Esbuild> => (esbuild ??= await import('esbuild'))
+// Packaged builds: esbuild spawns its native binary, and spawn can't run a
+// file inside app.asar, so it's pointed at the unpacked copy
+// (electron-builder.yml asarUnpack). Always set there, so an inherited
+// ESBUILD_BINARY_PATH can't choose another binary.
+function unpackedBinary(): string | null {
+  const res = (process as { resourcesPath?: string }).resourcesPath
+  if (!res || !__dirname.includes(`${sep}app.asar${sep}`)) return null
+  const bin = process.platform === 'win32' ? 'esbuild.exe' : join('bin', 'esbuild')
+  return join(
+    res,
+    'app.asar.unpacked',
+    'node_modules',
+    '@esbuild',
+    `${process.platform}-${process.arch}`,
+    bin
+  )
+}
+const load = async (): Promise<Esbuild> => {
+  const bin = esbuild ? null : unpackedBinary()
+  if (bin) process.env.ESBUILD_BINARY_PATH = bin
+  return (esbuild ??= await import('esbuild'))
+}
 
 const EXTENSIONS = ['', '.ts', '.js', '.json', '/index.ts', '/index.js']
 
