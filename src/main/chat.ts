@@ -322,7 +322,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   // checked against the plugin's state again when it runs.
   const pluginsAllowed = policy.tools.has('plugin')
   const plugins = pluginsAllowed
-    ? pluginHost().toolSet()
+    ? pluginHost().toolSet(conversation.mode)
     : { tools: [], snapshot: new Map(), instructions: [] }
 
   const system: BetaTextBlockParam[] = [
@@ -404,7 +404,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ...(workspace?.tools ?? []),
     ...web.tools,
     ...plugins.tools,
-    ...(widgetCatalog.length ? widgetTools(widgets().keys()) : []),
+    ...(widgetCatalog.length ? widgetTools(widgets().keys(conversation.id)) : []),
     ...(policy.tools.has('design') ? designTools() : [])
   ].filter((t) => policy.tools.has(kindOf(t.name)))
   const available = new Set(tools.map((t) => t.name))
@@ -679,6 +679,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       const { data, ...r } = await pluginHost().invoke(c.name, c.input, {
         snapshot: plugins.snapshot,
         signal: controller.signal,
+        mode: conversation.mode,
         approve,
         preApproved
       })

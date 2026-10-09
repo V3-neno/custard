@@ -113,6 +113,9 @@ try {
   await w.click('button:has-text("Save configuration")')
   await w.click('button:text-is("Connect")')
   await w.waitForSelector('text=· connected', { timeout: 15000 })
+  // Chat, Design and Skills use a plugin only once it's turned on for them.
+  await w.click('label:has-text("in Chat, Design and Skills") input[type=checkbox]')
+  await w.waitForSelector('label:has-text("in Chat, Design and Skills") input:checked')
   await w.click('button:text-is("Done")')
 
   const readJson = (f) => {

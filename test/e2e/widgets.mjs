@@ -186,6 +186,9 @@ const activate = async (name) => {
   for (let i = 0; i < (await boxes.count()); i++) await boxes.nth(i).check()
   await w.click('button:text-matches("^Activate [0-9]")')
   await w.waitForSelector('button:text-is("Disable")', { timeout: 30000 })
+  // Chat, Design and Skills use a plugin only once it's turned on for them.
+  await w.click('label:has-text("in Chat, Design and Skills") input[type=checkbox]')
+  await w.waitForSelector('label:has-text("in Chat, Design and Skills") input:checked')
   await w.click('button:text-is("Done")')
 }
 const newChat = async () => {
@@ -471,6 +474,9 @@ try {
   await w.click('button:has-text("Save configuration")')
   await w.click('button:text-is("Connect")')
   await w.waitForSelector('text=· connected', { timeout: 15000 })
+  // Chat, Design and Skills use a plugin only once it's turned on for them.
+  await w.click('label:has-text("in Chat, Design and Skills") input[type=checkbox]')
+  await w.waitForSelector('label:has-text("in Chat, Design and Skills") input:checked')
   await w.click('button:text-is("Done")')
   await newChat()
   await send('widget spotify test')

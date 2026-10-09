@@ -92,10 +92,12 @@ function newHost(): PluginHost {
   })
 }
 
-async function install(host: PluginHost): Promise<void> {
+async function install(host: PluginHost, chatDesign = true): Promise<void> {
   const v = await host.validate('slowmo')
   expect(v.errors).toEqual([])
   await host.activate('slowmo', v.buildId!, permissionsOf(v.manifest!))
+  // Design runs a plugin only once the user turns on Use in Chat and Design.
+  if (chatDesign) host.setChatDesign('slowmo', true)
 }
 
 function deps(host: PluginHost): PluginMediaDeps {
@@ -177,6 +179,7 @@ async function fixtureJobs(
         ['slowmo__jobs', { pluginId: 'slowmo', buildId: host.status('slowmo').active!.buildId }]
       ]),
       signal: new AbortController().signal,
+      mode: 'code',
       approve: async () => false
     }
   )
@@ -330,7 +333,7 @@ describe('plugin host media route', () => {
   it("doesn't offer media tools to the model, and refuses them as plain tool calls", async () => {
     const host = newHost()
     await install(host)
-    const { tools, snapshot } = host.toolSet()
+    const { tools, snapshot } = host.toolSet('code')
     expect(tools.map((t) => t.name)).toEqual(['slowmo__jobs'])
     const r = await host.invoke(
       'slowmo__submit',
@@ -338,6 +341,7 @@ describe('plugin host media route', () => {
       {
         snapshot,
         signal: new AbortController().signal,
+        mode: 'code',
         approve: async () => true
       }
     )
@@ -382,6 +386,38 @@ describe('plugin host media route', () => {
       ready: false,
       needs: expect.stringMatching(/turned off/)
     })
+  })
+
+  it('needs Use in Chat and Design before Design can use it', async () => {
+    const host = newHost()
+    await install(host, false)
+    expect(host.mediaCatalog()[0]).toMatchObject({
+      ready: false,
+      needs: expect.stringMatching(/turn on Use in Chat and Design/)
+    })
+    let asked = 0
+    const r = await host.invokeMedia(
+      {
+        pluginId: 'slowmo',
+        providerId: 'video',
+        operation: 'video.text-to-video',
+        role: 'status',
+        input: { remoteId: 'x' }
+      },
+      {
+        signal: new AbortController().signal,
+        approve: async () => {
+          asked++
+          return true
+        }
+      }
+    )
+    expect(r).toMatchObject({ outcome: 'not-run', isError: true })
+    expect(r.content).toMatch(/isn't turned on for Chat and Design/)
+    expect(asked).toBe(0)
+    expect(await fixtureJobs(host)).toEqual([])
+    host.setChatDesign('slowmo', true)
+    expect(host.mediaCatalog()[0].ready).toBe(true)
   })
 })
 
@@ -694,7 +730,7 @@ describe('plugin media jobs', () => {
     const host = newHost()
     await install(host)
     const { buildId } = host.mediaCatalog()[0]
-    expect(host.toolSet().tools.map((t) => t.name)).not.toContain('slowmo__submit')
+    expect(host.toolSet('code').tools.map((t) => t.name)).not.toContain('slowmo__submit')
     for (const name of ['slowmo__submit', 'slowmo__cancel', 'slowmo__status']) {
       const r = await host.invoke(
         name,
@@ -702,6 +738,7 @@ describe('plugin media jobs', () => {
         {
           snapshot: new Map([[name, { pluginId: 'slowmo', buildId }]]),
           signal: new AbortController().signal,
+          mode: 'code',
           approve: async () => true,
           preApproved: true
         }

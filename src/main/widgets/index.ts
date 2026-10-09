@@ -1,7 +1,8 @@
 import { app, BrowserWindow, type WebContents } from 'electron'
 import { handle, on } from '../ipc'
 import { pluginHost } from '../plugins'
-import { messageCount } from '../store'
+import { conversationMode, messageCount } from '../store'
+import type { Mode } from '../../shared/chat'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation } from '../../shared/widgets'
 import { WidgetManager } from './manager'
 import { widgetRecords } from './records'
@@ -21,14 +22,22 @@ export function setRequestLookup(fn: (requestId: string) => string | null): void
   requestLookup = fn
 }
 
+// A widget's plugin may run in its conversation only if that conversation's
+// mode allows the plugin (see needsChatDesign in plugins/host.ts). Without a
+// known conversation, the strictest mode applies.
+function modeOf(conversationId: string | null): Mode {
+  return (conversationId && conversationMode(conversationId)) || 'chat'
+}
+
 export function widgets(): WidgetManager {
   if (manager) return manager
   const host = pluginHost()
   const m = new WidgetManager({
-    catalog: () => host.widgetCatalog(),
+    catalog: (conversationId) => host.widgetCatalog(modeOf(conversationId)),
     widgetCode: (id, buildId, widgetId) => host.widgetCode(id, buildId, widgetId),
     isWrite: (id, buildId, tool) => host.toolWrites(id, buildId, tool),
-    invoke: (name, input, o) => host.invoke(name, input, o),
+    invoke: (name, input, { conversationId, ...o }) =>
+      host.invoke(name, input, { ...o, mode: modeOf(conversationId) }),
     log: (id, line) => host.widgetLog(id, line),
     surface: createSurface(() => win),
     records: widgetRecords,

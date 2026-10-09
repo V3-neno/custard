@@ -27,3 +27,21 @@ the D2 section of SECURITY-REVIEW.
   that exact call on a card). It can't reach media tools. Replacing it with a
   token too is possible; say if you want it.
 - The JobError-leaves-pending-version finding is fixed in ff5f3a2.
+
+## Option A follow-up (Neno chose "Opt-in per plugin", 2026-10-09)
+
+Files outside Thread 1's ownership that changed, for you to check at merge:
+
+- `src/shared/plugins.ts`: `PluginStatus.chatDesign: 'on' | 'off' | 'changed'`.
+- `src/main/chat.ts`: `toolSet(conversation.mode)`, `mode` passed to `invoke`,
+  `widgets().keys(conversation.id)`.
+- `src/main/store.ts`: `conversationMode(id)`.
+- `src/main/widgets/{index,manager}.ts`: the catalog and `invoke` take the
+  conversation, so the host knows the widget's mode.
+- `src/preload/index.ts`, `src/main/plugins/index.ts`: `plugins:setChatDesign`.
+- `PluginsTab.tsx`: the "Use in Chat and Design" checkbox.
+- e2e suites that use a plugin in Chat or Design now turn it on first.
+
+Existing installs: every plugin is off in Chat, Design and Skills after this
+until turned on (Spotify needs one click). Design's video/image plugins show
+"turn on Use in Chat and Design" as the reason they aren't ready.

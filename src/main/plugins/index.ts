@@ -155,6 +155,9 @@ export function registerPluginHandlers(): void {
   handle('plugins:setAskEveryTime', (_, id: string, tool: string, ask: boolean) =>
     h().setAskEveryTime(id, tool, ask === true)
   )
+  handle('plugins:setChatDesign', (_, id: string, on: boolean) =>
+    h().setChatDesign(id, on === true)
+  )
   handle('plugins:connect', (_, id: string) => h().connect(id))
   handle('plugins:disconnect', (_, id: string) => h().disconnect(id))
   handle('plugins:resetSecrets', async (e, id: string) => {
