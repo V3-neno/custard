@@ -34,4 +34,22 @@ describe('IPC sender checks', () => {
     call(app)
     expect(ran).toEqual([['chat', 'cancel', 'job']])
   })
+
+  it('with an app page set, answers only its top frame on that page', async () => {
+    const { handle, allowOnlyAppPage } = await import('./ipc')
+    const ran: unknown[] = []
+    handle('design:job', (_e, ...a) => ran.push(a))
+    allowOnlyAppPage('file:///app/renderer/index.html')
+    const top = { url: 'file:///app/renderer/index.html' }
+    const sender = { mainFrame: top }
+    const call = (senderFrame: unknown): unknown =>
+      handlers.get('design:job')!({ sender, senderFrame }, 'x')
+    expect(() => call({ url: 'file:///app/renderer/index.html' })).toThrow('Not allowed')
+    expect(() => call({ url: 'http://127.0.0.1:1/' })).toThrow('Not allowed')
+    expect(() => call(null)).toThrow('Not allowed')
+    expect(ran).toEqual([])
+    call(top)
+    expect(ran).toEqual([['x']])
+    allowOnlyAppPage(null)
+  })
 })

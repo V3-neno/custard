@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 import type { MemorySettings } from '../shared/memory'
 import type {
   ChatLink,
@@ -214,18 +213,10 @@ const custard = {
   }
 }
 
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('custard', custard)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.custard = custard
-}
+// The main window is sandboxed (src/main/index.ts): this preload may only
+// use what Electron's sandboxed preloads offer (contextBridge, ipcRenderer,
+// a reduced `process`), never Node modules. Context isolation is on, so the
+// API is only ever exposed through the bridge.
+contextBridge.exposeInMainWorld('custard', custard)
 
 export type CustardAPI = typeof custard

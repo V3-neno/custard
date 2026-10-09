@@ -106,7 +106,7 @@ Kernel view per process (`test/platform/sandbox-evidence.mjs`, `/proc/<pid>`):
 | Process              | Seccomp filter        | Own user / net namespace | Launch flags                  | Notes                                                                |
 | -------------------- | --------------------- | ------------------------ | ----------------------------- | -------------------------------------------------------------------- |
 | Preview renderer     | yes (`Seccomp: 2`)    | yes / yes                | none                          | no preload; sees no `window.custard`, `require`, `process`, `Buffer` |
-| Main window renderer | **no**                | no / no                  | `--no-sandbox --no-zygote`    | `sandbox: false` in `src/main/index.ts`; not changed (needs Neno)    |
+| Main window renderer | yes (`Seccomp: 2`)    | yes / yes                | none                          | `sandbox: true` in `src/main/index.ts` (see "Main window")           |
 | GPU                  | no (`NoNewPrivs` set) | no / no                  | `--no-zygote-sandbox`         | software GL under xvfb; recheck on real hardware                     |
 | Network service      | no                    | no / no                  | `--service-sandbox-type=none` | Chromium's default on Linux                                          |
 
@@ -141,3 +141,50 @@ Tab moves from the composer into the preview, and through the page's own
 controls in order, but never back out: the page keeps focus. **F6** returns
 focus to the app; it is handled before the page sees the key, so a page can't
 block it.
+
+## Main window (sandboxed since this change)
+
+`src/main/index.ts` creates the app window with `sandbox: true`.
+`contextIsolation` (true) and `nodeIntegration` (false) are Electron's
+defaults and are not overridden; no bypass flag is set. Verified on the
+packaged Linux build as a non-root user without `--no-sandbox`: the main
+renderer has a seccomp-bpf filter and its own user and net namespaces, and
+sees `window.custard` but no `window.electron`, `require` or `process`
+(`test/platform/sandbox-evidence.mjs`).
+
+**What the preload exposes** (`src/preload/index.ts`): only
+`window.custard`, about 70 functions, each a thin `ipcRenderer.invoke` /
+`send` / listener wrapper (API keys, settings, vault, plugins incl. activate,
+memory, widgets, Design, security, workspace, conversations, attachments,
+chat incl. approve). It uses `contextBridge`, `ipcRenderer` and
+`process.platform`, all of which sandboxed preloads provide, and no Node
+module. Everything the renderer does beyond rendering goes through IPC to
+the main process, which holds the filesystem, network, keys and processes.
+
+**Removed:** `window.electron` (`@electron-toolkit/preload`): raw
+`ipcRenderer` for any channel plus a copy of `process.env`. The renderer
+never used it, and a sandboxed preload cannot `require` the package. The
+dependency is gone.
+
+**Dev:** nothing hard-codes sandbox flags. `--no-sandbox` is only added by
+Playwright (unless `chromiumSandbox: true`) or needed when running as root;
+pass it on the command line when needed. `--inspect` and the inspect fuse
+are unchanged.
+
+**Residual trust assumptions**
+
+- The preload is delivered from `app.asar` (integrity validation is off, see
+  fuses above); whoever can modify the install can change it.
+- The sandbox limits damage from a renderer exploit, not from script
+  injection: a script in the renderer can still call everything
+  `window.custard` offers, including approving cards and activating plugins.
+- IPC sender checks remain a deny-list; the main window can still navigate
+  to remote pages that would receive `window.custard` (no `will-navigate`
+  lock yet). Both are tracked as separate, unconfirmed follow-up commits.
+- GPU and network service processes are not sandboxed on Linux (above).
+- Windows and macOS: not run.
+
+Tests with the main window sandboxed: unit 762/762, `test:electron` 25/25,
+20 e2e suites all pass (dev build, mock model, xvfb, root container so
+Chromium itself ran `--no-sandbox`); packaged non-root sandbox-on:
+`sandbox-evidence`, `design-security`, `widgets` pass.
