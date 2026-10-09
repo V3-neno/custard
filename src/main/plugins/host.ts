@@ -22,6 +22,7 @@ import {
   sha256,
   type Authorizations
 } from '../design/authorization'
+import type { Mode } from '../../shared/chat'
 import { formatLabel } from '../../shared/vault'
 import { WIDGET_LIMITS, type WidgetSpec } from '../../shared/widgets'
 import { resolveInside } from '../workspace/paths'
@@ -143,6 +144,32 @@ export const mediaTools = (m: PluginManifest): Set<string> =>
       p.capabilities.flatMap((c) => Object.values(c.tools).filter(Boolean) as string[])
     )
   )
+
+// "Use in Chat and Design" (docs/design/MODE-BOUNDARY.md, option A, chosen by
+// Neno on 2026-10-09). Chat, Design and Skills only use extensions; they must
+// not start implementation work. Custard can't tell from outside what a
+// plugin's code does with its network access, so a plugin runs in those modes
+// only after the user says they trust it there. This records the user's
+// trust; it is not proof that the plugin can't start implementation work.
+// Only Code's Plugins workspace (where plugins are built) runs plugins
+// without it.
+export const needsChatDesign = (mode: Mode): boolean => mode !== 'code'
+
+// What the choice covers: everywhere the plugin can send data or links, the
+// account it acts as, and its actions. A version that asks for more needs the
+// choice again.
+export const chatDesignScope = (m: PluginManifest): string[] =>
+  permissionsOf(m).filter((p) => /^(network|open|account(-[a-z]+)?|action):/.test(p))
+
+const chatDesignState = (m: PluginManifest, saved: string[] | null): 'on' | 'off' | 'changed' =>
+  !Array.isArray(saved)
+    ? 'off'
+    : chatDesignScope(m).every((p) => saved.includes(p))
+      ? 'on'
+      : 'changed'
+
+const CHAT_DESIGN_OFF = (name: string): string =>
+  `${name} isn't turned on for Chat and Design (Use in Chat and Design, in its plugin settings), so nothing was done.`
 
 export type MediaRole = 'submit' | 'status' | 'result' | 'cancel'
 
@@ -418,6 +445,7 @@ export class PluginHost {
         effect: t.effect,
         askEveryTime: t.effect === 'write' && (st.askEveryTime[t.name] ?? this.d.askByDefault())
       })),
+      chatDesign: active ? chatDesignState(active, st.chatDesign) : 'off',
       ...(m?.widgets?.length
         ? { widgets: m.widgets.map((w) => ({ id: w.id, title: w.title })) }
         : {}),
@@ -783,6 +811,17 @@ export class PluginHost {
     return this.status(id)
   }
 
+  // The user's "Use in Chat and Design" choice for the active version.
+  setChatDesign(id: string, on: boolean): PluginStatus {
+    const st = this.d.store.state(id)
+    if (on && !st.active) throw new Error('Review and activate the plugin first.')
+    this.d.store.setState(id, {
+      chatDesign: on ? chatDesignScope(this.build(id, st.active!.buildId).manifest) : null
+    })
+    this.changed(id)
+    return this.status(id)
+  }
+
   async connect(id: string): Promise<PluginStatus> {
     const { manifest, granted } = this.activeManifest(id)
     const spec = manifest.auth
@@ -837,8 +876,9 @@ export class PluginHost {
     }
   }
 
-  // Tools of every enabled plugin, for the existing assistant tool pipeline.
-  toolSet(): { tools: BetaTool[]; snapshot: ToolSnapshot; instructions: string[] } {
+  // Tools of every enabled plugin a conversation in this mode may use, for
+  // the existing assistant tool pipeline.
+  toolSet(mode: Mode): { tools: BetaTool[]; snapshot: ToolSnapshot; instructions: string[] } {
     const tools: BetaTool[] = []
     const snapshot: ToolSnapshot = new Map()
     const instructions: string[] = []
@@ -846,6 +886,7 @@ export class PluginHost {
       const st = this.d.store.state(id)
       if (!st.enabled || !st.active) continue
       const { manifest, instructions: text } = this.build(id, st.active.buildId)
+      if (needsChatDesign(mode) && chatDesignState(manifest, st.chatDesign) !== 'on') continue
       const media = mediaTools(manifest)
       for (const t of manifest.tools) {
         if (media.has(t.name)) continue
@@ -865,9 +906,9 @@ export class PluginHost {
     return { tools, snapshot, instructions }
   }
 
-  // Widgets the assistant may show now: declared by an enabled plugin's
-  // active build and approved by the user.
-  widgetCatalog(): {
+  // Widgets the assistant may show now in a conversation of this mode:
+  // declared by an enabled plugin's active build and approved by the user.
+  widgetCatalog(mode: Mode): {
     pluginId: string
     pluginName: string
     buildId: string
@@ -879,6 +920,7 @@ export class PluginHost {
       if (!st.enabled || !st.active) continue
       const { manifest } = this.build(id, st.active.buildId)
       if (permissionsOf(manifest).some((p) => !st.granted.includes(p))) continue
+      if (needsChatDesign(mode) && chatDesignState(manifest, st.chatDesign) !== 'on') continue
       for (const w of manifest.widgets ?? [])
         if (st.granted.includes(`widget:${w.id}`))
           out.push({
@@ -919,13 +961,15 @@ export class PluginHost {
           ? `the ${manifest.name} plugin is turned off.`
           : missingPerm
             ? `the ${manifest.name} plugin is missing approved permissions.`
-            : this.d.store.secretsLocked(id)
-              ? `the ${manifest.name} plugin's saved secrets can't be read.`
-              : unset.length
-                ? `set ${unset.map(([, f]) => f.title).join(', ')} in the ${manifest.name} plugin's settings.`
-                : manifest.auth && !this.d.store.secrets(id)[OAUTH_KEY]
-                  ? `connect your account in the ${manifest.name} plugin's settings.`
-                  : undefined
+            : chatDesignState(manifest, st.chatDesign) !== 'on'
+              ? `turn on Use in Chat and Design in the ${manifest.name} plugin's settings.`
+              : this.d.store.secretsLocked(id)
+                ? `the ${manifest.name} plugin's saved secrets can't be read.`
+                : unset.length
+                  ? `set ${unset.map(([, f]) => f.title).join(', ')} in the ${manifest.name} plugin's settings.`
+                  : manifest.auth && !this.d.store.secrets(id)[OAUTH_KEY]
+                    ? `connect your account in the ${manifest.name} plugin's settings.`
+                    : undefined
         out.push({
           pluginId: id,
           pluginName: manifest.name,
@@ -978,6 +1022,8 @@ export class PluginHost {
       return notRun(`${manifest.name} no longer offers this, so nothing was done.`)
     if (!st.granted.includes(`media:${spec.id}`))
       return notRun(`${spec.name} isn't approved for Design, so nothing was done.`)
+    if (chatDesignState(manifest, st.chatDesign) !== 'on')
+      return notRun(CHAT_DESIGN_OFF(manifest.name))
     const name = fullToolName(a.pluginId, tool)
     const snapshot: ToolSnapshot = new Map([
       [name, { pluginId: a.pluginId, buildId: st.active.buildId }]
@@ -996,7 +1042,14 @@ export class PluginHost {
     return this.run(
       name,
       a.input,
-      { signal: o.signal, approve: o.approve, preApproved, snapshot, dataLimit: MEDIA_DATA_BYTES },
+      {
+        signal: o.signal,
+        approve: o.approve,
+        preApproved,
+        snapshot,
+        mode: 'design',
+        dataLimit: MEDIA_DATA_BYTES
+      },
       true
     )
   }
@@ -1137,15 +1190,18 @@ export class PluginHost {
     return values
   }
 
-  // A tool call from the assistant or a widget. A media provider's tools
-  // aren't reachable this way, whatever the snapshot says: only Design's job
-  // flow runs them, through invokeMedia.
+  // A tool call from the assistant or a widget, in a conversation of `mode`.
+  // A media provider's tools aren't reachable this way, whatever the snapshot
+  // says: only Design's job flow runs them, through invokeMedia.
   async invoke(
     name: string,
     input: unknown,
     o: {
       snapshot: ToolSnapshot
       signal: AbortSignal
+      // The mode of the conversation the call comes from: outside Code it
+      // needs "Use in Chat and Design".
+      mode: Mode
       approve: (r: ApprovalRequest) => Promise<boolean>
       // The user already approved this exact call (a repeat of an action
       // whose outcome was unknown), so don't ask again.
@@ -1161,6 +1217,7 @@ export class PluginHost {
     o: {
       snapshot: ToolSnapshot
       signal: AbortSignal
+      mode: Mode
       approve: (r: ApprovalRequest) => Promise<boolean>
       preApproved?: boolean
       // Media calls only (invokeMedia): a larger bound on `data`.
@@ -1185,6 +1242,8 @@ export class PluginHost {
       const missing = permissionsOf(manifest).filter((p) => !st.granted.includes(p))
       if (missing.length)
         return 'The plugin is missing approved permissions, so this call was not run.'
+      if (needsChatDesign(o.mode) && chatDesignState(manifest, st.chatDesign) !== 'on')
+        return CHAT_DESIGN_OFF(manifest.name)
       return { manifest, granted: st.granted }
     }
     let c = current()
@@ -1310,7 +1369,7 @@ export class PluginHost {
         case 'fetch':
           return {
             ok: true,
-            value: await this.fetchFor(id, manifest, granted, a, call.controller.signal)
+            value: await this.fetchFor(id, manifest, granted, a, call.controller.signal, call.write)
           }
         case 'storage.get':
         case 'storage.set':
@@ -1354,13 +1413,25 @@ export class PluginHost {
     m: PluginManifest,
     granted: string[],
     a: Record<string, unknown>,
-    signal: AbortSignal
+    signal: AbortSignal,
+    write: boolean
   ): Promise<NetResponse> {
     const init = (a.init ?? {}) as {
       method?: string
       headers?: Record<string, string>
       body?: string
       auth?: boolean
+    }
+    // A read tool only reads, in every mode: it may only GET or HEAD, with
+    // no body. Anything that sends or changes something is an action, which
+    // the user approves and can be asked about. This narrows what a read
+    // tool can do; a GET can still reach a server that acts on it.
+    if (!write) {
+      const method = String(init.method ?? 'GET').toUpperCase()
+      if ((method !== 'GET' && method !== 'HEAD') || (init.body ?? '') !== '')
+        throw new Error(
+          `Read tools may only GET or HEAD, without a body, so this ${method} request was not sent.`
+        )
     }
     const url = String(a.url ?? '')
     const auth = init.auth === true

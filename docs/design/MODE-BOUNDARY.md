@@ -3,25 +3,55 @@
 Chat and Design may recommend plugins and skills and draft development
 prompts. They may not create or change extensions, send prompts to
 implementation agents, or start implementation work. This is what the app
-enforces, what it can't, and the open decision (stabilization item 1.1,
-2026-10-09, from `design-integration` at 9701117).
+enforces, what it can't, and the decision (stabilization item 1.1,
+2026-10-09).
 
-**Status: not complete.** The options below wait on Neno; none is built.
+**Status: decided and built, still trust-limited.** Neno chose option A
+(per-plugin "Use in Chat and Design", plus read tools limited to GET/HEAD) on
+2026-10-09. It is built and tested, but it is the user's say-so, not proof:
+a plugin the user turns it on for can still do whatever its approved hosts'
+APIs allow, including starting implementation work at a coding or agent
+service. The boundary is **not** guaranteed against such a plugin, and this
+is not described as proof that arbitrary plugin code can't start
+implementation work. Model instructions are not counted as a control. B, C
+and D below were not chosen and are not built.
+
+## What option A does now
+
+- Each plugin has a "Use in Chat and Design" setting in its plugin settings,
+  **off** until the user turns it on. Existing plugins (Spotify) are off after
+  this change; nothing is granted silently.
+- Off, the plugin's tools, instructions, widgets and media provider are not
+  offered in Chat, Design or Skills, and a call from those modes is refused
+  before the plugin is called or any approval is asked
+  (`needsChatDesign`, `host.ts`). Checked again at call time, after the
+  approval card, in `invoke`, `invokeMedia` and the widget catalog (a widget's
+  mode is its conversation's mode). Code's Plugins workspace, where plugins
+  are built, does not need it.
+- The setting stores what it covered: every network host, link prefix, account
+  scope and host, and write tool. An update that asks for any more turns it
+  off again ("changed") until the user turns it on again. An update that only
+  changes code under the same permissions keeps it; the activation review is
+  what covers that.
+- In every mode, a tool declared `read` may only GET or HEAD, with no body
+  (`fetchFor`). Spotify's read tools only GET. A GET can still have side
+  effects at a server.
+- Skills mode is covered too (the same host check).
 
 ## What the host enforces today (checked in code)
 
-| Route from Chat/Design                                          | What stops implementation work                                                                                                                                               | Enforced by                                         | Bypass?                                                                                                                      |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `vault_create_note` into skills, plugin source or Custard files | `extensionTarget` on the path as written and on its real location, checked again just before the write                                                                       | `chat.ts modeRefusal`, `modes/extensions.ts`        | No (race noted in extensions.ts; Thread 2 owns the write)                                                                    |
-| Code's file tools (`fs_*`), workspace                           | Not offered: Chat/Design have no `workspace` kind                                                                                                                            | `modes/policy.ts`, `available` set in chat.ts       | No                                                                                                                           |
-| Design HTML export                                              | `exportRefusal` blocks skills, plugin folders, Custard source and userData                                                                                                   | `design/html/index.ts`                              | No                                                                                                                           |
-| Plugin media tools                                              | Hidden from the model (`toolSet` skips them), widgets can't list them (manifest), reachable only through `invokeMedia` for the declared role                                 | `host.ts`, `manifest.ts checkMedia`                 | Host `invoke()` itself doesn't refuse a media tool name; closed in stabilization 1.3: `invoke()` refuses media tools by name |
-| Plugin `openExternal`                                           | Only `spotify:` and approved https prefixes, only during a write tool                                                                                                        | `host.ts capability`, `manifest.ts validOpenPrefix` | See residual 3                                                                                                               |
-| Links in answers                                                | Only http(s), opened in the user's browser on click                                                                                                                          | `src/main/index.ts` window-open handler             | See residual 3                                                                                                               |
-| Skills                                                          | Text only. Mode policy depends only on mode + workspace; no skill field changes tools                                                                                        | `modes/policy.ts`                                   | No                                                                                                                           |
-| **Any enabled plugin's ordinary tools**                         | **Nothing purpose-based.** Every enabled plugin's non-media tools are offered in Chat and Design. Write tools ask unless the user turned "ask every time" off for that tool. | `chat.ts` (`pluginHost().toolSet()`)                | **Yes: the D2 residual.**                                                                                                    |
+| Route from Chat/Design                                          | What stops implementation work                                                                                                                              | Enforced by                                         | Bypass?                                                                                                                      |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `vault_create_note` into skills, plugin source or Custard files | `extensionTarget` on the path as written and on its real location, checked again just before the write                                                      | `chat.ts modeRefusal`, `modes/extensions.ts`        | No (race noted in extensions.ts; Thread 2 owns the write)                                                                    |
+| Code's file tools (`fs_*`), workspace                           | Not offered: Chat/Design have no `workspace` kind                                                                                                           | `modes/policy.ts`, `available` set in chat.ts       | No                                                                                                                           |
+| Design HTML export                                              | `exportRefusal` blocks skills, plugin folders, Custard source and userData                                                                                  | `design/html/index.ts`                              | No                                                                                                                           |
+| Plugin media tools                                              | Hidden from the model (`toolSet` skips them), widgets can't list them (manifest), reachable only through `invokeMedia` for the declared role                | `host.ts`, `manifest.ts checkMedia`                 | Host `invoke()` itself doesn't refuse a media tool name; closed in stabilization 1.3: `invoke()` refuses media tools by name |
+| Plugin `openExternal`                                           | Only `spotify:` and approved https prefixes, only during a write tool                                                                                       | `host.ts capability`, `manifest.ts validOpenPrefix` | See residual 3                                                                                                               |
+| Links in answers                                                | Only http(s), opened in the user's browser on click                                                                                                         | `src/main/index.ts` window-open handler             | See residual 3                                                                                                               |
+| Skills                                                          | Text only. Mode policy depends only on mode + workspace; no skill field changes tools                                                                       | `modes/policy.ts`                                   | No                                                                                                                           |
+| **A plugin's ordinary tools**                                   | Only plugins the user turned "Use in Chat and Design" on for; read tools GET/HEAD only. Write tools still ask unless "ask every time" is off for that tool. | `host.ts` (`toolSet(mode)`, `run`, `fetchFor`)      | **Trust-limited:** a granted plugin can still reach whatever its approved hosts allow.                                       |
 
-## The known bypass
+## The bypass this closes by default (before option A)
 
 A plugin approved for a host that is a coding or agent service (a hosted coding agent, an issue tracker whose bot implements issues, a CI trigger) can start implementation from Chat or Design:
 
@@ -29,13 +59,13 @@ A plugin approved for a host that is a coding or agent service (a hosted coding 
 - A **read** tool can do it with no card at all. `read` is self-declared. The host doesn't limit what a read tool sends: any method (POST/PUT/PATCH/DELETE) to any approved host.
 - Tool names and descriptions are plugin text, so the host can't infer purpose from them.
 
-The boundary is therefore **not complete** while any such plugin can be enabled.
+Before option A the boundary was **not complete** while any such plugin could be enabled. With option A none is in Chat or Design unless the user chose it there; for a plugin they did choose, the limit above still holds.
 
 ## Residual trust limit (true under every option)
 
 Plugin code with network access to a host can cause whatever side effects that host's API allows. The host enforces _which plugin_, _which hosts_, _which tools ask_, and (with option A or C) _which HTTP methods_. It cannot see what a request means. Every option below makes the boundary depend on a classification by the user, and on the plugin's code doing what its review showed.
 
-## Options (Amendment 4 format; none is built)
+## Options (Amendment 4 format; A chosen and built, the rest not built)
 
 None of these proves that plugin code can't start implementation work. Plugin
 code with network access to a host can do anything that host's API allows,
@@ -44,7 +74,7 @@ plugins and which kinds of request can run from Chat and Design at all, and
 on whose say-so. Domain or host labels ("coding", "agent") are not used: a
 host can offer many services, and labels prove nothing.
 
-### A. Per-plugin "Use in Chat and Design" grant, plus read tools limited to GET/HEAD (recommended)
+### A. Per-plugin "Use in Chat and Design" grant, plus read tools limited to GET/HEAD (CHOSEN, built)
 
 1. **Host enforces:** a plugin without the grant has no tool, widget or
    media provider offered or run in Chat, Design or Skills. Checked in the

@@ -71,7 +71,9 @@ export type ViewSurface = {
 }
 
 export type ManagerDeps = {
-  catalog(): CatalogEntry[]
+  // The widgets a conversation may show (its mode decides which plugins it
+  // may use); null for no conversation.
+  catalog(conversationId: string | null): CatalogEntry[]
   widgetCode(pluginId: string, buildId: string, widgetId: string): string | null
   // Whether a tool of the plugin changes something (effect: write).
   isWrite(pluginId: string, buildId: string, tool: string): boolean | null
@@ -82,6 +84,8 @@ export type ManagerDeps = {
       snapshot: ToolSnapshot
       signal: AbortSignal
       approve: (r: ApprovalRequest) => Promise<boolean>
+      // The conversation the widget belongs to.
+      conversationId: string
     }
   ): Promise<ToolOutcome>
   log(pluginId: string, line: string): void
@@ -141,14 +145,14 @@ export class WidgetManager {
 
   // The assistant's tools
 
-  keys(): string[] {
-    return this.d.catalog().map((e) => widgetKey(e.pluginId, e.widget.id))
+  keys(conversationId: string | null): string[] {
+    return this.d.catalog(conversationId).map((e) => widgetKey(e.pluginId, e.widget.id))
   }
 
   // What the assistant is told it can show, for one conversation.
   describe(conversationId: string | null): string[] {
     const dismissed = conversationId ? this.d.records.get(conversationId).dismissed?.key : undefined
-    return this.d.catalog().map((e) => {
+    return this.d.catalog(conversationId).map((e) => {
       const key = widgetKey(e.pluginId, e.widget.id)
       const note = key === dismissed ? ' (the user closed it in this chat)' : ''
       const schema = e.widget.inputSchema
@@ -164,13 +168,15 @@ export class WidgetManager {
     input: unknown,
     turn: { start: number }
   ): { ok: boolean; content: string } {
-    const entry = this.d.catalog().find((e) => widgetKey(e.pluginId, e.widget.id) === key)
+    const entry = this.d
+      .catalog(conversationId)
+      .find((e) => widgetKey(e.pluginId, e.widget.id) === key)
     if (!entry)
       return {
         ok: false,
         content: `There is no widget "${String(key)}" to show. Available: ${
           this.d
-            .catalog()
+            .catalog(conversationId)
             .map((e) => widgetKey(e.pluginId, e.widget.id))
             .join(', ') || 'none'
         }.`
@@ -324,7 +330,7 @@ export class WidgetManager {
   pluginChanged(pluginId: string): void {
     const inst = this.live
     if (!inst || inst.entry.pluginId !== pluginId) return
-    if (this.current(inst.entry)) return
+    if (this.current(inst)) return
     const rec = this.d.records.get(inst.conversationId)
     this.d.records.set(inst.conversationId, { ...rec, active: undefined })
     this.unmount('the plugin was disabled, updated or removed')
@@ -355,9 +361,10 @@ export class WidgetManager {
   }
 
   // The catalog entry, if the plugin and build are still enabled and approved.
-  private current(e: CatalogEntry): CatalogEntry | undefined {
+  private current(inst: Instance): CatalogEntry | undefined {
+    const e = inst.entry
     return this.d
-      .catalog()
+      .catalog(inst.conversationId)
       .find(
         (c) => c.pluginId === e.pluginId && c.widget.id === e.widget.id && c.buildId === e.buildId
       )
@@ -378,7 +385,7 @@ export class WidgetManager {
     const a = rec.active
     if (!a) return
     const entry = this.d
-      .catalog()
+      .catalog(conversationId)
       .find(
         (c) => c.pluginId === a.pluginId && c.widget.id === a.widgetId && c.buildId === a.buildId
       )
@@ -535,7 +542,7 @@ export class WidgetManager {
     if (this.live !== inst || inst.status !== 'ready') return notRun('The widget is closed.')
     if (typeof tool !== 'string' || !entry.widget.tools.includes(tool))
       return notRun(`This widget may not use "${String(tool)}".`)
-    if (!this.current(entry))
+    if (!this.current(inst))
       return notRun('The plugin was disabled or updated, so nothing was done.')
     if (!this.visible(inst))
       return notRun("The widget can't be seen right now, so nothing was done.")
@@ -566,7 +573,8 @@ export class WidgetManager {
       const r = await this.d.invoke(name, input ?? {}, {
         snapshot: new Map([[name, { pluginId: entry.pluginId, buildId: entry.buildId }]]),
         signal: controller.signal,
-        approve: (req) => this.approve(inst, req)
+        approve: (req) => this.approve(inst, req),
+        conversationId: inst.conversationId
       })
       const status = r.outcome ?? (r.isError ? 'failed' : 'completed')
       if (status === 'unknown')

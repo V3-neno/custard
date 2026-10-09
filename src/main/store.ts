@@ -75,6 +75,15 @@ export function messageCount(id: string): number {
   }
 }
 
+// A conversation's mode, counting one whose first turn is still in progress.
+export function conversationMode(id: string): Mode | null {
+  try {
+    return (live.get(id) ?? getConversation(id))?.mode ?? null
+  } catch {
+    return null
+  }
+}
+
 // Applies a change to the current copy of a conversation and saves it.
 export function updateConversation(
   id: string,

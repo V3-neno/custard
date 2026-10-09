@@ -179,6 +179,17 @@ try {
   for (let i = 0; i < (await boxes.count()); i++) await boxes.nth(i).check()
   await w.click('button:text-matches("^Activate [0-9]")')
   await w.waitForSelector('button:text-is("Disable")', { timeout: 30000 })
+
+  step('Design needs Use in Chat and Design before it can use the plugin')
+  const off = await design(() => window.custard.design.capabilities())
+  check(
+    off['video.text-to-video'].availability.status !== 'supported' &&
+      /Use in Chat and Design/.test(JSON.stringify(off['video.text-to-video'].availability)),
+    `not offered until turned on (${JSON.stringify(off['video.text-to-video'].availability).slice(0, 160)})`
+  )
+  // Chat, Design and Skills use a plugin only once it's turned on for them.
+  await w.click('label:has-text("in Chat, Design and Skills") input[type=checkbox]')
+  await w.waitForSelector('label:has-text("in Chat, Design and Skills") input:checked')
   await w.click('button:text-is("Done")')
 
   step('Design reports video through the plugin')

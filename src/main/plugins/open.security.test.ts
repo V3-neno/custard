@@ -134,8 +134,9 @@ const call = (name: string, url: string): Promise<{ content: string }> =>
     name,
     { url },
     {
-      snapshot: host.toolSet().snapshot,
+      snapshot: host.toolSet('code').snapshot,
       signal: new AbortController().signal,
+      mode: 'code',
       approve: async () => {
         approvals++
         return true
