@@ -190,8 +190,33 @@ try {
   evidence.mainWindow = {
     sandboxPreference: main?.contents[0]?.sandboxPref,
     seccomp: main?.seccomp,
-    note: 'src/main/index.ts creates it with sandbox:false; not changed here (needs Neno)'
+    ownUserNs: main ? main.user !== browser.user : null
   }
+  check(main?.contents[0]?.sandboxPref === true, 'the main window is created with sandbox: true')
+  check(
+    main && filtered(main),
+    `the main window renderer has a seccomp-bpf filter (Seccomp: ${main?.seccomp})`
+  )
+  check(
+    main && !main.flags.includes('--no-sandbox'),
+    'the main window renderer was not started with --no-sandbox'
+  )
+  const appApi = await app.evaluate(async ({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((x) => x.webContents.getURL().endsWith('/renderer/index.html'))
+      ?.webContents.executeJavaScript(
+        'JSON.stringify({ custard: typeof window.custard, electron: typeof window.electron, require: typeof require, process: typeof process })'
+      )
+  )
+  console.log('  main window globals: ' + appApi)
+  const a = JSON.parse(appApi ?? '{}')
+  check(
+    a.custard === 'object' &&
+      a.electron === 'undefined' &&
+      a.require === 'undefined' &&
+      a.process === 'undefined',
+    'the main window has window.custard and nothing else from the preload'
+  )
 
   step('Preview bridges')
   const bridges = await app.evaluate(async ({ webContents }) => {
