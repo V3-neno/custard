@@ -511,7 +511,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     if (refusal) return { content: refusal, isError: true, outcome: 'not-run' }
     const isPlugin = c.name.includes('__') && !workspace?.has(c.name)
     let preApproved = false
-    if (c.write && log.unknownRepeat(c)) {
+    const repeatWarning =
+      'This repeats an earlier action whose outcome is unknown. It may already have happened.'
+    // A Design repeat carries the warning on Design's own card, which names
+    // the provider, the files sent and the price; it is never pre-approved.
+    const designRepeat = kindOf(c.name) === 'design' && c.write && log.unknownRepeat(c)
+    if (c.write && !designRepeat && log.unknownRepeat(c)) {
       const allowed = await approve(
         {
           pluginId: isPlugin ? c.name.split('__')[0] : 'custard',
@@ -520,7 +525,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
           label: c.label,
           input: c.input
         },
-        'This repeats an earlier action whose outcome is unknown. It may already have happened.'
+        repeatWarning
       )
       if (!allowed)
         return {
@@ -625,17 +630,18 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         messageIndex: log.startLength,
         chat: { provider: model.provider, model: model.id, hasKey: true },
         approve: (label, detail) =>
-          preApproved
-            ? Promise.resolve(true)
-            : approve({
-                pluginId: 'custard',
-                pluginName: 'Custard',
-                tool: c.name,
-                label,
-                input: c.input,
-                detail,
-                individual: true
-              }),
+          approve(
+            {
+              pluginId: 'custard',
+              pluginName: 'Custard',
+              tool: c.name,
+              label,
+              input: c.input,
+              detail,
+              individual: true
+            },
+            designRepeat ? repeatWarning : undefined
+          ),
         references: async (ids) => designReferences(conversation, ids),
         signal: controller.signal
       })
