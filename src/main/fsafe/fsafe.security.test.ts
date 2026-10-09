@@ -218,6 +218,49 @@ describe('writeReplace', () => {
     expect(readdirSync(secret)).toEqual([])
   })
 
+  it('a folder swapped for a link while replacing: refused, the original kept', async () => {
+    const dir = join(work, 'out')
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'x.md'), 'keep')
+    writeFileSync(join(secret, 'x.md'), 'secret')
+    const open = io.open
+    vi.spyOn(io, 'open').mockImplementation((...args) => {
+      renameSync(dir, join(work, 'gone'))
+      symlinkSync(secret, dir)
+      return open(...args)
+    })
+    await expect(writeReplace(join(dir, 'x.md'), 'evil', { guard: guardOut })).rejects.toThrow(
+      /folder changed/
+    )
+    expect(readdirSync(secret)).toEqual(['x.md'])
+    expect(readFileSync(join(secret, 'x.md'), 'utf8')).toBe('secret')
+    expect(readFileSync(join(work, 'gone', 'x.md'), 'utf8')).toBe('keep')
+  })
+
+  it.runIf(process.platform === 'linux')(
+    'a swap undone while replacing: the empty temp file is removed too (Linux)',
+    async () => {
+      const dir = join(work, 'out')
+      mkdirSync(dir)
+      writeFileSync(join(dir, 'x.md'), 'keep')
+      const open = io.open
+      vi.spyOn(io, 'open').mockImplementation((...args) => {
+        renameSync(dir, join(work, 'gone'))
+        symlinkSync(secret, dir)
+        const fd = open(...args)
+        renameSync(dir, join(work, 'link'))
+        renameSync(join(work, 'gone'), dir)
+        return fd
+      })
+      await expect(writeReplace(join(dir, 'x.md'), 'evil', { guard: guardOut })).rejects.toThrow(
+        /folder changed/
+      )
+      expect(readdirSync(secret)).toEqual([])
+      expect(readdirSync(dir)).toEqual(['x.md'])
+      expect(readFileSync(join(dir, 'x.md'), 'utf8')).toBe('keep')
+    }
+  )
+
   it('refuses a folder at the target', async () => {
     mkdirSync(join(work, 'd'))
     await expect(writeReplace(join(work, 'd'), 'x')).rejects.toBeInstanceOf(FsafeError)
