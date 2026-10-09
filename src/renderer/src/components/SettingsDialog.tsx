@@ -4,10 +4,11 @@ import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
 
 import PluginsTab from './settings/PluginsTab'
+import DesignTab from './settings/DesignTab'
 import { cleanError, primary, secondary } from './settings/ui'
 
 type Props = { onClose: () => void; onChanged: () => void }
-type Tab = 'general' | 'plugins'
+type Tab = 'general' | 'design' | 'plugins'
 
 const keyInfo: Record<Provider, { placeholder: string; where: string }> = {
   claude: { placeholder: 'sk-ant-…', where: 'console.anthropic.com' },
@@ -202,7 +203,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
             className="flex gap-1 rounded-full border border-forge-700 p-0.5 text-sm"
             role="tablist"
           >
-            {(['general', 'plugins'] as Tab[]).map((t) => (
+            {(['general', 'design', 'plugins'] as Tab[]).map((t) => (
               <button
                 key={t}
                 role="tab"
@@ -210,7 +211,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
                 onClick={() => setTab(t)}
                 className={`rounded-full px-3 py-1 ${tab === t ? 'bg-forge-700 text-ash-100' : 'text-ash-400 hover:text-ash-100'}`}
               >
-                {t === 'general' ? 'General' : 'Plugins'}
+                {t === 'general' ? 'General' : t === 'design' ? 'Design' : 'Plugins'}
               </button>
             ))}
           </div>
@@ -218,6 +219,8 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
 
         {tab === 'plugins' ? (
           <PluginsTab />
+        ) : tab === 'design' ? (
+          <DesignTab />
         ) : (
           <>
             <p className="mb-5 -mt-1 text-sm text-ash-400">
