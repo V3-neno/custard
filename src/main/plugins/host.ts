@@ -162,7 +162,7 @@ export class PluginHost {
   private starting = new Map<string, Promise<RuntimeHandle>>()
   private calls = new Map<
     string,
-    { pluginId: string; buildId: string; controller: AbortController }
+    { pluginId: string; buildId: string; controller: AbortController; write: boolean }
   >()
   private logs = new Map<string, string[]>()
   private refreshing = new Map<string, Promise<string>>()
@@ -1050,9 +1050,9 @@ export class PluginHost {
     const controller = new AbortController()
     const onAbort = (): void => controller.abort()
     o.signal.addEventListener('abort', onAbort)
-    this.calls.set(callId, { pluginId: id, buildId: offered.buildId, controller })
-    const secrets = this.secretValues(id)
     const write = tool.effect === 'write'
+    this.calls.set(callId, { pluginId: id, buildId: offered.buildId, controller, write })
+    const secrets = this.secretValues(id)
     // Once the call may have reached the plugin, a write cut short might
     // still have happened.
     let sent = false
@@ -1150,6 +1150,9 @@ export class PluginHost {
           return { ok: true, value: null }
         }
         case 'openExternal': {
+          // Only during an action (a write tool), which the user can be
+          // asked about; a read tool never shows an approval card.
+          if (!call.write) throw new Error('Only actions can open links, so nothing was opened.')
           const url = String(a.url ?? '')
           const prefixes = manifest.permissions.openExternal.filter((p) =>
             granted.includes(`open:${p}`)

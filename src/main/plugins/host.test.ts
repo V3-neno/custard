@@ -116,7 +116,7 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
     instructions: 'instructions.md',
     permissions: {
       network: ['api.example.com', 'auth.example.com'],
-      openExternal: ['demo:'],
+      openExternal: ['spotify:'],
       storage: true
     },
     config: {
@@ -170,7 +170,7 @@ function manifest(over: Record<string, unknown> = {}): Record<string, unknown> {
       {
         name: 'open',
         description: 'Open',
-        effect: 'read',
+        effect: 'write',
         inputSchema: { type: 'object', properties: { url: { type: 'string' } } }
       },
       {
@@ -268,13 +268,14 @@ beforeEach(() => {
 const ALL = [
   'network:api.example.com',
   'network:auth.example.com',
-  'open:demo:',
+  'open:spotify:',
   'storage',
   'account:auth.example.com',
   'account-token:auth.example.com',
   'account-api:api.example.com',
   'account-scope:read',
-  'action:act'
+  'action:act',
+  'action:open'
 ]
 
 async function activate(approved = ALL): Promise<string> {
@@ -670,31 +671,31 @@ describe('capabilities', () => {
   it('opens only declared link prefixes', async () => {
     writePlugin({})
     await activate()
-    expect((await invoke('demo__open', { url: 'demo:item/1' })).content).toBe('opened')
+    expect((await invoke('demo__open', { url: 'spotify:item/1' })).content).toBe('opened')
     expect((await invoke('demo__open', { url: 'file:///etc/passwd' })).content).toMatch(
       /may not open/
     )
-    expect(opened).toEqual(['demo:item/1'])
+    expect(opened).toEqual(['spotify:item/1'])
   })
 
   it('opens only links made of plain URL characters (L20)', async () => {
     writePlugin({})
     await activate()
     for (const url of [
-      'demo:x" --inspect',
-      "demo:x'y",
-      'demo:x\\..\\y',
-      'demo:x<y>',
-      'demo:x`y`',
-      'demo:x|y',
-      'demo:caf\u00e9',
-      'demo:x^y'
+      'spotify:x" --inspect',
+      "spotify:x'y",
+      'spotify:x\\..\\y',
+      'spotify:x<y>',
+      'spotify:x`y`',
+      'spotify:x|y',
+      'spotify:caf\u00e9',
+      'spotify:x^y'
     ])
       expect((await invoke('demo__open', { url })).content, url).toMatch(/may not open/)
     expect(
-      (await invoke('demo__open', { url: 'demo:track/4uLU6hMC?si=a%20b&x=1#t' })).content
+      (await invoke('demo__open', { url: 'spotify:track/4uLU6hMC?si=a%20b&x=1#t' })).content
     ).toBe('opened')
-    expect(opened).toEqual(['demo:track/4uLU6hMC?si=a%20b&x=1#t'])
+    expect(opened).toEqual(['spotify:track/4uLU6hMC?si=a%20b&x=1#t'])
   })
 
   it('refuses capabilities outside an active call', async () => {
