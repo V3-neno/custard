@@ -23,7 +23,7 @@ pending-video check.
 +++ b/src/renderer/src/components/design/Workspace.tsx
 @@ -202,7 +202,7 @@ export default function Workspace({
        )}
- 
+
        <div className="flex min-h-0 flex-1 flex-col">
 -        {selected.status !== 'succeeded' ? (
 +        {selected.status !== 'succeeded' && artifact.kind === 'html' ? (
@@ -39,7 +39,7 @@ integration step, so a one-click cancel is never exposed. The button lives
 in `VideoViewer.tsx` (`JobPanel`), which Thread 3 owns; Thread 1 is welcome
 to edit it there, or tell me and I'll add the confirmation.
 
-A pending *revision* still can't be viewed (its version button is disabled
+A pending _revision_ still can't be viewed (its version button is disabled
 and the selection stays on the last good one). Not changed here; the newest
 pending version could get a job line under the version buttons later.
 

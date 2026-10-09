@@ -353,7 +353,7 @@ try {
   console.log(`  pane shows: ${text.replace(/\s+/g, ' ').slice(0, 160)}`)
   check(
     controls.length === 3,
-    `the pending video shows its job state and controls in the workspace; needs request stab-3 R2 (found: ${controls.join(', ') || 'none'})`
+    `the pending video shows its job state and controls in the workspace; needs request stab-3 R1 (found: ${controls.join(', ') || 'none'})`
   )
   await shot('s3-05-video-pending')
 } catch (err) {

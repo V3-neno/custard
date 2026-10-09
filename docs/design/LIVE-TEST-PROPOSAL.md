@@ -15,10 +15,10 @@ approval.
 
 ## The requests: exactly two
 
-| # | Operation | Endpoint | Model | Sent |
-| - | --------- | -------- | ----- | ---- |
-| 1 | `image.generate` | `POST https://api.openai.com/v1/images/generations` | `gpt-image-2.5-sunburst` (Custard's default) | `model`, `prompt`, `n: 1`, `output_format: "png"`, `size: "1024x1024"`, `stream: false` |
-| 2 | `image.edit` | `POST https://api.openai.com/v1/images/edits` (multipart) | `gpt-image-2.5-sunburst` | the same fields plus one `image` file: the PNG from request 1 |
+| #   | Operation        | Endpoint                                                  | Model                                        | Sent                                                                                    |
+| --- | ---------------- | --------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 1   | `image.generate` | `POST https://api.openai.com/v1/images/generations`       | `gpt-image-2.5-sunburst` (Custard's default) | `model`, `prompt`, `n: 1`, `output_format: "png"`, `size: "1024x1024"`, `stream: false` |
+| 2   | `image.edit`     | `POST https://api.openai.com/v1/images/edits` (multipart) | `gpt-image-2.5-sunburst`                     | the same fields plus one `image` file: the PNG from request 1                           |
 
 Request 2 runs only if request 1 completed and its image shows in the
 workspace.
