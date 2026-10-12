@@ -21,6 +21,23 @@ const check = (cond, what) => {
   if (!cond) process.exitCode = 1
 }
 const step = (s) => console.log('\n## ' + s)
+
+// Plugins are managed from Plugins mode's start page (the hub), not Settings.
+// Opening it closes Settings if open and remembers the mode to come back to.
+let backTo = null
+const openPlugins = async () => {
+  if (await w.locator('h2:text-is("Settings")').count()) await w.click('button:text-is("Done")')
+  backTo = (await w.locator('button.molten-fill[title]').first().innerText()).trim()
+  await w.click('button[title][class*="rounded-full"]:text-is("Plugins")')
+  if (!(await w.locator('text=What Custard can reach').count()))
+    await w.click('button[title][class*="rounded-full"]:text-is("Plugins")')
+  await w.waitForSelector('text=What Custard can reach')
+}
+// Closes the plugin's panel and goes back to the mode it was opened from.
+const closePlugins = async () => {
+  await w.click('[role=dialog] button:text-is("Done")')
+  if (backTo && backTo !== 'Plugins') await w.click(`button[title]:text-is("${backTo}")`)
+}
 const CFG = OUT + '/cfg-media-sizes'
 fs.rmSync(CFG, { recursive: true, force: true })
 fs.mkdirSync(SHOTS, { recursive: true })
@@ -104,7 +121,7 @@ try {
   await w.press('input[aria-label="Claude API key"]', 'Enter')
   await w.click('button:has-text("Use an existing vault")')
   await w.waitForSelector('text=· connected')
-  await w.click('[role=tab]:text-is("Plugins")')
+  await openPlugins()
   await w.click('button:has-text("Bigmedia")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
@@ -115,7 +132,9 @@ try {
   // Chat, Design and Skills use a plugin only once it's turned on for them.
   await w.click('label:has-text("in Chat, Design and Skills") input[type=checkbox]')
   await w.waitForSelector('label:has-text("in Chat, Design and Skills") input:checked')
+  await closePlugins()
   // Images from the fixture rather than the built-in provider, if Design asks which.
+  await w.click('button[title=Settings]')
   await w.getByRole('tab', { name: 'Design' }).click()
   const sel = w.locator('#design-image-provider')
   if (await sel.count()) {

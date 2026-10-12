@@ -33,9 +33,11 @@ function WorkspaceBar({ fixed, value, onChange, disabled }: Props): React.JSX.El
   const [newName, setNewName] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  // Again when a plugin made elsewhere (the hub's Add) is picked.
+  const picked = value?.kind === 'internal' ? value.pluginId : null
   useEffect(() => {
     window.custard.plugins.list().then(setPlugins)
-  }, [])
+  }, [picked])
 
   if (fixed !== null)
     return (
@@ -106,7 +108,7 @@ function WorkspaceBar({ fixed, value, onChange, disabled }: Props): React.JSX.El
       {!value && !error && (
         <p className="mt-1 text-xs text-ash-500">
           Without a plugin, the assistant answers without touching files. With one, it can only edit
-          that plugin. You review and activate it in Settings → Plugins.
+          that plugin. You review and activate it with Manage on its card.
         </p>
       )}
       {error && <p className="mt-1 text-xs text-ember-600">{error}</p>}

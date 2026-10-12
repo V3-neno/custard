@@ -68,11 +68,16 @@ function App(): React.JSX.Element {
             onHistory={() => setHistoryOpen(true)}
             onSettings={() => setSettingsOpen(true)}
           />
-          {/* Each mode has its own history, so switching mode starts fresh. */}
+          {/* Each mode has its own history; coming back to a mode reopens its chat. */}
           <ChatView
             key={mode}
             mode={mode}
-            onModeChange={setMode}
+            onModeChange={(m) => {
+              // The mode already shown: back to its start page (a new chat).
+              if (m === mode) {
+                if (!busy) setNewChat((n) => n + 1)
+              } else setMode(m)
+            }}
             hasKey={hasKey}
             settings={settings}
             onSettings={updateSettings}

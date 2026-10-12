@@ -27,6 +27,7 @@ import {
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
 import SkillsHub from '../hubs/SkillsHub'
+import PluginsHub from '../hubs/PluginsHub'
 import WidgetSlot from './WidgetSlot'
 import { cleanError } from '../settings/ui'
 import {
@@ -103,6 +104,9 @@ type Props = {
 }
 
 const unsent = new Map<Mode, { text: string; draftId: string; files: DraftAttachment[] }>()
+// The chat open in each mode, so leaving a mode (say, to manage a plugin in
+// Plugins mode) and coming back returns to it.
+const openChats = new Map<Mode, string>()
 
 const NARROW = 900
 const PANE_MIN = 320
@@ -143,6 +147,27 @@ function ChatView(props: Props): React.JSX.Element {
     props
   const [list, setList] = useState<ConversationSummary[]>([])
   const [current, setCurrent] = useState<Conversation | null>(null)
+  const restoring = useRef(openChats.has(mode))
+  useEffect(() => {
+    const id = openChats.get(mode)
+    if (!id) return
+    window.custard.conversations
+      .get(id)
+      .then((c) => {
+        restoring.current = false
+        if (c) setCurrent(c)
+        else openChats.delete(mode)
+      })
+      .catch(() => {
+        restoring.current = false
+        openChats.delete(mode)
+      })
+  }, [mode])
+  useEffect(() => {
+    if (restoring.current) return
+    if (current) openChats.set(mode, current.id)
+    else openChats.delete(mode)
+  }, [mode, current])
   const [live, setLive] = useState<Live | null>(null)
   const [error, setError] = useState<string | null>(null)
   // The unsent message (and its files) of each mode, kept when switching
@@ -524,6 +549,15 @@ function ChatView(props: Props): React.JSX.Element {
       return next
     })
   }
+  // Puts a request from a hub in the message box, cursor at its end.
+  const fillBox = (text: string): void => {
+    setDraft(text)
+    setTimeout(() => {
+      const box = document.querySelector<HTMLTextAreaElement>('textarea')
+      box?.focus()
+      box?.setSelectionRange(text.length, text.length)
+    })
+  }
   const split = showPane && !narrow
   const chatHidden = showPane && narrow && side === 'outputs'
   const modeLabel = modes.find((m) => m.id === mode)?.label ?? 'Chat'
@@ -534,19 +568,15 @@ function ChatView(props: Props): React.JSX.Element {
       <div className={`min-h-0 min-w-0 flex-1 flex-col ${chatHidden ? 'hidden' : 'flex'}`}>
         {showPane && narrow && <SideSwitch side={side} onSide={setSide} count={outputs.length} />}
         <div className="flex-1 overflow-y-auto">
-          {empty && mode === 'skills' ? (
-            <SkillsHub
-              onOpenSettings={onOpenSettings}
-              onStart={(text) => {
-                setDraft(text)
-                // After the box has the text, so the cursor lands at its end.
-                setTimeout(() => {
-                  const box = document.querySelector<HTMLTextAreaElement>('textarea')
-                  box?.focus()
-                  box?.setSelectionRange(text.length, text.length)
-                })
+          {empty && mode === 'code' ? (
+            <PluginsHub
+              onStart={(pluginId, text) => {
+                setWorkspace({ kind: 'internal', pluginId })
+                fillBox(text)
               }}
             />
+          ) : empty && mode === 'skills' ? (
+            <SkillsHub onOpenSettings={onOpenSettings} onStart={fillBox} />
           ) : empty ? (
             <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
               <Orb size={128} state={copy[mode].orb} />

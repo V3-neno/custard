@@ -3,14 +3,13 @@ import { providerNames, type Provider } from '../../../shared/chat'
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
 
-import PluginsTab from './settings/PluginsTab'
 import DesignTab from './settings/DesignTab'
 import EditableFolders from './settings/EditableFolders'
 import Automations from './settings/Automations'
 import { cleanError, primary, secondary } from './settings/ui'
 
 type Props = { onClose: () => void; onChanged: () => void }
-type Tab = 'general' | 'design' | 'plugins'
+type Tab = 'general' | 'design'
 
 const keyInfo: Record<Provider, { placeholder: string; where: string }> = {
   claude: { placeholder: 'sk-ant-…', where: 'console.anthropic.com' },
@@ -119,36 +118,8 @@ function MemorySection(): React.JSX.Element {
       <p className="mt-2 text-xs text-ash-400">
         {settings && !settings.auto
           ? "Off: nothing new is saved, and waiting summaries are cancelled. Notes already in your vault stay until you edit them, and chats from while it was off aren't saved later."
-          : "To keep one chat out, start it as a Temporary chat from the top bar; Forget in History deletes a chat's notes. You can also turn it off for a plugin in its settings. Edit or delete anything in your vault; what you delete is not added back."}
+          : "To keep one chat out, start it as a Temporary chat from the top bar; Forget in History deletes a chat's notes. You can also turn it off for a plugin with Manage in Plugins mode. Edit or delete anything in your vault; what you delete is not added back."}
       </p>
-    </section>
-  )
-}
-
-function SecuritySection(): React.JSX.Element {
-  const [ask, setAsk] = useState<boolean | null>(null)
-  useEffect(() => {
-    window.custard.security.get().then((s) => setAsk(s.askBeforeWriteTools))
-  }, [])
-  return (
-    <section className="mb-6">
-      <h3 className="mb-1 text-sm font-medium">Security</h3>
-      <label className="flex items-start gap-2 text-sm text-ash-300">
-        <input
-          type="checkbox"
-          className="mt-1"
-          checked={ask ?? true}
-          disabled={ask === null}
-          onChange={(e) => {
-            setAsk(e.target.checked)
-            window.custard.security.set({ askBeforeWriteTools: e.target.checked })
-          }}
-        />
-        <span>
-          Ask before plugin actions that change things (queueing music, opening apps, sending data).
-          This is the default for every plugin action; you can change single actions in Plugins.
-        </span>
-      </label>
     </section>
   )
 }
@@ -196,7 +167,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
       onClick={onClose}
     >
       <div
-        className={`max-h-[90vh] overflow-y-auto rounded-3xl border border-forge-700 bg-forge-850 p-6 ${tab === 'plugins' ? 'w-[820px]' : 'w-[480px]'}`}
+        className={`max-h-[90vh] overflow-y-auto rounded-3xl border border-forge-700 bg-forge-850 p-6 w-[480px]`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center gap-4">
@@ -205,7 +176,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
             className="flex gap-1 rounded-full border border-forge-700 p-0.5 text-sm"
             role="tablist"
           >
-            {(['general', 'design', 'plugins'] as Tab[]).map((t) => (
+            {(['general', 'design'] as Tab[]).map((t) => (
               <button
                 key={t}
                 role="tab"
@@ -213,15 +184,13 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
                 onClick={() => setTab(t)}
                 className={`rounded-full px-3 py-1 ${tab === t ? 'bg-forge-700 text-ash-100' : 'text-ash-400 hover:text-ash-100'}`}
               >
-                {t === 'general' ? 'General' : t === 'design' ? 'Design' : 'Plugins'}
+                {t === 'general' ? 'General' : 'Design'}
               </button>
             ))}
           </div>
         </div>
 
-        {tab === 'plugins' ? (
-          <PluginsTab />
-        ) : tab === 'design' ? (
+        {tab === 'design' ? (
           <DesignTab />
         ) : (
           <>
@@ -294,7 +263,6 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
             </section>
             <div className="mt-6">
               <MemorySection />
-              <SecuritySection />
             </div>
           </>
         )}

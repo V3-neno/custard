@@ -37,6 +37,23 @@ const app = await electron.launch({
   }
 })
 const step = (s) => console.log('\n## ' + s)
+
+// Plugins are managed from Plugins mode's start page (the hub), not Settings.
+// Opening it closes Settings if open and remembers the mode to come back to.
+let backTo = null
+const openPlugins = async () => {
+  if (await w.locator('h2:text-is("Settings")').count()) await w.click('button:text-is("Done")')
+  backTo = (await w.locator('button.molten-fill[title]').first().innerText()).trim()
+  await w.click('button[title][class*="rounded-full"]:text-is("Plugins")')
+  if (!(await w.locator('text=What Custard can reach').count()))
+    await w.click('button[title][class*="rounded-full"]:text-is("Plugins")')
+  await w.waitForSelector('text=What Custard can reach')
+}
+// Closes the plugin's panel and goes back to the mode it was opened from.
+const closePlugins = async () => {
+  await w.click('[role=dialog] button:text-is("Done")')
+  if (backTo && backTo !== 'Plugins') await w.click(`button[title]:text-is("${backTo}")`)
+}
 const check = (cond, what) => {
   console.log((cond ? '✓ ' : '✕ ') + what)
   if (!cond) process.exitCode = 1
@@ -77,8 +94,7 @@ const fail = async (e) => {
   process.exit(1)
 }
 const settings = async () => {
-  await w.click('button[title=Settings]')
-  await w.click('[role=tab]:text-is("Plugins")')
+  await openPlugins()
   await w.click('button:has-text("Spotify")')
 }
 const closeSettings = () => w.click('button:text-is("Done")')
@@ -206,7 +222,7 @@ try {
     !plainFiles.includes('AT-secret') && !plainFiles.includes('RT-secret'),
     'tokens not in state/config/data files'
   )
-  await closeSettings()
+  await closePlugins()
 
   step('6-9. Chat: five focus songs from saved preferences')
   await w.click('button:text-is("Chat")')
@@ -276,7 +292,7 @@ try {
   await settings()
   await w.click('button:text-is("Disable")')
   await w.waitForSelector('button:text-is("Enable")')
-  await closeSettings()
+  await closePlugins()
   const before2 = spotifyLog().length
   await send('Queue one more')
   await w.waitForSelector('text=nothing was queued', { timeout: 30000 })

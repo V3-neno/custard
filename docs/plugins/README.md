@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins add tools to Custard's assistant. They are developed in **Plugins** mode, reviewed and activated in **Settings → Plugins**, and run in sandboxes the host controls. Spotify is the first plugin, in `plugin/spotify`.
+Plugins add tools to Custard's assistant. They are developed in **Plugins** mode, reviewed and activated with **Manage** on the plugin's card in Plugins mode, and run in sandboxes the host controls. Spotify is the first plugin, in `plugin/spotify`.
 
 - [API.md](API.md): the plugin API (`custard-plugin-sdk`), where plugin code runs, and testing
 - [MANIFEST.md](MANIFEST.md): `plugin.json`
@@ -16,7 +16,7 @@ Plugins add tools to Custard's assistant. They are developed in **Plugins** mode
 2. **Edit.** The assistant edits files only in `plugin/<id>`. It can read the docs, the SDK source and the Spotify example, read-only.
 3. **Validate.** `plugin_validate` checks the manifest and bundles the code into a staged build, stored in Custard's data folder.
 4. **Test.** `plugin_test` runs `tests/*.test.ts` and a load check in a sandbox.
-5. **Review.** In Settings → Plugins, **Review and activate** (or **Review update**) validates again and shows:
+5. **Review.** With **Manage** on its card in Plugins mode, **Review and activate** (or **Review update**) validates again and shows:
    - errors and warnings
    - the version change
    - a per-file diff against the active build
@@ -49,21 +49,21 @@ Editing files never changes the running plugin. Only activation does, so develop
 
 ## How it fits into Custard
 
-| Piece                                                                          | File                                                               |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| Manifest checks, permissions, tool naming                                      | `src/main/plugins/manifest.ts`, `schema.ts`                        |
-| Builds (esbuild, imports limited to the folder and SDK)                        | `src/main/plugins/build.ts`                                        |
-| Host: discovery, review, activation, rollback, capabilities, invocation checks | `src/main/plugins/host.ts`                                         |
-| Sandboxed runtime and IPC                                                      | `src/main/plugins/runtime.ts`, `src/preload/plugin.ts`             |
-| Network policy                                                                 | `src/main/plugins/net.ts`                                          |
-| OAuth PKCE                                                                     | `src/main/plugins/oauth.ts`                                        |
-| State and secrets                                                              | `src/main/plugins/store.ts`                                        |
-| Spotify settings migration                                                     | `src/main/plugins/migrate.ts`                                      |
-| Electron wiring, IPC, workspace checks                                         | `src/main/plugins/index.ts`                                        |
-| SDK, runtime and test helpers                                                  | `src/plugin-sdk/`                                                  |
-| Workspace file tools and path checks                                           | `src/main/workspace/`                                              |
-| Chat integration (tools for both providers, approvals, stale history)          | `src/main/chat.ts`, `src/main/history.ts`                          |
-| Settings → Plugins, review screen                                              | `src/renderer/src/components/settings/PluginsTab.tsx`              |
-| Code-mode workspace picker, approval cards                                     | `src/renderer/src/components/chat/WorkspaceBar.tsx`, `Working.tsx` |
+| Piece                                                                          | File                                                                  |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Manifest checks, permissions, tool naming                                      | `src/main/plugins/manifest.ts`, `schema.ts`                           |
+| Builds (esbuild, imports limited to the folder and SDK)                        | `src/main/plugins/build.ts`                                           |
+| Host: discovery, review, activation, rollback, capabilities, invocation checks | `src/main/plugins/host.ts`                                            |
+| Sandboxed runtime and IPC                                                      | `src/main/plugins/runtime.ts`, `src/preload/plugin.ts`                |
+| Network policy                                                                 | `src/main/plugins/net.ts`                                             |
+| OAuth PKCE                                                                     | `src/main/plugins/oauth.ts`                                           |
+| State and secrets                                                              | `src/main/plugins/store.ts`                                           |
+| Spotify settings migration                                                     | `src/main/plugins/migrate.ts`                                         |
+| Electron wiring, IPC, workspace checks                                         | `src/main/plugins/index.ts`                                           |
+| SDK, runtime and test helpers                                                  | `src/plugin-sdk/`                                                     |
+| Workspace file tools and path checks                                           | `src/main/workspace/`                                                 |
+| Chat integration (tools for both providers, approvals, stale history)          | `src/main/chat.ts`, `src/main/history.ts`                             |
+| Plugins hub, Manage panel, review screen                                       | `src/renderer/src/components/hubs/PluginsHub.tsx`, `PluginDetail.tsx` |
+| Code-mode workspace picker, approval cards                                     | `src/renderer/src/components/chat/WorkspaceBar.tsx`, `Working.tsx`    |
 
 Plugin tools join the same `BetaTool[]` list as the vault tools, which `openai.ts` converts for OpenAI, so plugins work with both providers. When a tool from an earlier message isn't offered any more (plugin disabled, removed, or from another mode), that call is sent to the model as text, so the API doesn't need a definition for it.

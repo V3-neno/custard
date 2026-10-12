@@ -69,7 +69,7 @@ function internal(pluginId: string): WorkspaceTools {
       `Workspace: Internal (Plugins). You are developing the Custard plugin "${pluginId}". The fs_ tools work only inside plugin/${pluginId}; everything else, including Custard's core, is out of reach.`,
       '- Read the reference first: reference_read docs/API.md and docs/MANIFEST.md, and look at examples/spotify for a complete plugin. sdk/ is the custard-plugin-sdk source.',
       '- Work in steps: edit, then plugin_validate, then plugin_test, and fix what they report. Show the user what you changed and which permissions the plugin asks for.',
-      "- You can't activate, enable or install plugins, and you have no shell. When it validates and tests cleanly, tell the user to open Settings → Plugins, review the changes and permissions, and activate it.",
+      "- You can't activate, enable or install plugins, and you have no shell. When it validates and tests cleanly, tell the user to click Manage on its card in Plugins mode (the start page of a new Plugins chat), review the changes and permissions, and activate it.",
       '- Plugin code runs in a sandbox with no Node.js and no direct network. Everything goes through the context: ctx.fetch (https, hosts in permissions.network), ctx.storage, ctx.openExternal, ctx.config. There are no npm packages.',
       "- If the plugin needs something the SDK doesn't offer, say so plainly and describe the core change it would need as a separate proposal. Don't try to work around the sandbox.",
       '- Each file change you make is shown to the user in full and happens only if they allow it; a declined change did nothing.',
@@ -92,7 +92,9 @@ function internal(pluginId: string): WorkspaceTools {
             : v.typeErrors
               ? ['Types: no errors.']
               : []),
-          v.ok ? 'Run plugin_test next. Only the user can activate it, in Settings → Plugins.' : ''
+          v.ok
+            ? 'Run plugin_test next. Only the user can activate it, with Manage on its card in Plugins mode.'
+            : ''
         ]
         return { content: lines.filter(Boolean).join('\n'), isError: !v.ok || types.length > 0 }
       }
