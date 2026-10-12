@@ -311,6 +311,7 @@ http
         [/vgrant elsewhere/, 'vgelsewhere'],
         [/vgrant protected/, 'vgprotected'],
         [/vgrant newoutside/, 'vgnewoutside'],
+        [/vgrant web/, 'vgweb'],
         [/fs write test/, 'fswrite'],
         [/forged test/, 'forged'],
         [/note test/, 'note'],
@@ -665,6 +666,13 @@ http
         vgprotected: [
           () => tool('vault_append', { path: 'Custard/Captures/Old.md', text: 'PROTECTED-4417' }),
           'Tried a protected note.'
+        ],
+        // Reads a web page (outside text), then changes allowed notes.
+        vgweb: [
+          () => tool('web_read', { url: 'https://tea.example.com/guide' }),
+          () => tool('vault_append', { path: 'Journal/Log.md', text: 'WEB-APPEND-4410' }),
+          () => tool('vault_create_note', { path: 'Notes/WebMade.md', content: 'WEB-MADE-2203' }),
+          'Done.'
         ],
         vgnewoutside: [
           () => tool('vault_create_note', { path: 'Inbox/Outside.md', content: 'OUTSIDE-NOTE' }),

@@ -115,6 +115,10 @@ try {
   await allow('Custard', 'edit')
   await w.fill('input[aria-label="Folder to allow"]', '../outside')
   await w.click('button:text-is("Allow")')
+  await w
+    .locator("text=That folder can't be allowed")
+    .waitFor({ timeout: 5000 })
+    .catch(() => {})
   check(
     await w.locator("text=That folder can't be allowed").isVisible(),
     'a folder outside the vault is refused'
@@ -177,13 +181,93 @@ try {
   await w.waitForSelector('text=has changed since this edit')
   check(file('Notes/Plan.md').endsWith('by hand\n'), 'undo leaves a note changed since alone')
 
+  step('Outside text: edits in allowed folders ask, for the rest of the chat')
+  await allow('Journal', 'append')
+  await closeSettings()
+  await app.evaluate(() => {
+    const { Readable } = process.getBuiltinModule('stream')
+    globalThis.__custardWebHop = async () => ({
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+      stream: Readable.from([
+        Buffer.from(
+          '<html><head><title>Tea</title></head><body><article><h1>Tea</h1><p>' +
+            'Brew green tea at 80 degrees for two minutes. '.repeat(8) +
+            '</p></article></body></html>'
+        )
+      ])
+    })
+  })
+  const indicator = w.locator('text=Outside text')
+  check((await indicator.count()) === 0, 'no indicator before any outside text')
+  await send('vgrant web')
+  const seen = []
+  const answer = async (stopAt = 60000) => {
+    const t0 = Date.now()
+    for (;;) {
+      if (await w.locator('button[title=Send]').count()) return
+      if (Date.now() - t0 > stopAt) throw new Error('timed out')
+      const c = card()
+      if (await c.count()) {
+        const text = (await c.first().textContent()) ?? ''
+        seen.push(text)
+        const hold =
+          /WEB-APPEND|WEB-MADE|APPENDED-LINE|vgrant/.test(text) && !/tea\.example\.com/.test(text)
+        await c
+          .first()
+          .getByRole('button', { name: hold ? "Don't allow" : 'Allow', exact: true })
+          .click()
+        await new Promise((r) => setTimeout(r, 300))
+      } else await new Promise((r) => setTimeout(r, 150))
+    }
+  }
+  await answer()
+  const appendCard = seen.find((t) => /WEB-APPEND-4410/.test(t)) ?? ''
+  check(!!appendCard, 'an append after a web page shows the card')
+  check(/text from the web or a plugin/.test(appendCard), 'the card says why it is asking')
+  check(!file('Journal/Log.md').includes('WEB-APPEND-4410'), 'declining left the note unchanged')
+  check(
+    seen.some((t) => /WebMade\.md/.test(t) && /WEB-MADE-2203/.test(t)),
+    'a new note in an allowed folder asks too, with its content'
+  )
+  check(!fs.existsSync(`${V}/Notes/WebMade.md`), 'declining created nothing')
+  check((await indicator.count()) > 0, 'the chat shows an Outside text indicator')
+  await w.screenshot({ path: SHOTS + '/vault-edit-outside.png' })
+  seen.length = 0
+  await send('vgrant append')
+  await answer()
+  check(
+    seen.some((t) => /APPENDED-LINE-7731/.test(t)),
+    'a later append in the same chat still asks'
+  )
+  check(!file('Journal/Log.md').includes('APPENDED-LINE-7731'), 'and was declined')
+  await send('vgrant append')
+  for (let i = 0; i < 200 && !(await card().count()); i++)
+    await new Promise((r) => setTimeout(r, 100))
+  await card().first().getByRole('button', { name: 'Allow', exact: true }).click()
+  await idle()
+  check(file('Journal/Log.md').endsWith('APPENDED-LINE-7731\n'), 'allowing applies the change')
+  await w.click('button[aria-label="Temporary chat"]')
+  await w.click('button[aria-label="Temporary chat"]')
+  await w.waitForSelector('text=Outside text', { state: 'detached' })
+  check(true, 'a new chat clears the indicator')
+  await send('vgrant append')
+  await idle()
+  check(!(await card().count()), 'a new chat without outside text edits with no card again')
+  check(
+    file('Journal/Log.md').split('APPENDED-LINE-7731').length === 3,
+    'and the change was applied'
+  )
+
   step('Removing a grant stops it')
+  const logBefore = file('Journal/Log.md')
+  await openSettings()
   await w.click('button[aria-label="Remove Journal"]')
   await w.waitForSelector('button[aria-label="Remove Journal"]', { state: 'detached' })
   await closeSettings()
   await send('vgrant append')
   await idle()
-  check(!file('Journal/Log.md').includes('APPENDED-LINE-7731'), 'the removed grant no longer works')
+  check(file('Journal/Log.md') === logBefore, 'the removed grant no longer works')
 } finally {
   await app.close()
   console.log('e2e done, exit', process.exitCode ?? 0)

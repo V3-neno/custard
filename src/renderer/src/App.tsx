@@ -25,6 +25,7 @@ function App(): React.JSX.Element {
   const [temporary, setTemporary] = useState(false)
   const [newChat, setNewChat] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [outsideText, setOutsideText] = useState(false)
   const provider = providerOf(settings.model)
 
   useEffect(() => {
@@ -59,6 +60,7 @@ function App(): React.JSX.Element {
             vaultConnected={vaultConnected}
             temporary={temporary}
             busy={busy}
+            outsideText={outsideText}
             onTemporary={() => {
               setTemporary((t) => !t)
               setNewChat((n) => n + 1)
@@ -81,6 +83,7 @@ function App(): React.JSX.Element {
             onTemporary={setTemporary}
             newChat={newChat}
             onBusy={setBusy}
+            onOutsideText={setOutsideText}
           />
           {settingsOpen && (
             <SettingsDialog

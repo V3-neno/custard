@@ -1,3 +1,4 @@
+import { chatHasOutsideText } from '../../../../shared/outsideText'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import {
@@ -97,6 +98,7 @@ type Props = {
   onTemporary: (temporary: boolean) => void
   newChat: number
   onBusy: (busy: boolean) => void
+  onOutsideText: (outside: boolean) => void
 }
 
 const unsent = new Map<Mode, { text: string; draftId: string; files: DraftAttachment[] }>()
@@ -136,7 +138,8 @@ function SideSwitch({
 
 function ChatView(props: Props): React.JSX.Element {
   const { mode, onModeChange, hasKey, settings, onSettings, onOpenSettings } = props
-  const { historyOpen, onCloseHistory, temporary, onTemporary, newChat, onBusy } = props
+  const { historyOpen, onCloseHistory, temporary, onTemporary, newChat, onBusy, onOutsideText } =
+    props
   const [list, setList] = useState<ConversationSummary[]>([])
   const [current, setCurrent] = useState<Conversation | null>(null)
   const [live, setLive] = useState<Live | null>(null)
@@ -274,6 +277,8 @@ function ChatView(props: Props): React.JSX.Element {
   }
 
   useEffect(() => onBusy(!!live), [live, onBusy])
+  const outsideText = chatHasOutsideText(current)
+  useEffect(() => onOutsideText(outsideText), [outsideText, onOutsideText])
 
   // The header's Temporary switch: a chat that has started gives way to a
   // new one of the chosen kind.

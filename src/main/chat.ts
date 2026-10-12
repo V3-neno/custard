@@ -56,7 +56,8 @@ import {
   vaultSystemPrompt,
   vaultTools
 } from './vault'
-import { createGranted } from './vault/edit'
+import { createGranted, previewChange } from './vault/edit'
+import { chatHasOutsideText, isOutsideTool } from '../shared/outsideText'
 import { anyGrantAllows } from '../shared/vaultGrants'
 import { withoutUnavailableTools } from './history'
 import { attachments } from './attachments'
@@ -522,6 +523,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
 
   // Runs one tool call. Its record is kept by the log.
+  // Outside text (web results or pages, plugin tool results) anywhere in the
+  // chat, or in this round's calls, makes edits in granted folders ask first.
+  let roundOutside = false
   const runTool = async (c: Call): Promise<ToolRun> => {
     emit({ requestId, type: 'tool', id: c.id, label: c.label, status: 'running', write: c.write })
     // Only tools offered in this turn run: a call to anything else (a
@@ -626,14 +630,27 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       // its own. Approval doesn't make what's in notes trustworthy.
       // A new note in a folder the user granted needs no card; elsewhere it
       // is shown in full and approved on its own.
-      if (
-        c.name === 'vault_create_note' &&
-        !preApproved &&
-        !createGranted(vault, (c.input as { path?: unknown })?.path, grants)
-      ) {
-        let preview: ReturnType<typeof previewNote>
+      const outside = roundOutside || chatHasOutsideText(conversation)
+      const needsCard =
+        c.name === 'vault_create_note'
+          ? !createGranted(vault, (c.input as { path?: unknown })?.path, grants) || outside
+          : outside && (c.name === 'vault_append' || c.name === 'vault_edit')
+      if (needsCard && !preApproved) {
+        let preview: { label: string; detail: string }
         try {
-          preview = previewNote(vault, c.input)
+          if (c.name === 'vault_create_note') preview = previewNote(vault, c.input)
+          else {
+            const p = await previewChange(
+              vault,
+              c.name as 'vault_append' | 'vault_edit',
+              c.input as never,
+              {
+                grants
+              }
+            )
+            if ('content' in p) return p
+            preview = p
+          }
         } catch (err) {
           return {
             content: err instanceof Error ? err.message : String(err),
@@ -647,14 +664,16 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
           tool: c.name,
           label: preview.label,
           input: c.input,
-          detail: preview.detail,
+          detail: outside
+            ? `This chat contains text from the web or a plugin, which could be steering this change.\n\n${preview.detail}`
+            : preview.detail,
           individual: true
         })
         if (!allowed)
           return {
             content: controller.signal.aborted
               ? 'Stopped before it ran, so nothing was done.'
-              : 'The user declined creating this note, so nothing was done.',
+              : 'The user declined this change, so nothing was done.',
             isError: true,
             outcome: 'not-run'
           }
@@ -728,8 +747,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
 
   const runRound = (
     uses: { id: string; name: string; input: unknown }[]
-  ): Promise<BetaToolResultBlockParam[]> =>
-    log.runRound(
+  ): Promise<BetaToolResultBlockParam[]> => {
+    if (uses.some((u) => isOutsideTool(u.name))) roundOutside = true
+    return log.runRound(
       uses.map((u) => toCall(u.id, u.name, u.input)),
       runCapped,
       controller.signal,
@@ -743,6 +763,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
           write: c.write
         })
     )
+  }
 
   const params: MessageCreateParamsStreaming = {
     model: model.id,

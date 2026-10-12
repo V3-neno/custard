@@ -70,7 +70,8 @@ export function route({ req, url, body, j, OUT }) {
     keyOk: req.headers.authorization === 'Bearer sk-openai-test'
   })
   fs.writeFileSync(file, JSON.stringify(log, null, 1))
-  if (/s3fail/.test(prompt)) return (j(500, { error: { message: 'The server had an error.' } }), true)
+  if (/s3fail/.test(prompt))
+    return (j(500, { error: { message: 'The server had an error.' } }), true)
   j(200, {
     created: 1,
     output_format: 'png',

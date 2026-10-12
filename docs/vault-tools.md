@@ -197,10 +197,28 @@ another program saving between the last check and the replace can lose one of
 the two changes. Neno: there shouldn't be unsaved changes in Obsidian, so the
 risk is accepted. This replaces the 2026-10-07 decision to defer editing.
 
-**Open for review.** Inside an allowed folder an edit needs no card, even in a
-chat that has read web pages or plugin text. A prompt-injected page could ask
-Claude to change a note in an allowed folder. Notes in `Custard/Plugins` are
-also read into later chats' instructions.
+**Outside text (Neno, 2026-10-12).** A page or a plugin result can carry
+instructions, so in chat the no-card rule has one condition. Once a chat holds
+outside text, every change inside an allowed folder (a new note, an append, an
+edit) shows the approval card with what would change, for the rest of that chat:
+
+- Outside text means a result from `web_search` or `web_read`, or from any
+  plugin tool. A call that never ran doesn't count. Calls in the same round as
+  such a call count, because they run together.
+- A chat continued from another one counts, because it carries that chat's text.
+- Chats without outside text keep no-card changes.
+- A top-bar pill, "Outside text", shows when the chat on screen has some. A new
+  chat clears it.
+- The card is the same as for a note outside the grants: it can't be allowed for
+  the whole chat, and a call that would be refused is refused without a card.
+- Unattended automations are not chats and stay card-free; they rely on the
+  hostile-text controls of Step 5.
+- `Custard/Memory.md` can't be allowed (it is a file), and Skills and Captures
+  stay protected under a parent grant. There is no way to grant them by accident.
+
+The indicator reads the saved chat, so it can show up once the turn that brought
+the text has finished. The card doesn't wait for that: it already applies within
+the same turn.
 
 ## Tests
 
@@ -238,7 +256,9 @@ also read into later chats' instructions.
 `test/e2e/vault-edit.mjs`): grants and protected places, every edit type,
 atomic failure, stale version, frontmatter, links, limits, records and undo; and
 in the app, no card inside an allowed folder, refusal outside, Settings add and
-remove, Recent changes and Undo.
+remove, Recent changes and Undo, and the outside-text rule (cards with the diff
+after a web page, indicator, new chat clears it). `src/shared/outsideText.test.ts`
+covers what counts as outside text.
 
 ## Limits
 

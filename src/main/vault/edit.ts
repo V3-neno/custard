@@ -310,13 +310,24 @@ export function createGranted(
 const NOT_GRANTED = (path: string, need: GrantMode): string =>
   `${path} isn't in a folder the user has allowed you to ${need === 'edit' ? 'edit' : 'add to'}, so nothing was done. Offer to save it as a new note instead, or ask the user to add the folder under Settings → Obsidian vault → Editable folders.`
 
-// vault_append and vault_edit.
-export async function changeNote(
+type Plan = {
+  full: string
+  path: string
+  edits: NoteEdit[]
+  before: string
+  after: string
+  beforeVersion: string
+}
+
+// Everything a change needs decided before anything is written: that the path
+// is allowed, the version is current, every edit applies, and the result is
+// sound. Returns the change, or a refusal.
+async function planChange(
   vault: string,
   name: 'vault_append' | 'vault_edit',
   input: { path?: unknown; text?: unknown; edits?: unknown; version?: unknown },
-  ctx: EditContext
-): Promise<ToolRun> {
+  ctx: Pick<EditContext, 'grants'>
+): Promise<Plan | ToolRun> {
   const full = resolveInVault(vault, input.path)
   const need: GrantMode = name === 'vault_edit' ? 'edit' : 'append'
   const { path, mode } = grantedMode(vault, full, ctx.grants)
@@ -361,6 +372,45 @@ export async function changeNote(
   const problem = frontmatterProblem(before, after)
   if (problem) return fail(`${problem} Nothing was changed.`)
   if (after === before) return fail('The edits change nothing, so nothing was written.')
+  return { full, path, edits, before, after, beforeVersion }
+}
+
+const isPlan = (x: Plan | ToolRun): x is Plan => 'after' in x
+
+// What a change will do, for the user to approve first: the note and what
+// would be removed and added. A change that would be refused is refused here,
+// without asking. Nothing is written.
+export async function previewChange(
+  vault: string,
+  name: 'vault_append' | 'vault_edit',
+  input: { path?: unknown; text?: unknown; edits?: unknown; version?: unknown },
+  ctx: Pick<EditContext, 'grants'>
+): Promise<{ label: string; detail: string } | ToolRun> {
+  const plan = await planChange(vault, name, input, ctx)
+  if (!isPlan(plan)) return plan
+  const change = summarizeChange(plan.before, plan.after)
+  return {
+    label: `${name === 'vault_edit' ? 'Edit' : 'Add to'} ${plan.path}`,
+    detail: [
+      `${name === 'vault_edit' ? 'Edit' : 'Add to'} ${plan.path} (${plan.edits.length} ${plan.edits.length === 1 ? 'change' : 'changes'}).`,
+      '',
+      ...(change.removed ? [`Removed:`, change.removed, ''] : []),
+      ...(change.added ? [`Added:`, change.added] : []),
+      ...(change.truncated ? ['', '(Long: only the start of each part is shown.)'] : [])
+    ].join('\n')
+  }
+}
+
+// vault_append and vault_edit.
+export async function changeNote(
+  vault: string,
+  name: 'vault_append' | 'vault_edit',
+  input: { path?: unknown; text?: unknown; edits?: unknown; version?: unknown },
+  ctx: EditContext
+): Promise<ToolRun> {
+  const plan = await planChange(vault, name, input, ctx)
+  if (!isPlan(plan)) return plan
+  const { full, path, before, after, beforeVersion } = plan
 
   // The note must still be what was read, just before it is replaced.
   try {

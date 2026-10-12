@@ -18,6 +18,7 @@ import {
   applyEdits,
   EDIT_LIMITS,
   listEdits,
+  previewChange,
   summarizeChange,
   undoEdit,
   VaultEditError
@@ -337,6 +338,60 @@ describe('vault_edit', () => {
     note('Notes/a.md', 'hello\n')
     await edit(EDIT, 'Notes/a.md', [{ type: 'append', text: 'x' }])
     expect(readdirSync(join(vault, 'Notes')).filter((f) => f !== 'a.md')).toEqual([])
+  })
+})
+
+describe('previewChange', () => {
+  it('shows what an edit would remove and add, and writes nothing', async () => {
+    note('Notes/a.md', 'hello world\n')
+    const p = await previewChange(
+      vault,
+      'vault_edit',
+      {
+        path: 'Notes/a.md',
+        version: versionOf(text('Notes/a.md')),
+        edits: [{ type: 'replace', old_text: 'hello', new_text: 'goodbye' }]
+      },
+      { grants: EDIT }
+    )
+    expect(p).toMatchObject({ label: expect.stringContaining('Notes/a.md') })
+    expect(JSON.stringify(p)).toContain('hello')
+    expect(JSON.stringify(p)).toContain('goodbye')
+    expect(text('Notes/a.md')).toBe('hello world\n')
+    expect(listEdits(records)).toHaveLength(0)
+  })
+  it('shows an append', async () => {
+    note('Notes/a.md', 'x\n')
+    const p = await previewChange(
+      vault,
+      'vault_append',
+      { path: 'Notes/a.md', text: 'ADDED-LINE' },
+      { grants: APPEND }
+    )
+    expect(JSON.stringify(p)).toContain('ADDED-LINE')
+    expect(text('Notes/a.md')).toBe('x\n')
+  })
+  it('refuses outside the grants, and on a stale version', async () => {
+    note('Notes/a.md', 'hello\n')
+    note('Other/b.md', 'hello\n')
+    const out = await previewChange(
+      vault,
+      'vault_append',
+      { path: 'Other/b.md', text: 'x' },
+      { grants: APPEND }
+    )
+    expect(out).toMatchObject({ isError: true, outcome: 'not-run' })
+    const stale = await previewChange(
+      vault,
+      'vault_edit',
+      {
+        path: 'Notes/a.md',
+        version: 'deadbeef0000',
+        edits: [{ type: 'replace', old_text: 'hello', new_text: 'X' }]
+      },
+      { grants: EDIT }
+    )
+    expect(stale).toMatchObject({ isError: true, outcome: 'not-run' })
   })
 })
 

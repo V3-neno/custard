@@ -6,6 +6,7 @@ type Props = {
   vaultConnected: boolean
   temporary: boolean
   busy: boolean
+  outsideText: boolean
   onTemporary: () => void
   onHistory: () => void
   onSettings: () => void
@@ -15,7 +16,16 @@ const iconButton =
   'flex h-9 w-9 items-center justify-center rounded-full text-lg text-ash-400 transition-colors hover:bg-forge-800 hover:text-molten-300'
 
 function TopBar(props: Props): React.JSX.Element {
-  const { modeLabel, vaultConnected, temporary, busy, onTemporary, onHistory, onSettings } = props
+  const {
+    modeLabel,
+    vaultConnected,
+    temporary,
+    busy,
+    outsideText,
+    onTemporary,
+    onHistory,
+    onSettings
+  } = props
   return (
     <header className="relative flex h-14 shrink-0 items-center gap-2 px-4">
       <button onClick={onHistory} className={iconButton} title={`${modeLabel} history`}>
@@ -28,6 +38,14 @@ function TopBar(props: Props): React.JSX.Element {
         </span>
       </div>
       <div className="ml-auto flex items-center gap-1">
+        {outsideText && (
+          <span
+            className="mr-1 flex items-center gap-1.5 rounded-full border border-molten-500/50 px-2.5 py-1 text-xs text-molten-200"
+            title="This chat has web or plugin text in it, so changes to notes ask for approval first, even in allowed folders."
+          >
+            Outside text
+          </span>
+        )}
         {vaultConnected && (
           <button
             role="switch"
