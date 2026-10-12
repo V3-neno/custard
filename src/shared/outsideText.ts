@@ -15,10 +15,13 @@ export const isOutsideTool = (name: string): boolean =>
 // whose summary may carry such text. Once true it stays true: the results are
 // part of the chat from then on.
 export function chatHasOutsideText(
-  c: Pick<Conversation, 'actions' | 'continuedFrom'> | null | undefined
+  c: Pick<Conversation, 'actions' | 'continuedFrom' | 'questions'> | null | undefined
 ): boolean {
   if (!c) return false
   if (c.continuedFrom) return true
+  // A question an automation run left was written after it read notes and
+  // plugin text.
+  if (c.questions?.length) return true
   return Object.values(c.actions ?? {}).some(
     (a) => isOutsideTool(a.name) && a.status !== 'not-run' && a.status !== 'pending'
   )

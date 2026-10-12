@@ -205,3 +205,5 @@ export const getAutomations = (): Automation[] => readConfig().automations
 export const setAutomations = (automations: Automation[]): void =>
   writeConfig({ automations: normalizeAutomations(automations) })
 export const automationRunsDir = (): string => join(app.getPath('userData'), 'automation-runs')
+export const automationQuestionsFile = (): string =>
+  join(app.getPath('userData'), 'automation-questions.json')

@@ -312,6 +312,9 @@ http
         [/vgrant protected/, 'vgprotected'],
         [/vgrant newoutside/, 'vgnewoutside'],
         [/vgrant web/, 'vgweb'],
+        [/vgauto ask/, 'vgask'],
+        [/vgq answer/, 'vgqanswer'],
+        [/vgq hello/, 'vgqchat'],
         [/vgauto/, 'vgauto'],
         [/fs write test/, 'fswrite'],
         [/forged test/, 'forged'],
@@ -674,6 +677,43 @@ http
           () => tool('vault_append', { path: 'Journal/Log.md', text: 'WEB-APPEND-4410' }),
           () => tool('vault_create_note', { path: 'Notes/WebMade.md', content: 'WEB-MADE-2203' }),
           'Done.'
+        ],
+        // An automation run that leaves a question, and the chat that asks it
+        // (test/e2e/questions.mjs).
+        vgask: [
+          () =>
+            tool('leave_question', {
+              question: 'QSTN-4471 Which heading should the log go under?',
+              context: 'Plan.md has Log and Later.',
+              path: 'Notes/Plan.md',
+              options: ['Log', 'Later']
+            }),
+          'Left a question.'
+        ],
+        vgqchat: [
+          'Hello. Quick question from your automation: which heading should the log go under?'
+        ],
+        vgqanswer: [
+          () =>
+            tool('vault_edit', {
+              path: 'Notes/Plan.md',
+              version: createHash('sha256')
+                .update(fs.readFileSync(OUT + '/vault/Notes/Plan.md', 'utf8'), 'utf8')
+                .digest('hex')
+                .slice(0, 12),
+              edits: [
+                { type: 'insert_after_heading', heading: '## Later', text: '- ANSWERED-8812' }
+              ]
+            }),
+          () =>
+            tool('automation_question', {
+              id: /id="(q-[0-9a-f]{8})"/.exec(
+                (b.system ?? []).map((x) => x.text ?? '').join('\n')
+              )?.[1],
+              action: 'answer',
+              answer: 'Later'
+            }),
+          'Added it under Later and closed the question.'
         ],
         // An unattended automation run (test/e2e/automations.mjs).
         vgauto: [

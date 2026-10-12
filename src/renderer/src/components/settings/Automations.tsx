@@ -3,6 +3,7 @@ import {
   DEFAULT_LIMITS,
   type Automation,
   type AutomationView,
+  type PendingQuestion,
   type RunRecord
 } from '../../../../shared/automations'
 import { chatModels } from '../../../../shared/chat'
@@ -68,6 +69,7 @@ const split = (s: string): string[] =>
 // and use only the read tools of the plugins picked here.
 export default function Automations(): React.JSX.Element {
   const [views, setViews] = useState<AutomationView[]>([])
+  const [questions, setQuestions] = useState<PendingQuestion[]>([])
   const [grants, setGrants] = useState<VaultGrant[]>([])
   const [skills, setSkills] = useState<string[]>([])
   const [plugins, setPlugins] = useState<PluginStatus[]>([])
@@ -77,6 +79,7 @@ export default function Automations(): React.JSX.Element {
 
   const refresh = useCallback(() => {
     window.custard.automations.list().then(setViews)
+    window.custard.automations.questions().then(setQuestions)
     window.custard.vault.getGrants().then(setGrants)
     window.custard.vault.get().then((v) => setSkills(v?.skills ?? []))
     window.custard.plugins.list().then(setPlugins)
@@ -161,6 +164,56 @@ export default function Automations(): React.JSX.Element {
         the newest missed runs happen when it opens (you set how many), marked catch-up; older ones
         are noted and passed to the first of them.
       </p>
+      {questions.some((q) => q.status === 'open') && (
+        <div className="mb-3">
+          <h4 className="mb-1 text-xs font-medium text-ash-300">
+            Waiting for your answer. Claude asks them in your next chat.
+          </h4>
+          <ul className="space-y-1.5" aria-label="Open questions">
+            {questions
+              .filter((q) => q.status === 'open')
+              .map((q) => (
+                <li
+                  key={q.id}
+                  className="flex items-start gap-2 rounded-lg border border-molten-500/40 bg-forge-900 px-3 py-1.5 text-sm"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p>{q.question}</p>
+                    <p className="text-xs text-ash-500">
+                      {q.automationName}, {when(q.created)}
+                      {q.path ? ` · ${q.path}` : ''}
+                    </p>
+                    {q.context && <p className="text-xs text-ash-400">{q.context}</p>}
+                  </div>
+                  <button
+                    aria-label={`Drop question: ${q.question}`}
+                    onClick={() => void run(window.custard.automations.dismissQuestion(q.id))}
+                    className={`${danger} !px-2 !py-0.5 text-xs`}
+                  >
+                    Drop
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
+      {questions.some((q) => q.status === 'answered') && (
+        <details className="mb-3 text-xs text-ash-400">
+          <summary className="cursor-pointer">
+            Answered questions ({questions.filter((q) => q.status === 'answered').length})
+          </summary>
+          <ul className="mt-1 space-y-1" aria-label="Answered questions">
+            {questions
+              .filter((q) => q.status === 'answered')
+              .slice(0, 10)
+              .map((q) => (
+                <li key={q.id}>
+                  {q.question} <span className="text-ash-300">→ {q.answer}</span>
+                </li>
+              ))}
+          </ul>
+        </details>
+      )}
       {views.length > 0 && (
         <ul className="mb-3 space-y-2" aria-label="Automations">
           {views.map(({ automation: a, state, running, runs }) => (

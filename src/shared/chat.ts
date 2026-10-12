@@ -192,6 +192,9 @@ export type Conversation = ConversationSummary & {
   sources?: WebSource[]
   memory?: ChatMemory
   continuedFrom?: Continuation
+  // Open questions from automation runs shown to the model in this chat (ids).
+  // Their text came from a run that read notes and plugin text.
+  questions?: string[]
   // Where a provider's compaction summarized everything before message
   // `after`. The messages themselves are kept and shown in full.
   compactions?: Compaction[]

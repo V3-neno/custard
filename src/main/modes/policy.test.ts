@@ -40,7 +40,9 @@ describe('mode policy', () => {
       expect(p.authorSkills).toBe(false)
       expect(p.authorPlugins).toBe(false)
       const use = ['plugin', 'vault-read', 'vault-write', 'web', 'widget']
-      expect([...p.tools].sort()).toEqual(mode === 'design' ? ['design', ...use].sort() : use)
+      expect([...p.tools].sort()).toEqual(
+        mode === 'design' ? ['design', ...use].sort() : [...use, 'questions'].sort()
+      )
       expect(refuseKind(p, 'fs_write', 'workspace')).toMatch(/can't be used in/)
       expect(refuseKind(p, 'send_to_code', 'unknown')).toMatch(/can't be used in/)
     }

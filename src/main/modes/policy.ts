@@ -16,6 +16,7 @@ export type ToolKind =
   | 'web' // web_search, web_read
   | 'plugin' // an enabled plugin's tool, <plugin>__<tool>
   | 'widget' // widget_show, widget_hide
+  | 'questions' // automation_question: closes an automation's open question
   | 'workspace' // Code mode's file tools
   | 'design' // design_html, design_media, design_jobs: Design's outputs
   | 'unknown' // anything else: never allowed
@@ -38,7 +39,12 @@ export function modePolicy(mode: Mode, workspace?: Workspace): ModePolicy {
   switch (mode) {
     // Chat and Design use extensions; they never make or change them.
     case 'chat':
-      return { mode, tools: new Set(USE), authorSkills: false, authorPlugins: false }
+      return {
+        mode,
+        tools: new Set<ToolKind>([...USE, 'questions']),
+        authorSkills: false,
+        authorPlugins: false
+      }
     case 'design':
       return {
         mode,
@@ -47,7 +53,12 @@ export function modePolicy(mode: Mode, workspace?: Workspace): ModePolicy {
         authorPlugins: false
       }
     case 'skills':
-      return { mode, tools: new Set(USE), authorSkills: true, authorPlugins: false }
+      return {
+        mode,
+        tools: new Set<ToolKind>([...USE, 'questions']),
+        authorSkills: true,
+        authorPlugins: false
+      }
     case 'code': {
       // General Code gets no plugin tools: only the Plugins workspace does.
       const internal = workspace?.kind === 'internal'
@@ -69,6 +80,7 @@ export function toolKind(name: string, sources: ToolSources): ToolKind {
   if (sources.isWorkspace(name)) return 'workspace'
   if (sources.isWeb(name)) return 'web'
   if (name === 'widget_show' || name === 'widget_hide') return 'widget'
+  if (name === 'automation_question') return 'questions'
   if ((DESIGN_TOOLS as readonly string[]).includes(name)) return 'design'
   if (/^[a-z][a-z0-9-]{1,30}__[a-z][a-z0-9_]{0,40}$/.test(name)) return 'plugin'
   return 'unknown'

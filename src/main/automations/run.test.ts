@@ -71,6 +71,9 @@ function script(steps: (StepResult | ((seen: Parameters<Step>[0]) => StepResult)
   }
 }
 
+const left: { runId: string; slot?: string; q: unknown }[] = []
+beforeEach(() => (left.length = 0))
+
 const GRANTS: VaultGrant[] = [{ folder: 'Notes', mode: 'edit' }]
 
 function deps(step: Step | string, over: Partial<RunDeps> = {}): RunDeps {
@@ -86,6 +89,10 @@ function deps(step: Step | string, over: Partial<RunDeps> = {}): RunDeps {
     callPlugin: async () => ({ content: 'plugin result', isError: false }),
     describePlugin: () => null,
     step: () => step,
+    leaveQuestion: (runId, slot, q) => {
+      left.push({ runId, slot, q })
+      return { ok: true, id: `q-${left.length}` }
+    },
     now: () => Date.parse('2026-03-01T08:00:00Z'),
     ...over
   }
@@ -111,7 +118,7 @@ describe('what a run does', () => {
     expect(r.summary).toBe('Added a line.')
     expect(listEdits(join(root, 'records'))[0].source).toBe('automation a1 2026-03-01T08:00')
     expect(m.seen[0].system).toContain('Write the log.')
-    expect(m.seen[0].system).toContain('never ask one')
+    expect(m.seen[0].system).toContain('leave_question')
     expect(m.seen[0].system).toContain('Notes/ (edit)')
   })
   it('edits atomically with a version, like chat', async () => {
@@ -151,6 +158,55 @@ describe('what a run does', () => {
       'completed',
       expect.stringMatching(/not-run|failed/)
     ])
+  })
+})
+
+describe('leaving a question', () => {
+  it('saves it for the next chat, tied to the run, and carries on', async () => {
+    const m = script([
+      {
+        text: '',
+        calls: [
+          call('leave_question', {
+            question: 'Which playlist is the main one?',
+            path: 'Notes/a.md',
+            options: ['A', 'B']
+          })
+        ]
+      },
+      { text: 'Did the rest.', calls: [] }
+    ])
+    const r = await runAutomation(
+      auto(),
+      '2026-03-01T08:00',
+      new AbortController().signal,
+      deps(m.step),
+      undefined,
+      'run-7'
+    )
+    expect(r.status).toBe('completed')
+    expect(r.questions).toEqual(['q-1'])
+    expect(left).toEqual([expect.objectContaining({ runId: 'run-7', slot: '2026-03-01T08:00' })])
+    expect(r.calls[0].label).toMatch(/^Left a question: Which playlist/)
+    expect(JSON.stringify(m.seen[1].messages)).toContain('asked in their next chat')
+    expect(m.seen[0].system).toContain('leave_question')
+  })
+  it('tells the model when a question was not saved', async () => {
+    const m = script([
+      { text: '', calls: [call('leave_question', { question: 'x' })] },
+      { text: 'ok', calls: [] }
+    ])
+    const r = await runAutomation(
+      auto(),
+      undefined,
+      new AbortController().signal,
+      deps(m.step, {
+        leaveQuestion: () => ({ ok: false, message: 'At most 3 questions per run.' })
+      })
+    )
+    expect(r.questions).toBeUndefined()
+    expect(r.calls[0].outcome).toBe('not-run')
+    expect(JSON.stringify(m.seen[1].messages)).toContain('Not run: At most 3')
   })
 })
 
@@ -244,7 +300,7 @@ describe('what a run may not do', () => {
     const m = script([{ text: 'nothing to do', calls: [] }])
     await run(auto({ folders: [] }), deps(m.step))
     const names = m.seen[0].tools.map((t: BetaTool) => t.name)
-    expect(names).toEqual(['vault_search', 'vault_list', 'vault_read'])
+    expect(names).toEqual(['vault_search', 'vault_list', 'vault_read', 'leave_question'])
     expect(m.seen[0].system).toContain('may not change any notes')
   })
   it('protected places stay protected under a parent grant', async () => {

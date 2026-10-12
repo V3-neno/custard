@@ -224,7 +224,7 @@ try {
   await answer()
   const appendCard = seen.find((t) => /WEB-APPEND-4410/.test(t)) ?? ''
   check(!!appendCard, 'an append after a web page shows the card')
-  check(/text from the web or a plugin/.test(appendCard), 'the card says why it is asking')
+  check(/text from the web, a plugin or an automation/.test(appendCard), 'the card says why it is asking')
   check(!file('Journal/Log.md').includes('WEB-APPEND-4410'), 'declining left the note unchanged')
   check(
     seen.some((t) => /WebMade\.md/.test(t) && /WEB-MADE-2203/.test(t)),

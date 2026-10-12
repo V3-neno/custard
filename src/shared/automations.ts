@@ -168,6 +168,8 @@ export type RunRecord = {
   changes: { path: string; kind: 'create' | 'append' | 'edit' }[]
   // The end of its last message, capped.
   summary?: string
+  // Questions it left for the user (ids).
+  questions?: string[]
 }
 
 // Automation state kept apart from settings.
@@ -203,4 +205,41 @@ export type RunContext = {
   missed_slots_omitted?: number
   catch_up: boolean
   time_zone: string
+}
+
+// --- questions from unattended runs -----------------------------------------
+
+// A run can't ask anything, so it can leave a question. The next chat shows
+// Claude the open ones; Claude asks briefly and applies the answer.
+export const QUESTION_LIMITS = {
+  question: 300,
+  context: 500,
+  option: 60,
+  options: 4,
+  answer: 500,
+  // Per run, open in total, and kept in total.
+  perRun: 3,
+  open: 50,
+  kept: 200,
+  // Shown to one chat at a time.
+  shown: 5
+}
+
+export type PendingQuestion = {
+  id: string
+  automationId: string
+  automationName: string
+  runId: string
+  // The slot of the run that left it.
+  slot?: string
+  created: number
+  question: string
+  // Why it is asked, in the run's words.
+  context?: string
+  // The note the answer is for, if any.
+  path?: string
+  options?: string[]
+  status: 'open' | 'answered' | 'dismissed'
+  answer?: string
+  closed?: number
 }

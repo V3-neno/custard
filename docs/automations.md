@@ -1,4 +1,4 @@
-# Automations (Steps 2 and 3: scheduled runs and catch-up)
+# Automations (Steps 2 to 4: scheduled runs, catch-up, questions)
 
 A skill the user has Custard run on a schedule, while Custard is open. Created
 in Settings → **Automations**. Nothing here has been tested live, on Windows,
@@ -74,6 +74,31 @@ what a window means and can record "data unavailable".
 | `catch_up`                   | true for a late run of a missed slot.                                                         |
 | `time_zone`                  | The automation's zone.                                                                        |
 
+## Questions from a run (Step 4)
+
+A run can't ask anything, so it has one more tool, `leave_question` (question,
+and optionally context, the note it is for, and up to 4 suggested answers). It
+saves the question and the run carries on or stops. At most 3 per run, 50 open
+in all, identical open ones are merged, and the text is cut to its limits
+(300 characters for the question, 500 for the context). Questions live in app
+data (`automation-questions.json`), not in notes: a marker in a note would be
+text any plugin or web page could imitate.
+
+- Settings → Automations lists the open questions (with **Drop**) and keeps the
+  answered ones with their answers.
+- The next **Chat or Skills** chat is told the open questions (up to 5, the
+  oldest first) in its instructions and is offered `automation_question`
+  (close one as answered or dropped). It asks briefly, once per chat, after
+  helping with what the user asked. When the user answers, Claude reads the
+  note and changes it with `vault_edit` (version-checked), then closes the
+  question. If the note isn't in a folder it may edit, it tells the user what to
+  change instead. It can only close a question that was shown in that chat.
+- **Outside text:** a question's text was written by a run that had read notes
+  and plugin text, so a chat that was shown one counts as having outside text.
+  The "Outside text" pill shows, and the edit that applies the answer shows its
+  approval card with the diff, like any edit after a web page. To relax that,
+  take the `questions` check out of `chatHasOutsideText`.
+
 ## What a run can do
 
 A run is its own turn, with no chat, no approval cards and nobody to answer
@@ -115,8 +140,7 @@ The list of edits that Undo uses is shared with chat and now keeps the newest
 
 ## Not in this step
 
-Questions from unattended runs, the
-hostile-text controls for outside text read by a run (Step 5), plugin write
+The hostile-text controls for outside text read by a run (Step 5), plugin write
 tools, web access, notifications when a run fails.
 
 ## Open for review

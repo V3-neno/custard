@@ -14,7 +14,7 @@ import type {
 } from '../shared/chat'
 import type { VaultEditEntry, VaultInfo } from '../shared/vault'
 import type { VaultGrant } from '../shared/vaultGrants'
-import type { AutomationView } from '../shared/automations'
+import type { AutomationView, PendingQuestion } from '../shared/automations'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision } from '../shared/chat'
@@ -58,6 +58,9 @@ const custard = {
     setEnabled: (id: string, enabled: boolean): Promise<void> =>
       ipcRenderer.invoke('automations:setEnabled', id, enabled),
     resume: (id: string): Promise<void> => ipcRenderer.invoke('automations:resume', id),
+    questions: (): Promise<PendingQuestion[]> => ipcRenderer.invoke('automations:questions'),
+    dismissQuestion: (id: string): Promise<void> =>
+      ipcRenderer.invoke('automations:dismissQuestion', id),
     runNow: (id: string): Promise<boolean> => ipcRenderer.invoke('automations:runNow', id),
     onChanged: (cb: () => void): (() => void) => {
       const h = (): void => cb()

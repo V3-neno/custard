@@ -32,6 +32,10 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
       return str(i.path) === MEMORY_NOTE ? 'Saved to memory' : `Added to ${str(i.path)}`
     case 'vault_edit':
       return `Edited ${str(i.path)}`
+    case 'automation_question':
+      return i.action === 'dismiss'
+        ? 'Dropped a question from an automation'
+        : 'Answered a question from an automation'
     case 'fs_list':
       return `Looked in ${str(i.path) || 'the workspace'}`
     case 'fs_read':
