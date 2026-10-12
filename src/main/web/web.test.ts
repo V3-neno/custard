@@ -77,6 +77,14 @@ describe('isolated search', () => {
     expect(webTools({ id: 'claude-3-opus', provider: 'claude' }).prompt).toMatch(
       /Web search isn't available/
     )
+    // DeepSeek has no hosted search; OpenAI does.
+    expect(
+      webTools({ id: 'deepseek-flash', provider: 'deepseek' }).tools.map((t) => t.name)
+    ).toEqual(['web_read'])
+    expect(webTools({ id: 'gpt-6-luna', provider: 'openai' }).tools.map((t) => t.name)).toEqual([
+      'web_search',
+      'web_read'
+    ])
   })
 
   it('sends Claude only the query, and keeps results and citations', async () => {

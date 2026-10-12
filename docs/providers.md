@@ -1,0 +1,30 @@
+# Providers
+
+Custard talks to each provider through one of two APIs: Anthropic's Messages API (Claude) or the OpenAI Responses API (OpenAI, DeepSeek). Each provider is one entry in `src/shared/providers.ts`; its key file is in `src/main/providers.ts` and its address in `src/main/endpoints.ts`. Its models are in `src/shared/chat.ts`, its prices in `src/shared/pricing.ts` and its context limits in `src/main/context.ts`. TypeScript flags the other tables that need an entry: attachment rules, Design's chat-output note, the orb colours and the context minimum. The theme is a `data-provider` block in `src/renderer/src/assets/main.css`.
+
+A packaged build always sends a provider's requests to its official address. A development build leaves Claude and OpenAI to `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`. DeepSeek uses its own `DEEPSEEK_BASE_URL` or its official address, never OpenAI's.
+
+## DeepSeek
+
+Checked against api-docs.deepseek.com on 2026-10-12 (the overview, Models & Pricing, Create Response, the Responses API guide, Thinking Mode and Tool Calls pages).
+
+|                      | DeepSeek in Custard                                                                                                                                                               |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Models               | DeepSeek V4 Pro (`deepseek-v4-pro`) and DeepSeek Flash (`deepseek-flash`). Both have a 1M context and up to 384K output.                                                          |
+| Address              | `https://api.deepseek.com/responses`, with the DeepSeek key from Settings.                                                                                                        |
+| Tools                | Function tools, as for OpenAI.                                                                                                                                                    |
+| Thinking             | DeepSeek has no reasoning summaries. It streams its reasoning text as it goes, and Custard shows that. Within a turn, the reasoning is passed back with each tool result.         |
+| Effort               | Custard's levels are sent as they are. DeepSeek treats low as low, medium/high/xhigh as high, and max as max.                                                                     |
+| Web search           | None. DeepSeek chats get `web_read` only, and the model is told search isn't available.                                                                                           |
+| Files                | Text files work. Images work on Flash only. PDFs are refused ("File inputs are not supported").                                                                                   |
+| Long chats           | No compaction and no token counting endpoint. The context gauge is an estimate, and "Continue in a new chat" is the way on.                                                       |
+| Cost                 | Always the peak rates (Flash: $0.30 in, $0.006 cached, $1.20 out per million tokens; V4 Pro: $1.32, $0.044, $3.96). Off-peak hours cost half, so the estimate may be high.        |
+| Background summaries | Captures, chat notes and Continue use DeepSeek Flash for DeepSeek chats.                                                                                                          |
+| Data                 | DeepSeek's privacy policy says data is processed and stored in the People's Republic of China. Neno chose to let DeepSeek chats read vault notes and memory like any other model. |
+
+Unverified, since nothing has been sent to DeepSeek itself:
+
+- The Chat Completions docs say that with tools, earlier `reasoning_content` must be passed back in every later request, or the request fails with a 400. The Responses docs state no such rule. Custard keeps a Responses provider's reasoning only within a turn, not between messages. Whether a second message in a DeepSeek chat with tools fails is the first thing the live test checks.
+- That background summaries get valid JSON from `text.format: json_schema` with Custard's schemas.
+- DeepSeek's wording for a too-long request (a 400). Custard's check for it is a guess.
+- How DeepSeek counts image tokens. OpenAI's rule is used for the estimate.

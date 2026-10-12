@@ -33,6 +33,10 @@ meter's tooltip says how many such calls there were.
   tokens use the long-context rates: openai.com gives the standard rates as
   "for context lengths under 270K", and the developer pricing page lists
   long-context rates without a threshold.
+- DeepSeek (api-docs.deepseek.com/quick_start/pricing): input minus its cached
+  part, cached input, and output, always at the peak rates. Off-peak hours
+  (outside 01:00-04:00 and 06:00-10:00 UTC on weekdays, and China's public
+  holidays) cost half, so DeepSeek estimates may be high.
 
 ## Where it shows
 

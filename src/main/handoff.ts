@@ -1,9 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk'
-import OpenAI from 'openai'
-import type { ActionRecord, Continuation, Conversation, Provider } from '../shared/chat'
+import type { ActionRecord, Continuation, Conversation } from '../shared/chat'
+import { providerIds, providers, type Provider } from '../shared/providers'
 import { redact } from './memory/evidence'
 import { filesNote } from '../shared/attachments'
-import { anthropicEndpoint, openaiEndpoint } from './endpoints'
+import { anthropicEndpoint } from './endpoints'
+import { responsesClient } from './providers'
 import type { OnUsage } from '../shared/pricing'
 import { fromClaude, fromOpenAI } from './usage'
 
@@ -18,10 +19,9 @@ import { fromClaude, fromOpenAI } from './usage'
 //   bounded evidence. It can't act, read anything else or reach the web.
 // Neither is ever saved to the vault.
 
-export const HANDOFF_MODELS: Record<Provider, string> = {
-  claude: 'claude-haiku-4-5',
-  openai: 'gpt-6-luna'
-}
+export const HANDOFF_MODELS: Record<Provider, string> = Object.fromEntries(
+  providerIds.map((p) => [p, providers[p].summaryModel])
+) as Record<Provider, string>
 export const HANDOFF_LIMITS = {
   evidence: 40_000,
   request: 1_200,
@@ -266,12 +266,12 @@ export function handoffSummarizer(
   onUsage?: OnUsage
 ): HandoffSummarizer {
   const opts = { timeout: HANDOFF_LIMITS.timeoutMs, maxRetries: HANDOFF_LIMITS.retries }
-  if (provider === 'openai') {
-    const client = new OpenAI({ apiKey, ...opts, ...openaiEndpoint() })
+  if (providers[provider].api === 'responses') {
+    const client = responsesClient(provider, apiKey, opts)
     return async (evidence, signal) => {
       const r = await client.responses.create(
         {
-          model: HANDOFF_MODELS.openai,
+          model: HANDOFF_MODELS[provider],
           instructions: system,
           input: evidence,
           max_output_tokens: HANDOFF_LIMITS.maxTokens,
@@ -283,7 +283,7 @@ export function handoffSummarizer(
         },
         { signal }
       )
-      onUsage?.(HANDOFF_MODELS.openai, fromOpenAI(r.usage))
+      onUsage?.(HANDOFF_MODELS[provider], fromOpenAI(r.usage))
       if (r.status === 'incomplete') throw new Error('The summary was cut off.')
       return parseHandoff(r.output_text)
     }
@@ -292,7 +292,7 @@ export function handoffSummarizer(
   return async (evidence, signal) => {
     const m = await client.messages.create(
       {
-        model: HANDOFF_MODELS.claude,
+        model: HANDOFF_MODELS[provider],
         max_tokens: HANDOFF_LIMITS.maxTokens,
         system,
         messages: [{ role: 'user', content: evidence }],
@@ -300,7 +300,7 @@ export function handoffSummarizer(
       },
       { signal }
     )
-    onUsage?.(m.model || HANDOFF_MODELS.claude, fromClaude(m.usage))
+    onUsage?.(m.model || HANDOFF_MODELS[provider], fromClaude(m.usage))
     if (m.stop_reason === 'refusal') throw new Error('The summary was declined.')
     if (m.stop_reason === 'max_tokens') throw new Error('The summary was cut off.')
     return parseHandoff(m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))

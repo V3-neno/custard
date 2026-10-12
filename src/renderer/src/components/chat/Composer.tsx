@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  chatModels,
-  efforts,
-  providerNames,
-  type ChatSettings,
-  type Effort,
-  type Provider
-} from '../../../../shared/chat'
+import { chatModels, efforts, type ChatSettings, type Effort } from '../../../../shared/chat'
+import { providerIds, providerNames } from '../../../../shared/providers'
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from '../icons'
 import type { DraftAttachment } from '../../../../shared/attachments'
 import { DraftFiles } from './Attachments'
@@ -153,7 +147,7 @@ function Composer(props: Props): React.JSX.Element {
             onSettings({ ...settings, model: e.target.value as ChatSettings['model'] })
           }
         >
-          {(['claude', 'openai'] as Provider[]).map((p) => (
+          {providerIds.map((p) => (
             <optgroup key={p} label={providerNames[p]}>
               {chatModels
                 .filter((m) => m.provider === p)

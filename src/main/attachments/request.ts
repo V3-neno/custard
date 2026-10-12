@@ -23,16 +23,58 @@ export type FileModel = { id: string; label: string; provider: Provider }
 // What each provider documents (checked 2026-10-07; see docs/attachments.md).
 const PROVIDER_LIMITS: Record<
   Provider,
-  { images: (m: string) => number; pdfPages: (m: string) => number | null }
+  {
+    images: (m: string) => number
+    pdfPages: (m: string) => number | null
+    // Why the model can't take a file at all, if it can't: `why` for a note,
+    // `refusal` when it is on the message being sent.
+    refuses: (m: string, label: string, a: Attachment) => { why: string; refusal: string } | null
+    // How images are counted: Claude's long-edge tiers, or OpenAI's patches.
+    imageCount: 'claude' | 'patches'
+  }
 > = {
   // 600 images, or 100 on 200K-context models; 600 PDF pages, or 100 on
   // models with less than a 1M context.
   claude: {
     images: (m) => (limitsFor(m).window < 1_000_000 ? 100 : 600),
-    pdfPages: (m) => (limitsFor(m).window < 1_000_000 ? 100 : 600)
+    pdfPages: (m) => (limitsFor(m).window < 1_000_000 ? 100 : 600),
+    refuses: () => null,
+    imageCount: 'claude'
   },
   // 1,500 images per request; no page limit is documented.
-  openai: { images: () => 1_500, pdfPages: () => null }
+  openai: {
+    images: () => 1_500,
+    pdfPages: () => null,
+    // Claude takes animated GIFs (it uses the first frame).
+    refuses: (_, __, a) =>
+      a.kind === 'image' && (a.frames ?? 1) > 1
+        ? {
+            why: "OpenAI doesn't accept animated GIFs.",
+            refusal: `${a.name} is an animated GIF, which OpenAI doesn't accept. Remove it, attach a still image, or choose a Claude model (Claude uses only the first frame).`
+          }
+        : null,
+    imageCount: 'patches'
+  },
+  // DeepSeek's Responses API: "File inputs are not supported" (so no PDFs;
+  // text files go as text), and images only on deepseek-flash. No image
+  // count limit or token rule is documented: OpenAI's are used as a guess.
+  deepseek: {
+    images: () => 1_500,
+    pdfPages: () => null,
+    refuses: (m, label, a) =>
+      a.kind === 'pdf'
+        ? {
+            why: "DeepSeek doesn't accept PDFs.",
+            refusal: `${a.name} is a PDF, which DeepSeek doesn't accept. Remove it, or choose a Claude or OpenAI model.`
+          }
+        : a.kind === 'image' && m !== 'deepseek-flash'
+          ? {
+              why: `${label} doesn't take images.`,
+              refusal: `${label} doesn't take images, so ${a.name} can't be sent. Remove it, or choose DeepSeek Flash, a Claude or an OpenAI model.`
+            }
+          : null,
+    imageCount: 'patches'
+  }
 }
 
 // Claude downscales images past a long edge and caps their tokens; models
@@ -46,7 +88,7 @@ const claudeTier = (model: string): { side: number; tokens: number } =>
 const OPENAI_PATCHES = 2_500
 
 export function imageTokens(model: FileModel, width?: number, height?: number): number {
-  if (model.provider === 'openai') {
+  if (PROVIDER_LIMITS[model.provider].imageCount === 'patches') {
     if (!width || !height) return OPENAI_PATCHES
     return Math.min(OPENAI_PATCHES, Math.ceil(width / 32) * Math.ceil(height / 32))
   }
@@ -168,13 +210,10 @@ export async function prepareFiles(opts: {
         add(i, placeholder(a, "Custard's copy is missing or changed, so it is no longer included."))
         continue
       }
-      if (model.provider === 'openai' && a.kind === 'image' && (a.frames ?? 1) > 1) {
-        const why = `${provider} doesn't accept animated GIFs.`
-        if (isNow)
-          return refuse(
-            `${a.name} is an animated GIF, which ${provider} doesn't accept. Remove it, attach a still image, or choose a Claude model (Claude uses only the first frame).`,
-            a
-          )
+      const refused = PROVIDER_LIMITS[model.provider].refuses(model.id, model.label, a)
+      if (refused) {
+        const { why } = refused
+        if (isNow) return refuse(refused.refusal, a)
         add(i, placeholder(a, `not included, because ${why}`))
         notes.push(`${a.name} wasn't sent to ${model.label}: ${why}`)
         continue

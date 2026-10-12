@@ -2,10 +2,9 @@ import type { TokenUsage } from './pricing'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { Workspace } from './plugins'
 import type { Attachment, AttachmentKind } from './attachments'
+import { providers, type Provider, type ProviderApi } from './providers'
 
-export type Provider = 'claude' | 'openai'
-
-export const providerNames: Record<Provider, string> = { claude: 'Claude', openai: 'OpenAI' }
+export { providerNames, type Provider } from './providers'
 
 // Picking a model picks its provider; the app's tint follows it.
 export const chatModels = [
@@ -26,12 +25,38 @@ export const chatModels = [
   },
   { id: 'gpt-6-astra', label: 'GPT-6 Astra', provider: 'openai', effort: true, fallbacks: false },
   { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', provider: 'openai', effort: true, fallbacks: false },
-  { id: 'gpt-6-luna', label: 'GPT-6 Luna', provider: 'openai', effort: true, fallbacks: false }
+  { id: 'gpt-6-luna', label: 'GPT-6 Luna', provider: 'openai', effort: true, fallbacks: false },
+  // DeepSeek maps Custard's efforts onto its own: low, high (medium, xhigh)
+  // and max.
+  {
+    id: 'deepseek-v4-pro',
+    label: 'DeepSeek V4 Pro',
+    provider: 'deepseek',
+    effort: true,
+    fallbacks: false
+  },
+  {
+    id: 'deepseek-flash',
+    label: 'DeepSeek Flash',
+    provider: 'deepseek',
+    effort: true,
+    fallbacks: false
+  }
 ] as const
 
 export type ChatModel = (typeof chatModels)[number]['id']
 export const providerOf = (model: string): Provider =>
   chatModels.find((m) => m.id === model)?.provider ?? 'claude'
+
+// The API a model is reached through (see providers.ts).
+export const apiOf = (model: string): ProviderApi => providers[providerOf(model)].api
+
+// How the model is named in its own instructions: "You are Claude", or
+// "You are GPT-6 Astra, an OpenAI model".
+export const introduce = (model: { label: string; provider: Provider }): string => {
+  const maker = providers[model.provider].maker
+  return maker ? `You are ${model.label}, ${maker}` : 'You are Claude'
+}
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
