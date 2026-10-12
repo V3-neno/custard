@@ -41,7 +41,7 @@ In **Settings**, click **Create starter vault** to get a ready-made vault (folde
 
 Claude keeps what it learns about you in `Custard/Memory.md` inside the vault. That note is loaded into every chat, and you can edit it in Obsidian like any other note.
 
-Skills live in `Custard/Skills/<name>/SKILL.md`. Claude sees each skill's name and description and reads the full skill when a request matches. The starter vault includes note-writing, daily-note, weekly-review, project-kickoff and remember.
+Skills live in `Custard/Skills/<name>/SKILL.md`. Claude sees each skill's name and description and reads the full skill when a request matches. The starter vault includes note-writing, daily-note, weekly-review, project-kickoff, remember, skill-authoring, automation-skill-authoring, plugin-development, image-making, and skills for working efficiently: lean-work (fewer calls and less text), chat-recall (find what earlier chats decided), chat-housekeeping (one topic per chat, what is still open), chat-guard (outside text, secrets, actions), focus-planner (plan around the time you have), plugin-blueprint (agree the smallest plugin before building) and custard-tuneup (a weekly review of where Custard could be cheaper or faster).
 
 ## Roadmap
 
