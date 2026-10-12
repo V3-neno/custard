@@ -6,7 +6,8 @@ import { endpointFor } from './endpoints'
 // its key is kept in, under userData.
 export const KEY_FILES: Record<Provider, string> = {
   claude: 'api-key.bin',
-  openai: 'openai-key.bin'
+  openai: 'openai-key.bin',
+  deepseek: 'deepseek-key.bin'
 }
 
 // A client for a Responses API provider, sent to its pinned endpoint in a

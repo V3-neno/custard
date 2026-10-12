@@ -59,6 +59,24 @@ export const providers = {
       tokenCount: true,
       webSearch: true
     }
+  },
+  // DeepSeek's Responses API (api-docs.deepseek.com, checked 2026-10-12):
+  // stateless, function tools only, no hosted web search, no token counting,
+  // no reasoning summaries or encrypted reasoning (its reasoning streams as
+  // plain reasoning_text), and unsupported fields are silently ignored.
+  deepseek: {
+    name: 'DeepSeek',
+    api: 'responses',
+    maker: 'a DeepSeek model',
+    summaryModel: 'deepseek-flash',
+    keyPlaceholder: 'sk-…',
+    keyWhere: 'platform.deepseek.com',
+    responses: {
+      reasoningSummary: false,
+      encryptedReasoning: false,
+      tokenCount: false,
+      webSearch: false
+    }
   }
 } as const satisfies Record<string, ProviderInfo>
 

@@ -3,6 +3,7 @@
 //   Claude: https://platform.claude.com/docs/en/about-claude/pricing
 //   OpenAI: https://developers.openai.com/api/docs/pricing (and
 //           https://openai.com/api/pricing for the 270K long-context line)
+//   DeepSeek: https://api-docs.deepseek.com/quick_start/pricing
 // They are not looked up at run time, so a price change needs an update
 // here. Everything Custard shows from this is an estimate: it doesn't know
 // about discounts, credits, taxes or regional uplifts.
@@ -70,7 +71,12 @@ export const PRICES: Record<string, Price> = {
     cacheRead: 0.01,
     output: 0.5,
     long: { over: 270_000, input: 0.2, cacheWrite: 0.2, cacheRead: 0.02, output: 0.75 }
-  }
+  },
+  // DeepSeek: no cache-write charge. Always the peak rates; off-peak hours
+  // (outside 01:00-04:00 and 06:00-10:00 UTC on weekdays, and all of
+  // China's public holidays) cost half, so the estimate may be high.
+  'deepseek-flash': { input: 0.3, cacheWrite: 0.3, cacheRead: 0.006, output: 1.2 },
+  'deepseek-v4-pro': { input: 1.32, cacheWrite: 1.32, cacheRead: 0.044, output: 3.96 }
 }
 
 // Claude's dated or suffixed ids (from a fallback, say) are priced as their

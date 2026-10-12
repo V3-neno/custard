@@ -258,7 +258,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
           <>
             <p className="mb-5 -mt-1 text-sm text-ash-400">
               Keys are encrypted with Windows secure storage and stay on this computer. Pick a model
-              from either provider under the message box.
+              from any provider under the message box.
             </p>
             {providerIds.map((p) => (
               <KeySection key={p} provider={p} onChanged={onChanged} />

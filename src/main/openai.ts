@@ -244,6 +244,9 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
         emit({ requestId, type: 'thinking', text: event.delta })
       } else if (event.type === 'response.reasoning_summary_part.done') {
         emit({ requestId, type: 'thinking', text: '\n\n' })
+      } else if (event.type === 'response.reasoning_text.delta') {
+        // A provider without summaries (DeepSeek) streams its reasoning itself.
+        emit({ requestId, type: 'thinking', text: event.delta })
       } else if (event.type === 'response.output_text.delta') {
         log.text(event.delta)
         emit({ requestId, type: 'text', text: event.delta })

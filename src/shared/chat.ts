@@ -25,7 +25,23 @@ export const chatModels = [
   },
   { id: 'gpt-6-astra', label: 'GPT-6 Astra', provider: 'openai', effort: true, fallbacks: false },
   { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', provider: 'openai', effort: true, fallbacks: false },
-  { id: 'gpt-6-luna', label: 'GPT-6 Luna', provider: 'openai', effort: true, fallbacks: false }
+  { id: 'gpt-6-luna', label: 'GPT-6 Luna', provider: 'openai', effort: true, fallbacks: false },
+  // DeepSeek maps Custard's efforts onto its own: low, high (medium, xhigh)
+  // and max.
+  {
+    id: 'deepseek-v4-pro',
+    label: 'DeepSeek V4 Pro',
+    provider: 'deepseek',
+    effort: true,
+    fallbacks: false
+  },
+  {
+    id: 'deepseek-flash',
+    label: 'DeepSeek Flash',
+    provider: 'deepseek',
+    effort: true,
+    fallbacks: false
+  }
 ] as const
 
 export type ChatModel = (typeof chatModels)[number]['id']

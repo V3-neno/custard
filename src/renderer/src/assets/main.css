@@ -55,6 +55,29 @@
   --glow-ember: 79 107 140;
 }
 
+/* DeepSeek tint: the same forge at night, in deep blue. */
+:root[data-provider='deepseek'] {
+  --color-forge-950: #05070f;
+  --color-forge-900: #090d1a;
+  --color-forge-850: #0d1324;
+  --color-forge-800: #121a30;
+  --color-forge-700: #1b2644;
+  --color-forge-600: #27365e;
+  --color-ash-500: #5f6b8a;
+  --color-ash-400: #7c88a8;
+  --color-ash-300: #a0abc8;
+  --color-ash-100: #e1e6f5;
+  --color-molten-200: #d6e0ff;
+  --color-molten-300: #aec2ff;
+  --color-molten-400: #7d9bff;
+  --color-molten-500: #4d72f0;
+  --color-ember-600: #2f4fc2;
+  --color-ember-700: #1c2f7a;
+  --glow: 125 155 255;
+  --glow-deep: 77 114 240;
+  --glow-ember: 47 79 194;
+}
+
 html,
 body,
 #root {
