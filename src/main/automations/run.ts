@@ -13,11 +13,13 @@ import type { Guard } from '../fsafe'
 import { resolveInVault } from '../memory/paths'
 import { capResult } from '../context'
 import { hasMalformedArguments, type ToolRun } from '../turn'
+import { READ_LIMITS } from '../vault/read'
 import { runVaultTool, vaultChangeTools, vaultTools } from '../vault'
 import { createGranted } from '../vault/edit'
 import { anyGrantAllows } from '../../shared/vaultGrants'
 import type { RunResult } from './scheduler'
 import {
+  fencedLength,
   fenceResult,
   linksIn,
   looksLikeSecret,
@@ -243,11 +245,21 @@ async function execute(
           isError: true,
           outcome: 'not-run'
         }
-      return runVaultTool(d.vault!, c.name, c.input, d.guard, {
+      const editing = {
         grants,
         recordsDir: d.recordsDir,
         source: `${source} ${slot ?? 'manual'}`
-      })
+      }
+      if (c.name !== 'vault_read') return runVaultTool(d.vault!, c.name, c.input, d.guard, editing)
+      // The result is escaped and capped before the model sees it. A part that
+      // would be cut loses its footer and the characters before the next
+      // offset, so the part is made smaller until header, text and footer fit.
+      let part: number = READ_LIMITS.part
+      for (;;) {
+        const out = await runVaultTool(d.vault!, c.name, c.input, d.guard, editing, part)
+        if (out.isError || fencedLength(out.content) <= RESULT_CAPS.vault || part <= 500) return out
+        part = Math.max(500, Math.floor(part * 0.6))
+      }
     }
     return d.callPlugin(c.name, c.input, signal, plugins.snapshot)
   }

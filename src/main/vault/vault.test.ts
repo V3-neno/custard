@@ -23,7 +23,7 @@ import {
   vaultTools
 } from '../vault'
 import { fold, matchNote, parseQuery, search, searchVault, SEARCH_LIMITS, tagsOf } from './search'
-import { READ_LIMITS, readPart, versionOf } from './read'
+import { partSizeFor, READ_LIMITS, readPart, versionOf } from './read'
 
 let root: string
 let vault: string
@@ -302,6 +302,36 @@ describe('vault read', () => {
 })
 
 // --- Safeguards ----------------------------------------------------------------
+
+describe('vault read in a capped chat', () => {
+  it('sizes a part to leave room for the header and footer, within 1,000 and the usual part', () => {
+    expect(partSizeFor(100_000)).toBe(READ_LIMITS.part)
+    // Haiku 4.5 and unknown models: the chat cuts a result at 38,760 characters.
+    expect(partSizeFor(38_760)).toBe(36_760)
+    expect(partSizeFor(1_500)).toBe(1_000)
+  })
+  it('a part of that size, with its header and footer, is never longer than the cap', async () => {
+    const body = Array.from({ length: 3000 }, (_, i) => `line ${i} ${'y'.repeat(60)}`).join('\n')
+    note('capped.md', body)
+    let offset = 0
+    let version: string | undefined
+    let got = ''
+    for (let i = 0; i < 20 && offset < body.length; i++) {
+      const out = await readPart(vault, { path: 'capped.md', offset, version }, partSizeFor(38_760))
+      expect(out.length).toBeLessThanOrEqual(38_760)
+      const next = /offset (\d+) and version "(\w+)"/.exec(out)
+      got += out
+        .split('\n')
+        .slice(1)
+        .join('\n')
+        .replace(/\n\[Part ends at[^\n]*\]$/, '')
+      if (!next) break
+      offset = Number(next[1])
+      version = next[2]
+    }
+    expect(got).toBe(body)
+  })
+})
 
 describe('vault note creation (race-resistant)', () => {
   it("re-checks the real place against the caller's guard just before creating", async () => {

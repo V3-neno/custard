@@ -34,6 +34,7 @@ import { continueChat } from './continue'
 import {
   claudeCounter,
   capResult,
+  maxResultChars,
   compactTrigger,
   COMPACTION_INSTRUCTIONS,
   estimateTokens,
@@ -59,6 +60,7 @@ import {
 } from './vault'
 import { createGranted, previewChange } from './vault/edit'
 import { noteOutside, noteReadIsOutside, searchIsOutside } from './vault/outside'
+import { partSizeFor } from './vault/read'
 import { openQuestions } from './automations/questions'
 import {
   QUESTION_TOOL,
@@ -705,7 +707,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
             ? extensionRefusal(t, modeName(policy.mode))
             : null
         },
-        { grants, recordsDir: vaultEditsDir(), source: `chat ${conversation.id}` }
+        { grants, recordsDir: vaultEditsDir(), source: `chat ${conversation.id}` },
+        // A part that fits what the model may be sent, footer included.
+        partSizeFor(maxResultChars(model.id))
       )
       // Notes the model reads can carry text from anywhere; see vault/outside.
       if (!result.isError) {

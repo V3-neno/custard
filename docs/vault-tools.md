@@ -110,6 +110,19 @@ code units).
 The version check only detects a change between parts. It doesn't stop the note
 changing afterwards, and nothing is written based on it.
 
+**Parts that fit the cap.** A part is at most 40,000 characters, and a chat or a
+run cuts a result that is too long (a chat at the model's limit, 38,760
+characters for some models; a run at 40,000 characters after escaping `&`, `<`
+and `>`). A cut would lose the part's last characters and its footer with the
+offset to continue from, and the next part starts after them. So the caller asks
+for a part that fits (`partSizeFor` in chat; a run reads again with a smaller
+part until the escaped result fits), and no part is cut.
+
+**Every cut says so.** A result Custard shortens ends with a note saying what was
+left out: the chat and run caps, a plugin result over 50,000 characters, `fs_read`,
+`fs_list`, `fs_search` (30 matches, or 5,000 files scanned), a web search (results
+past 20, a long passage or summary) and a web page (links past 50).
+
 ## Safeguards
 
 - **One path check** (`resolveInVault`) is used by:

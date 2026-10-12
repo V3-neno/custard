@@ -7,8 +7,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
-  writeFileSync
+  statSync
 } from 'fs'
 import { join } from 'path'
 import {
@@ -21,6 +20,7 @@ import {
   type Boundary
 } from './paths'
 import { lineDiff } from './diff'
+import { FsafeError, isAtomicTemp, writeReplaceSync } from '../fsafe'
 
 // File tools for Code mode. They only ever touch paths inside the
 // conversation's workspace, resolved by resolveInside. There is no shell:
@@ -105,7 +105,7 @@ function list(b: Boundary, path: unknown): string {
   const dir = resolveInside(b, path ?? '', { mustExist: true })
   if (!statSync(dir).isDirectory()) throw new PathError('Not a folder.')
   const entries = readdirSync(dir, { withFileTypes: true })
-    .filter((e) => !isDeniedName(e.name))
+    .filter((e) => !isDeniedName(e.name) && !isAtomicTemp(e.name))
     .map((e) =>
       e.isDirectory()
         ? `${e.name}/`
@@ -139,7 +139,8 @@ function* walk(b: Boundary, dir: string, budget = { left: MAX_SCAN }): Generator
     return
   }
   for (const e of entries) {
-    if (budget.left <= 0 || isDeniedName(e.name) || e.isSymbolicLink()) continue
+    if (budget.left <= 0 || isDeniedName(e.name) || isAtomicTemp(e.name) || e.isSymbolicLink())
+      continue
     const full = join(dir, e.name)
     if ((b.deny ?? []).some((d) => isInside(full, d))) continue
     if (e.isDirectory()) yield* walk(b, full, budget)
@@ -155,7 +156,9 @@ function search(b: Boundary, query: unknown): string {
   const q = query.toLowerCase()
   const root = resolveInside(b, '', { mustExist: true })
   const hits: string[] = []
-  for (const f of walk(b, root)) {
+  const budget = { left: MAX_SCAN }
+  let stopped = false
+  for (const f of walk(b, root, budget)) {
     const rel = toRelative(b.root, f)
     let line = ''
     try {
@@ -172,9 +175,20 @@ function search(b: Boundary, query: unknown): string {
       continue
     }
     if (line || rel.toLowerCase().includes(q)) hits.push(`- ${rel}${line ? `: ${line}` : ''}`)
-    if (hits.length >= 30) break
+    if (hits.length >= 30) {
+      stopped = true
+      break
+    }
   }
-  return hits.length ? hits.join('\n') : 'No files matched.'
+  const notes = [
+    stopped ? '[Stopped at 30 matches; there may be more. Narrow the search.]' : '',
+    budget.left <= 0
+      ? `[Only the first ${MAX_SCAN.toLocaleString('en-US')} files were searched; files after them were not.]`
+      : ''
+  ].filter(Boolean)
+  return hits.length || notes.length
+    ? [...(hits.length ? hits : ['No files matched.']), ...notes].join('\n')
+    : 'No files matched.'
 }
 
 function mkdirs(b: Boundary, rel: string): void {
@@ -195,7 +209,10 @@ function write(b: Boundary, path: unknown, content: unknown): string {
   const full = resolveInside(b, rel, { forWrite: true })
   const existed = existsSync(full)
   if (existed && !lstatSync(full).isFile()) throw new PathError('Not a file.')
-  writeFileSync(full, content)
+  // Written beside the file and renamed over it: a crash or a full disk leaves
+  // the old file, never half of the new one, and a link at the name is replaced,
+  // not written through.
+  writeReplaceSync(full, content)
   return `${existed ? 'Updated' : 'Created'} ${toRelative(b.root, full)}`
 }
 
@@ -293,7 +310,7 @@ export function runFileTool(b: Boundary, name: string, input: unknown): Result {
   } catch (err) {
     return {
       content:
-        err instanceof PathError
+        err instanceof PathError || err instanceof FsafeError
           ? err.message
           : `File operation failed: ${(err as NodeJS.ErrnoException).code ?? 'error'}`,
       isError: true

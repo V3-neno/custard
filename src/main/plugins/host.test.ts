@@ -4,6 +4,7 @@ import { join, resolve } from 'path'
 import vm from 'vm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  cutResult,
   PluginHost,
   type ApprovalRequest,
   type RuntimeFactory,
@@ -613,6 +614,37 @@ describe('what became of a call', () => {
       }
     )
     expect(r).toMatchObject({ outcome: 'completed', content: 'done x' })
+  })
+})
+
+describe('a long result', () => {
+  it('is cut at 50,000 characters and says how much is left out', async () => {
+    writePlugin({})
+    await activate()
+    netRoute = () => ({ status: 200, headers: {}, body: 'x'.repeat(60_000) })
+    const r = await invoke('demo__call_api', { url: 'https://api.example.com/big' })
+    expect(r.isError).toBe(false)
+    expect(r.content.startsWith('status 200 xxx')).toBe(true)
+    expect(r.content).toContain(
+      '\n[… 10,011 more characters are left out here: Custard keeps at most 50,000 characters of one plugin result]'
+    )
+    expect(r.content.length).toBeLessThan(50_300)
+  })
+  it('is not touched, and gets no note, at or under the limit', () => {
+    expect(cutResult('y'.repeat(50_000))).toBe('y'.repeat(50_000))
+    expect(cutResult('y'.repeat(50_001))).toContain('1 more characters are left out here')
+  })
+  it('redacts a key before it cuts, so a key at the cut is not left half showing', async () => {
+    writePlugin({})
+    await activate()
+    await store.setSecret('demo', 'token', 'S3CRET-VALUE-1234567890')
+    netRoute = () => ({
+      status: 200,
+      headers: {},
+      body: `${'x'.repeat(49_985)}S3CRET-VALUE-1234567890${'z'.repeat(100)}`
+    })
+    const r = await invoke('demo__call_api', { url: 'https://api.example.com/key' })
+    expect(r.content).not.toContain('S3CR')
   })
 })
 

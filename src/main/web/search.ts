@@ -62,6 +62,10 @@ export function claudeSearchTool(model: string): BetaToolUnion | null {
 // Models that take output_config.effort (Haiku 4.5 doesn't).
 const takesEffort = (model: string): boolean => !/^claude-haiku/.test(model)
 
+// Cuts to `max` characters and says so.
+const clipped = (s: string, max: number, note = '… [shortened]'): string =>
+  s.length > max ? `${s.slice(0, max).trimEnd()}${note}` : s
+
 export async function searchClaude(
   client: Pick<Anthropic, 'beta'>,
   model: string,
@@ -223,9 +227,12 @@ export function formatResults(
         .slice(0, 20)
         .map(
           (h, n) =>
-            `[${n + 1}] ${h.title ?? '(no title given)'}: ${h.url}${h.pageAge ? ` (${h.pageAge})` : ''}${h.citedText ? `\n    Passage: "${h.citedText.replace(/\s+/g, ' ').slice(0, 300)}"` : ''}`
+            `[${n + 1}] ${h.title ?? '(no title given)'}: ${h.url}${h.pageAge ? ` (${h.pageAge})` : ''}${h.citedText ? `\n    Passage: "${clipped(h.citedText.replace(/\s+/g, ' '), 300)}"` : ''}`
         ),
-      o.summary.trim() ? `Search summary (untrusted):\n${o.summary.trim().slice(0, 3000)}` : '',
+      o.hits.length > 20 ? `[${o.hits.length - 20} more results are not listed]` : '',
+      o.summary.trim()
+        ? `Search summary (untrusted):\n${clipped(o.summary.trim(), 3000, '\n[… the rest of the summary is left out]')}`
+        : '',
       o.error ? `Note: ${o.error}` : '',
       'Cite what you use as Markdown links to these URLs. A result only supports a claim if its content says so; read it with web_read when the passage is not enough.'
     ]

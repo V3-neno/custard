@@ -448,7 +448,9 @@ export async function runVaultTool(
   guard?: Guard,
   // The user's granted folders and where edit records go; without it, existing
   // notes can't be changed.
-  editing?: Omit<EditContext, 'guard'>
+  editing?: Omit<EditContext, 'guard'>,
+  // Characters per vault_read part, when the caller's results are capped.
+  readChars?: number
 ): Promise<ToolRun> {
   const i = (input ?? {}) as Record<string, unknown>
   if (!(await reachable(vault)))
@@ -464,7 +466,7 @@ export async function runVaultTool(
       case 'vault_list':
         return { content: await list(vault, i.folder), isError: false }
       case 'vault_read':
-        return { content: await readPart(vault, i), isError: false }
+        return { content: await readPart(vault, i, readChars), isError: false }
       case 'vault_create_note': {
         const r = await create(vault, i.path, i.content, guard)
         // A note made in a granted folder had no approval card, so it is kept

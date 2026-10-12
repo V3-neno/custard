@@ -214,6 +214,31 @@ describe('isolated search', () => {
     })
   })
 
+  it('says what it left out: results past 20, a long passage, a long summary', () => {
+    const hits = Array.from({ length: 23 }, (_, i) => ({
+      url: `https://x.example.com/${i}`,
+      title: `T${i}`,
+      citedText: i === 0 ? 'p '.repeat(400) : undefined
+    }))
+    const { content } = formatResults('q', {
+      hits,
+      ran: [],
+      summary: 's'.repeat(3500),
+      error: undefined
+    } as never)
+    expect(content).toContain('[3 more results are not listed]')
+    expect(content).toContain('… [shortened]"')
+    expect(content).toContain('\n[… the rest of the summary is left out]')
+    const small = formatResults('q', {
+      hits: hits.slice(1, 3),
+      ran: [],
+      summary: 'short',
+      error: undefined
+    } as never).content
+    expect(small).not.toContain('not listed')
+    expect(small).not.toContain('left out')
+  })
+
   it('reads OpenAI sources and url citations', async () => {
     const seen: Record<string, unknown>[] = []
     const client = {

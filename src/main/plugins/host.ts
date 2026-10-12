@@ -126,6 +126,14 @@ const DEFAULT_TIMEOUT_MS = 20_000
 const MAX_RESULT_CHARS = 50_000
 const OAUTH_KEY = '__oauth'
 
+// A result over MAX_RESULT_CHARS is cut, and says so (after redaction, so a
+// key can't straddle the cut and stay half visible).
+export function cutResult(text: string): string {
+  return text.length > MAX_RESULT_CHARS
+    ? `${text.slice(0, MAX_RESULT_CHARS)}\n[… ${(text.length - MAX_RESULT_CHARS).toLocaleString('en-US')} more characters are left out here: Custard keeps at most ${MAX_RESULT_CHARS.toLocaleString('en-US')} characters of one plugin result]`
+    : text
+}
+
 const fail = (content: string): ToolOutcome => ({ content, isError: true })
 // Refused before the plugin was called: nothing was done.
 const notRun = (content: string): ToolOutcome => ({ content, isError: true, outcome: 'not-run' })
@@ -1350,7 +1358,7 @@ export class PluginHost {
         tool.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         controller.signal
       )
-      const content = redact(String(r.content).slice(0, MAX_RESULT_CHARS), secrets)
+      const content = cutResult(redact(String(r.content), secrets))
       const data = widgetData(r.data, secrets, o.dataLimit)
       if (r.isError) this.log(id, `${tool.name}: ${content.slice(0, 200)}`)
       const outcome = r.notSent

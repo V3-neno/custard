@@ -621,6 +621,68 @@ describe('text from outside (instruction-like results)', () => {
   })
 })
 
+describe('reading a long note in a run', () => {
+  const resultsOf = (messages: Parameters<Step>[0]['messages']): string[] => {
+    const last = messages[messages.length - 1]
+    return Array.isArray(last.content)
+      ? last.content.flatMap((b) => (b.type === 'tool_result' ? [String(b.content)] : []))
+      : []
+  }
+  const unescape = (t: string): string =>
+    t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+
+  it('every part fits the cap with its footer, and the parts join back into the note', async () => {
+    // Escaping nearly doubles this note, so a 40,000-character part would not fit.
+    const body = Array.from(
+      { length: 5000 },
+      (_, i) => `line ${i} a&b <c> ${'x'.repeat(8)}\n`
+    ).join('')
+    put('Notes/long.md', body)
+    const got: string[] = []
+    const m = script([
+      { text: '', calls: [call('vault_read', { path: 'Notes/long.md' })] },
+      (a) => {
+        const [r] = resultsOf(a.messages)
+        got.push(r)
+        const next = /call vault_read with offset (\d+) and version "([0-9a-f]+)"/.exec(r)
+        return next
+          ? {
+              text: '',
+              calls: [
+                call('vault_read', {
+                  path: 'Notes/long.md',
+                  offset: Number(next[1]),
+                  version: next[2]
+                })
+              ]
+            }
+          : { text: 'read it all', calls: [] }
+      }
+    ])
+    const r = await run(auto({ limits: { toolCalls: 40 } }), deps(m.step))
+    expect(r.status).toBe('completed')
+    expect(got.length).toBeGreaterThan(3)
+    for (const part of got) {
+      expect(part).not.toContain('more characters are left out here')
+      // The envelope's text, escaped, within the cap.
+      const inner = part.replace(/^<tool_result[^\n]*\n/, '').replace(/\n<\/tool_result>$/, '')
+      expect(inner.length).toBeLessThanOrEqual(40_000)
+    }
+    expect(got[got.length - 1]).toContain('end of note')
+    const joined = got
+      .map((part) =>
+        unescape(
+          part
+            .replace(/^<tool_result[^\n]*\n[^\n]*\n/, '')
+            .replace(/\n\[Part ends[^\n]*\]?\n<\/tool_result>$/, '')
+            .replace(/\n<\/tool_result>$/, '')
+        )
+      )
+      .join('')
+    expect(joined).toBe(body)
+  })
+})
+
 describe('how a run ends', () => {
   it('fails with the reason when the model call fails, and calls it once', async () => {
     let n = 0
