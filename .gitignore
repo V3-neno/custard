@@ -6,3 +6,4 @@ out
 *.log*
 out-test
 *.tsbuildinfo
+plugin-demo.mjs/
