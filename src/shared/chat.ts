@@ -226,7 +226,7 @@ export type Conversation = ConversationSummary & {
   // Why the chat holds text Custard can't vouch for besides web and plugin
   // results, which show in `actions`: it read notes it can't vouch for, or
   // was shown captures made from chats that held outside text.
-  outside?: ('notes' | 'memory')[]
+  outside?: ('notes' | 'memory' | 'chats')[]
   // Where a provider's compaction summarized everything before message
   // `after`. The messages themselves are kept and shown in full.
   compactions?: Compaction[]
@@ -235,6 +235,22 @@ export type Conversation = ConversationSummary & {
   // Files sent with user messages (Chat mode). The bytes are in app data;
   // each request builds the provider's blocks from them.
   attachments?: Attachment[]
+  // Earlier chats the user referenced from the message box: their summary
+  // notes as they were when sent, shown to the model for the rest of this
+  // chat (see main/earlierChats).
+  references?: ChatReference[]
+}
+
+export type ChatReference = {
+  chat: string
+  title: string
+  mode: Mode
+  // The user message it was sent with.
+  message: number
+  // The note's text, bounded.
+  text: string
+  // The note says its chat held web or plugin text (or doesn't say).
+  outside: boolean
 }
 
 // Claude's compaction block is part of the assistant message at `after`, as
@@ -333,6 +349,8 @@ export type SendChatRequest = {
   temporary?: boolean
   // Chat mode: the files picked for this message, from its draft, in order.
   attachments?: { draft: string; ids: string[] }
+  // Earlier chats (ids) whose summary notes go with this message.
+  references?: string[]
 }
 
 export type ApprovalDecision = 'once' | 'chat' | 'deny'

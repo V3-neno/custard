@@ -18,6 +18,7 @@ import ModeBubbles from '../ModeBubbles'
 import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
 import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
+import { SentReferences } from './References'
 import { SentFiles } from './Attachments'
 import {
   acceptsAttachments,
@@ -203,7 +204,10 @@ function ChatView(props: Props): React.JSX.Element {
     userText: string
     files: DraftAttachment[]
     draft: string
+    refs: ChatLink[]
   } | null>(null)
+  // Earlier chats picked for the next message.
+  const [refs, setRefs] = useState<ChatLink[]>([])
 
   const refreshList = useCallback(
     () => window.custard.conversations.list(filter).then(setList),
@@ -295,6 +299,7 @@ function ChatView(props: Props): React.JSX.Element {
             if (e.type === 'error' && !e.kept) {
               setError(e.message)
               setDraft(p.userText)
+              setRefs(p.refs)
               // The files went back to their draft; show them again.
               if (p.files.length) {
                 setDraftId(p.draft)
@@ -425,7 +430,8 @@ function ChatView(props: Props): React.JSX.Element {
     setDraft('')
     setFiles([])
     setFileErrors([])
-    pending.current = { requestId, userText: text, files: sending, draft: draftId }
+    pending.current = { requestId, userText: text, files: sending, draft: draftId, refs }
+    setRefs([])
     // The next message gets a new draft; this one is consumed by the send.
     if (sending.length) setDraftId(crypto.randomUUID())
     setLive({ requestId, userText: text, files: sending.length, segments: [], approvals: [] })
@@ -437,7 +443,8 @@ function ChatView(props: Props): React.JSX.Element {
       text,
       settings,
       ...(mode === 'code' && !current && workspace ? { workspace } : {}),
-      ...(!current && temporary ? { temporary: true } : {})
+      ...(!current && temporary ? { temporary: true } : {}),
+      ...(refs.length ? { references: refs.map((r) => r.id) } : {})
     })
   }
 
@@ -447,6 +454,18 @@ function ChatView(props: Props): React.JSX.Element {
     setOverflow(false)
     setCurrent(await window.custard.conversations.get(id))
     onCloseHistory()
+  }
+
+  // A chat from another mode opens in that mode.
+  const openIn = (id: string, other: Mode | undefined): void => {
+    if (!other || other === mode) {
+      void open(id)
+      return
+    }
+    if (live) return
+    openChats.set(other, id)
+    onCloseHistory()
+    onModeChange(other)
   }
 
   const startNew = (): void => {
@@ -636,6 +655,10 @@ function ChatView(props: Props): React.JSX.Element {
                         chat={current.id}
                         files={(current.attachments ?? []).filter((a) => a.message === i)}
                       />
+                      <SentReferences
+                        items={(current.references ?? []).filter((r) => r.message === i)}
+                        onOpen={openIn}
+                      />
                     </div>
                   )}
                   {turnSources.has(i) && (
@@ -732,6 +755,12 @@ function ChatView(props: Props): React.JSX.Element {
             onStop={() => live && window.custard.chat.stop(live.requestId)}
             draft={draft}
             setDraft={setDraft}
+            references={{
+              current: current?.id ?? null,
+              items: refs,
+              onAdd: (c) => setRefs((x) => (x.some((r) => r.id === c.id) ? x : [...x, c])),
+              onRemove: (id) => setRefs((x) => x.filter((r) => r.id !== id))
+            }}
             {...(acceptsAttachments(mode)
               ? {
                   files: {
@@ -790,18 +819,7 @@ function ChatView(props: Props): React.JSX.Element {
             setFilter(f)
           }}
           currentId={current?.id ?? null}
-          onOpen={(id) => {
-            // A chat from another mode opens in that mode.
-            const other = list.find((c) => c.id === id)?.mode
-            if (!other || other === mode) {
-              void open(id)
-              return
-            }
-            if (live) return
-            openChats.set(other, id)
-            onCloseHistory()
-            onModeChange(other)
-          }}
+          onOpen={(id) => openIn(id, list.find((c) => c.id === id)?.mode)}
           onNew={startNew}
           onDelete={remove}
           onForget={forgetChat}

@@ -32,6 +32,14 @@ import { allPluginInfo, chatNotes, memory } from './memory'
 import { pluginContext } from './memory/plugins'
 import { runOpenAI } from './openai'
 import { carriedContext, handoffSummarizer } from './handoff'
+import {
+  chatTools,
+  isChatTool,
+  makeReferences,
+  recentChatsPrompt,
+  referencesPrompt,
+  runChatTool
+} from './earlierChats'
 import { continueChat } from './continue'
 import {
   claudeCounter,
@@ -91,6 +99,7 @@ import {
   type ApprovalDecision,
   providerNames,
   type ChatEvent,
+  type ChatReference,
   type ContinueResult,
   type Conversation,
   type Mode,
@@ -277,6 +286,19 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   if (fileIds.length && !acceptsAttachments(existing?.mode ?? req.mode))
     return refuse('Files can be attached in Chat and Design modes only.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
+  // Earlier chats picked in the message box, checked before anything changes.
+  let references: ChatReference[] = []
+  try {
+    references = makeReferences(
+      getVaultPath(),
+      conversation,
+      req.references ?? [],
+      conversation.messages.length,
+      (id) => getConversation(id)
+    )
+  } catch (err) {
+    return refuse(err instanceof Error ? err.message : String(err))
+  }
   // Off before anything is said, so no part of it is ever captured.
   if (!existing && req.temporary) conversation.memory = { off: true, temporary: true, watermark: 0 }
   if (!existing && req.mode === 'code')
@@ -310,6 +332,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ;(conversation.attachments ??= []).push(...committed)
     if (!existing && !req.text.trim()) conversation.title = committed[0].name.slice(0, 60)
   }
+  if (references.length) (conversation.references ??= []).push(...references)
 
   const controller = new AbortController()
   const vault = getVaultPath()
@@ -347,6 +370,15 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       if (recall.outside) noteOutside(conversation, 'memory')
     } catch (err) {
       console.error('Vault prompt:', err)
+    }
+  // The newest earlier chats, from their notes, when memory is on (as
+  // captures are).
+  let recentChats = ''
+  if (vaultReady && getMemorySettings().auto && !conversation.memory?.off)
+    try {
+      recentChats = recentChatsPrompt(vault, conversation.id)
+    } catch (err) {
+      console.error('Earlier chats:', err)
     }
   if (vaultPrompt && grants.length)
     vaultPrompt += [
@@ -414,6 +446,16 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const carried = carriedContext(conversation)
   for (const text of carried.system) system.push({ type: 'text', text })
   injected.push(...carried.injected)
+  if (recentChats) {
+    system.push({ type: 'text', text: recentChats })
+    injected.push('summaries of your earlier chats')
+  }
+  // Earlier chats the user referenced in this chat.
+  if (conversation.references?.length) {
+    system.push({ type: 'text', text: referencesPrompt(conversation.references) })
+    injected.push('summaries of earlier chats you referenced')
+    if (conversation.references.some((r) => r.outside)) noteOutside(conversation, 'chats')
+  }
   const web = webTools(model)
   system.push({ type: 'text', text: web.prompt })
   system.push({
@@ -439,6 +481,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
 
   const tools: BetaTool[] = [
     ...(vaultReady ? vaultTools : []),
+    ...(vaultReady ? chatTools : []),
     ...(vaultReady
       ? vaultChangeTools.filter((t) =>
           anyGrantAllows(grants, t.name === 'vault_edit' ? 'edit' : 'append')
@@ -645,6 +688,17 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       })
     if (c.name === QUESTION_TOOL)
       return runQuestionTool(automationQuestionsFile(), shownQuestions, c.input)
+    if (isChatTool(c.name)) {
+      if (!vaultReady)
+        return {
+          content: 'The vault is not connected right now.',
+          isError: true,
+          outcome: 'not-run'
+        }
+      return runChatTool(vault, conversation.id, c.name, c.input, () =>
+        noteOutside(conversation, 'chats')
+      )
+    }
     if (isVaultTool(c.name)) {
       if (!vaultReady)
         return {
@@ -860,6 +914,11 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     const keptTurn = log.interrupt(kind, message)
     if (keptTurn) recordFiles()
     else if (committed.length) message += await takeBackFiles()
+    // A turn taken back takes its references with it.
+    if (!keptTurn && references.length)
+      conversation.references = (conversation.references ?? []).filter(
+        (r) => !references.includes(r)
+      )
     kept = keptTurn || log.startLength > 0
     if (kept) saveConversation(conversation)
     emit({

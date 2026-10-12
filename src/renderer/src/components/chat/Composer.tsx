@@ -10,6 +10,8 @@ import {
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from '../icons'
 import type { DraftAttachment } from '../../../../shared/attachments'
 import { DraftFiles } from './Attachments'
+import { DraftReferences, ReferenceButton } from './References'
+import type { ChatLink } from '../../../../shared/chat'
 
 type Props = {
   busy: boolean
@@ -32,6 +34,13 @@ type Props = {
     onRemove: (id: string) => void
     onDismiss: () => void
   }
+  // Earlier chats whose summary notes go with the message.
+  references?: {
+    current: string | null
+    items: ChatLink[]
+    onAdd: (c: ChatLink) => void
+    onRemove: (id: string) => void
+  }
 }
 
 const chip =
@@ -39,7 +48,7 @@ const chip =
 
 function Composer(props: Props): React.JSX.Element {
   const { busy, placeholder, settings, onSettings, onSend, onStop, draft, setDraft, files } = props
-  const { meter } = props
+  const { meter, references } = props
   const [focused, setFocused] = useState(false)
   const [dragging, setDragging] = useState(false)
   const hasFiles = !!files?.items.length
@@ -89,6 +98,9 @@ function Composer(props: Props): React.JSX.Element {
           disabled={busy}
         />
       )}
+      {references && (
+        <DraftReferences items={references.items} onRemove={references.onRemove} disabled={busy} />
+      )}
       <textarea
         ref={input}
         onPaste={(e) => {
@@ -124,6 +136,14 @@ function Composer(props: Props): React.JSX.Element {
           >
             <PaperclipIcon />
           </button>
+        )}
+        {references && (
+          <ReferenceButton
+            current={references.current}
+            picked={references.items}
+            onAdd={references.onAdd}
+            disabled={busy}
+          />
         )}
         <select
           className={chip}

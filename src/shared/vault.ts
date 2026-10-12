@@ -56,6 +56,12 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
       return str(i.path) === MEMORY_NOTE ? 'Saved to memory' : `Added to ${str(i.path)}`
     case 'vault_edit':
       return `Edited ${str(i.path)}`
+    case 'chats_search':
+      return str(i.query).trim()
+        ? `Searched earlier chats for "${str(i.query)}"`
+        : 'Listed earlier chats'
+    case 'chats_read':
+      return "Read an earlier chat's summary"
     case 'automation_question':
       return i.action === 'dismiss'
         ? 'Dropped a question from an automation'
