@@ -262,6 +262,47 @@ app.whenReady().then(async () => {
       BrowserWindow.getAllWindows().length === 0,
       BrowserWindow.getAllWindows().length
     )
+    // Timings, a name filter, and what a stopped run reports.
+    check(
+      'each test is timed',
+      tr.every((r) => typeof r.ms === 'number'),
+      tr
+    )
+    const filtered = await runTestsInSandbox(testCode, { name: 'FAIL' })
+    check(
+      'a name filter runs only matching tests and reports the others as skipped',
+      JSON.stringify(filtered.map((r) => [r.name, !!r.skipped])) ===
+        '[["passes",true],["fails",false],["no network",true]]',
+      filtered
+    )
+    const mixedCode = await (async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'custard-sbx-mixed-'))
+      mkdirSync(join(dir, 'tests'))
+      writeFileSync(
+        join(dir, 'tests', 'm.test.ts'),
+        "import { test } from 'custard-plugin-sdk/testing'\ntest('quick pass', () => {})\ntest('loops forever', () => { for (;;) {} })"
+      )
+      const r = await bundle(dir, SDK, { kind: 'tests', files: ['tests/m.test.ts'] })
+      if (!r.ok) throw new Error(r.errors.join())
+      return r.code
+    })()
+    const stopped = await runTestsInSandbox(mixedCode, { timeoutMs: 2000 }).then(
+      () => null,
+      (e: Error & { partial?: { name: string; ok: boolean }[] }) => e
+    )
+    check(
+      'a stopped run keeps the tests that finished and names the one that was running',
+      !!stopped &&
+        /loops forever/.test(stopped.message) &&
+        JSON.stringify(stopped.partial?.map((r) => [r.name, r.ok])) === '[["quick pass",true]]',
+      { message: stopped?.message, partial: stopped?.partial }
+    )
+    await new Promise((r) => setTimeout(r, 500))
+    check(
+      'and leaves no window behind after the stop',
+      BrowserWindow.getAllWindows().length === 0,
+      BrowserWindow.getAllWindows().length
+    )
     const again = await runTestsInSandbox(testCode)
     check(
       'tests run normally afterwards',

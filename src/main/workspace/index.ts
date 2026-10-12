@@ -2,6 +2,7 @@ import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/message
 import { app } from 'electron'
 import { join } from 'path'
 import type { Workspace } from '../../shared/plugins'
+import { testReport } from './report'
 import { custardSource, pluginDocsDir, pluginHost, pluginsRoot, sdkDir } from '../plugins'
 import type { Boundary } from './paths'
 import {
@@ -35,14 +36,20 @@ const devTools: BetaTool[] = [
   {
     name: 'plugin_validate',
     description:
-      "Validate this plugin: checks plugin.json, API compatibility, input and config schemas and tool names, then builds it into a staged build. Doesn't activate anything.",
+      "Validate this plugin: checks plugin.json, API compatibility, input and config schemas and tool names, builds it into a staged build, and type-checks its TypeScript (the build works even with type errors, but fix them). Doesn't activate anything.",
     input_schema: { type: 'object', properties: {} }
   },
   {
     name: 'plugin_test',
     description:
-      "Run this plugin's tests (tests/*.test.ts) and a load check in a sandbox with no network. Doesn't activate anything.",
-    input_schema: { type: 'object', properties: {} }
+      "Run this plugin's tests (tests/*.test.ts) and a load check in a sandbox with no network. Each test is timed and stopped after 10 seconds, and the whole run after 30. To run less, pass `file` (a path like tests/player.test.ts) and/or `name` (part of a test's name); the load check is then skipped. Doesn't activate anything.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Run only this test file, e.g. tests/player.test.ts' },
+        name: { type: 'string', description: 'Run only tests whose name contains this text' }
+      }
+    }
   }
 ]
 
@@ -72,27 +79,30 @@ function internal(pluginId: string): WorkspaceTools {
       if (name.startsWith('fs_')) return runFileTool(boundary, name, input)
       if (name.startsWith('reference_')) return runReferenceTool(refs, name, input)
       if (name === 'plugin_validate') {
-        const v = await pluginHost().validate(pluginId)
+        const v = await pluginHost().validate(pluginId, { typeCheck: true })
+        const types = v.typeErrors ?? []
         const lines = [
           v.ok
             ? `Valid. Build ${v.buildId} of version ${v.manifest?.version} is staged.`
             : 'Validation failed:',
           ...v.errors.map((e) => `- ${e}`),
           ...v.warnings.map((w) => `- warning: ${w}`),
+          ...(types.length
+            ? ['Type errors (the build works, but fix these):', ...types.map((e) => `- ${e}`)]
+            : v.typeErrors
+              ? ['Types: no errors.']
+              : []),
           v.ok ? 'Run plugin_test next. Only the user can activate it, in Settings → Plugins.' : ''
         ]
-        return { content: lines.filter(Boolean).join('\n'), isError: !v.ok }
+        return { content: lines.filter(Boolean).join('\n'), isError: !v.ok || types.length > 0 }
       }
       if (name === 'plugin_test') {
-        const r = await pluginHost().test(pluginId, signal)
-        const lines = [
-          r.ok ? 'All checks passed.' : 'Some checks failed.',
-          ...r.results.map(
-            (t) => `- ${t.ok ? 'pass' : 'FAIL'}: ${t.name}${t.error ? ` (${t.error})` : ''}`
-          ),
-          r.error ? `Error: ${r.error}` : ''
-        ]
-        return { content: lines.filter(Boolean).join('\n'), isError: !r.ok }
+        const q = (input ?? {}) as { file?: unknown; name?: unknown }
+        const r = await pluginHost().test(pluginId, signal, {
+          file: typeof q.file === 'string' && q.file.trim() ? q.file.trim() : undefined,
+          name: typeof q.name === 'string' && q.name.trim() ? q.name.trim() : undefined
+        })
+        return { content: testReport(r), isError: !r.ok }
       }
       return { content: `Unknown tool ${name}`, isError: true }
     }

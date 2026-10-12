@@ -139,8 +139,11 @@ export type PluginReview = {
 
 export type TestReport = {
   ok: boolean
-  results: { name: string; ok: boolean; error?: string }[]
+  results: { name: string; ok: boolean; error?: string; ms?: number; file?: string }[]
   error?: string
+  // Tests that ran, and the ones a file or name filter left out.
+  ran?: number
+  skipped?: number
 }
 
 // Code-mode workspaces, stored on the conversation.

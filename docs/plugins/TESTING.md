@@ -80,6 +80,8 @@ Run with `npm run dev` on Windows, with an API key, a vault and a Spotify Premiu
    - Then ask it to read `../../src/main/index.ts` or `C:\Windows\win.ini`. Both are refused.
 3. **Validate and test without activating.**
    - Ask it to validate and test. It runs `plugin_validate` and `plugin_test` and reports the results.
+   - `plugin_validate` also type-checks the plugin's TypeScript (strict; plugin code has no `fetch` or DOM, widgets and tests have the DOM) and lists type errors apart from validation errors. The build works without types, and review and activation don't wait on them. If the check can't run, validation says so as a note.
+   - `plugin_test` takes `file` (for example `tests/player.test.ts`) and `name` (part of a test's name) to run less; the load check is then skipped. Every result carries its time, a test that doesn't finish is failed after 10 seconds, and a run stopped at 30 seconds still reports the tests that had finished and the one that was running (a test stuck in a busy loop is named by its start, not its progress). A run in which no test ran says so and doesn't say it passed.
    - In Settings → Plugins, Spotify still runs the old version, or is "Not activated".
 4. **Review and grant permissions.**
    - Settings → Plugins → Spotify → **Review update** (or **Review and activate** the first time).

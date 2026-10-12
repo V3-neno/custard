@@ -7,6 +7,7 @@ import { getSecurityDefaults, setSecurityDefaults } from '../store'
 import { isInside } from '../workspace/paths'
 import { PluginHost, type HostDeps } from './host'
 import { migrateLegacySpotify } from './migrate'
+import TypecheckWorker from './typecheck.worker?nodeWorker'
 import { createRuntime, pluginPreloadPath, runTestsInSandbox } from './runtime'
 import { scaffoldPlugin } from './scaffold'
 import { PluginStore, type Crypto } from './store'
@@ -41,6 +42,39 @@ const crypto: Crypto = {
   decrypt: (b) => safeStorage.decryptString(b)
 }
 
+const TYPECHECK_TIMEOUT_MS = 60_000
+
+// Throws when the check can't run (the compiler is missing, or it ran too
+// long); the host reports that as a note and does not fail validation.
+function typecheckInWorker(
+  dir: string,
+  sdkDir: string,
+  widgetEntries: string[]
+): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const worker = TypecheckWorker({})
+    const done = (f: () => void): void => {
+      clearTimeout(timer)
+      void worker.terminate()
+      f()
+    }
+    const timer = setTimeout(
+      () => done(() => reject(new Error('The type check took too long and was stopped.'))),
+      TYPECHECK_TIMEOUT_MS
+    )
+    worker.once('message', (m: { ok: boolean; errors?: string[]; error?: string }) =>
+      done(() => (m.ok ? resolve(m.errors ?? []) : reject(new Error(m.error))))
+    )
+    worker.once('error', (err) => done(() => reject(err)))
+    worker.postMessage({
+      dir,
+      sdkDir,
+      widgetEntries,
+      libDir: app.isPackaged ? join(process.resourcesPath, 'typescript-lib') : undefined
+    })
+  })
+}
+
 let host: PluginHost | null = null
 
 export function pluginHost(): PluginHost {
@@ -51,6 +85,7 @@ export function pluginHost(): PluginHost {
     store: new PluginStore(join(app.getPath('userData'), 'plugins'), crypto),
     runtime: createRuntime(pluginPreloadPath()),
     testRunner: runTestsInSandbox,
+    typecheck: typecheckInWorker,
     openExternal: (url) => shell.openExternal(url),
     openBrowser: (url) => shell.openExternal(url),
     askByDefault: () => getSecurityDefaults().askBeforeWriteTools,

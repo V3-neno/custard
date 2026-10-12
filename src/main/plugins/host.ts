@@ -83,8 +83,8 @@ export type RuntimeFactory = (o: {
 
 export type TestRunner = (
   code: string,
-  o?: { signal?: AbortSignal; timeoutMs?: number }
-) => Promise<{ name: string; ok: boolean; error?: string }[]>
+  o?: { signal?: AbortSignal; timeoutMs?: number; name?: string }
+) => Promise<{ name: string; ok: boolean; error?: string; ms?: number; skipped?: boolean }[]>
 
 export type CapResult = { ok: true; value: unknown } | { ok: false; error: string }
 
@@ -94,6 +94,8 @@ export type HostDeps = {
   store: PluginStore
   runtime: RuntimeFactory
   testRunner: TestRunner
+  // Type errors in the plugin's files; throws when the check can't run.
+  typecheck?: (dir: string, sdkDir: string, widgetEntries: string[]) => Promise<string[]>
   openExternal: (url: string) => Promise<void>
   openBrowser: (url: string) => Promise<void>
   askByDefault: () => boolean
@@ -464,10 +466,14 @@ export class PluginHost {
 
   // Validate, review, test
 
-  async validate(id: string): Promise<{
+  async validate(
+    id: string,
+    o: { typeCheck?: boolean } = {}
+  ): Promise<{
     ok: boolean
     errors: string[]
     warnings: string[]
+    typeErrors?: string[]
     manifest: PluginManifest | null
     buildId: string | null
   }> {
@@ -543,7 +549,27 @@ export class PluginHost {
       .map((t) => fullToolName(id, t.name))
       .filter((n) => names.has(n))
       .map((n) => `Tool name ${n} is already used`)
-    return { ok: errors.length === 0, errors, warnings, manifest: m, buildId }
+    // Reported apart from errors: the build works without types, and review
+    // and activation are not held up by them. plugin_validate asks for them.
+    let typeErrors: string[] | undefined
+    if (o.typeCheck && this.d.typecheck)
+      try {
+        typeErrors = await this.d.typecheck(
+          this.sourceDir(id),
+          this.d.sdkDir,
+          (m.widgets ?? []).map((w) => w.entry)
+        )
+      } catch (err) {
+        warnings.push(`Types were not checked: ${message(err)}`)
+      }
+    return {
+      ok: errors.length === 0,
+      errors,
+      warnings,
+      ...(typeErrors ? { typeErrors } : {}),
+      manifest: m,
+      buildId
+    }
   }
 
   async review(id: string): Promise<PluginReview> {
@@ -574,35 +600,51 @@ export class PluginHost {
   }
 
   // Runs the plugin's tests, and a load check of the plugin itself, in fresh
-  // sandboxes with no capabilities.
-  async test(id: string, signal?: AbortSignal): Promise<TestReport> {
+  // sandboxes with no capabilities. `file` (a path in tests/) and `name` (part
+  // of a test's name) run less; the load check is left out then.
+  async test(
+    id: string,
+    signal?: AbortSignal,
+    o: { file?: string; name?: string } = {}
+  ): Promise<TestReport> {
     const v = await this.validate(id)
     if (!v.ok || !v.buildId) return { ok: false, results: [], error: v.errors.join('\n') }
     const results: TestReport['results'] = []
-    try {
-      const { handle, tools } = await this.d.runtime({
-        pluginId: id,
-        code: this.build(id, v.buildId).code,
-        onCap: async () => ({ ok: false, error: 'No capabilities during the load check.' }),
-        onExit: () => {}
-      })
-      handle.dispose('load check done')
-      const missing = v.manifest!.tools.filter((t) => !tools.includes(t.name)).map((t) => t.name)
-      results.push({
-        name: 'Plugin loads and handles every tool in plugin.json',
-        ok: !missing.length,
-        error: missing.length ? `No handler for ${missing.join(', ')}` : undefined
-      })
-    } catch (err) {
-      results.push({
-        name: 'Plugin loads and handles every tool in plugin.json',
-        ok: false,
-        error: message(err)
-      })
-    }
-    const testFiles = readSources(this.sourceDir(id))
+    const filtered = Boolean(o.file || o.name)
+    const allTests = readSources(this.sourceDir(id))
       .map((f) => f.path)
       .filter((p) => /^tests\/.+\.test\.(ts|js)$/.test(p))
+    const file = o.file?.replace(/\\/g, '/').replace(/^\.?\//, '')
+    if (file && !allTests.includes(file))
+      return {
+        ok: false,
+        results,
+        error: `There is no test file ${file}. Test files: ${allTests.join(', ') || 'none'}.`
+      }
+    if (!filtered)
+      try {
+        const { handle, tools } = await this.d.runtime({
+          pluginId: id,
+          code: this.build(id, v.buildId).code,
+          onCap: async () => ({ ok: false, error: 'No capabilities during the load check.' }),
+          onExit: () => {}
+        })
+        handle.dispose('load check done')
+        const missing = v.manifest!.tools.filter((t) => !tools.includes(t.name)).map((t) => t.name)
+        results.push({
+          name: 'Plugin loads and handles every tool in plugin.json',
+          ok: !missing.length,
+          error: missing.length ? `No handler for ${missing.join(', ')}` : undefined
+        })
+      } catch (err) {
+        results.push({
+          name: 'Plugin loads and handles every tool in plugin.json',
+          ok: false,
+          error: message(err)
+        })
+      }
+    const testFiles = file ? [file] : allTests
+    let skipped = 0
     if (testFiles.length) {
       const b = await bundle(this.sourceDir(id), this.d.sdkDir, { kind: 'tests', files: testFiles })
       if (!b.ok) return { ok: false, results, error: b.errors.join('\n') }
@@ -614,12 +656,28 @@ export class PluginHost {
           error: "The plugin's files changed while the tests were being built. Run them again."
         }
       try {
-        results.push(...(await this.d.testRunner(b.code, { signal })))
+        for (const r of await this.d.testRunner(b.code, { signal, name: o.name }))
+          if (r.skipped) skipped++
+          else results.push(r)
       } catch (err) {
-        return { ok: false, results, error: message(err) }
+        // A stopped run keeps the results of the tests that had finished.
+        const partial = (err as { partial?: TestReport['results'] }).partial
+        if (Array.isArray(partial)) results.push(...partial.filter((r) => !('skipped' in r)))
+        return { ok: false, results, error: message(err), ran: results.length, skipped }
       }
     }
-    return { ok: results.every((r) => r.ok), results }
+    // Nothing ran is not a pass: a filter that matched nothing, or a plugin
+    // with no tests, says so.
+    const ran = results.length
+    if (o.name && ran === 0)
+      return {
+        ok: false,
+        results,
+        error: `No test name contains "${o.name}".`,
+        ran,
+        skipped
+      }
+    return { ok: results.every((r) => r.ok), results, ran, skipped }
   }
 
   // Lifecycle
