@@ -40,7 +40,7 @@ function vaultInfo(): VaultInfo {
   return {
     path,
     isObsidian: existsSync(join(path, '.obsidian')),
-    skills: existsSync(path) ? listSkills(path).map((s) => s.name) : []
+    skills: existsSync(path) ? listSkills(path).map((s) => s.folder) : []
   }
 }
 

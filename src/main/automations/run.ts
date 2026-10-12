@@ -4,7 +4,7 @@ import type {
   BetaTool,
   BetaToolResultBlockParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import type { Automation, RunContext, RunRecord } from '../../shared/automations'
 import { chatModels } from '../../shared/chat'
 import { toolLabel } from '../../shared/vault'
@@ -14,7 +14,7 @@ import { resolveInVault } from '../memory/paths'
 import { capResult } from '../context'
 import { hasMalformedArguments, type ToolRun } from '../turn'
 import { READ_LIMITS } from '../vault/read'
-import { runVaultTool, vaultChangeTools, vaultTools } from '../vault'
+import { listSkills, runVaultTool, vaultChangeTools, vaultTools } from '../vault'
 import { createGranted } from '../vault/edit'
 import { anyGrantAllows } from '../../shared/vaultGrants'
 import type { RunResult } from './scheduler'
@@ -134,8 +134,14 @@ export function systemFor(
   ].join('\n\n')
 }
 
+// An automation names its skill by folder. One saved by the frontmatter name
+// (what the picker used to offer) still runs if exactly one skill has it.
 function readSkill(vault: string, name: string): string {
-  const path = resolveInVault(vault, `Custard/Skills/${name}/SKILL.md`)
+  let path = resolveInVault(vault, `Custard/Skills/${name}/SKILL.md`)
+  if (!existsSync(path)) {
+    const byName = listSkills(vault).filter((s) => s.name === name)
+    if (byName.length === 1) path = resolveInVault(vault, byName[0].path)
+  }
   const text = readFileSync(path, 'utf8')
   return text.length > SKILL_CHARS
     ? `${text.slice(0, SKILL_CHARS)}\n[… the rest of this skill is left out for length …]`
@@ -186,8 +192,10 @@ async function execute(
   ]
   const offered = new Set(tools.map((t) => t.name))
   const tz = a.timezone || systemTimezone()
+  // Said the way the run context says it, so the two never differ: a slot that
+  // was shifted by a change of the clocks is named at the moment it runs.
   const when = slot
-    ? `${slot.replace('T', ' ')} (${tz})`
+    ? `${(ctx?.scheduled_for.local ?? slot).replace('T', ' ')} (${tz})${ctx?.configured_local_time ? `; ${ctx.configured_local_time.replace('T', ' ')} did not exist that day because the clocks jumped, so this runs when they jump` : ''}`
     : `${slotLabel(localParts(d.now(), tz)).replace('T', ' ')} (${tz}), started by the user`
   const system =
     systemFor(a, skill, when, grants) +
@@ -238,6 +246,18 @@ async function execute(
     if (c.name.startsWith('vault_')) {
       const path = (c.input as { path?: unknown } | null)?.path
       // Unattended, a new note lands only in a folder this run was given.
+      if (c.name === 'vault_create_note') {
+        // A malformed path is told as that, not as a missing grant.
+        try {
+          resolveInVault(d.vault!, path)
+        } catch (err) {
+          return {
+            content: `${err instanceof Error ? err.message : 'That path is not valid.'} Nothing was done.`,
+            isError: true,
+            outcome: 'not-run'
+          }
+        }
+      }
       if (c.name === 'vault_create_note' && !createGranted(d.vault!, path, grants))
         return {
           content:

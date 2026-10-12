@@ -79,6 +79,21 @@ describe('firing', () => {
     await t.s.idle()
     expect(t.ran.map((r) => r.slot)).toEqual(['2026-03-01T08:00', '2026-03-01T12:00'])
   })
+  it('a time the clocks jump over runs once, when they jump, and not twice with the time after it', async () => {
+    // Europe/Stockholm 2026-03-29: 02:00 becomes 03:00 at 01:00Z.
+    const a = make({ times: ['02:30', '03:30'], timezone: 'Europe/Stockholm' })
+    const t = setup([a], '2026-03-29T00:30:00Z')
+    t.s.tick()
+    t.at('2026-03-29T01:00:10Z')
+    t.s.tick()
+    await t.s.idle()
+    // 02:30 runs the moment the clocks jump, with the context saying so.
+    expect(t.ran.map((r) => r.slot)).toEqual(['2026-03-29T02:30'])
+    t.at('2026-03-29T01:30:10Z')
+    t.s.tick()
+    await t.s.idle()
+    expect(t.ran.map((r) => r.slot)).toEqual(['2026-03-29T02:30', '2026-03-29T03:30'])
+  })
   it('does not run slots from before it first saw the automation', async () => {
     const t = setup([make()], '2026-03-01T13:00:00Z')
     t.s.tick()

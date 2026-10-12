@@ -205,6 +205,10 @@ export type RunContext = {
   missed_slots_omitted?: number
   catch_up: boolean
   time_zone: string
+  // Set when the time of day this slot was configured for does not exist on
+  // that date (the clocks jump over it). The run is at the moment they jump,
+  // which is what scheduled_for says; this is the time that was configured.
+  configured_local_time?: string
 }
 
 // --- questions from unattended runs -----------------------------------------

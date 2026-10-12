@@ -50,6 +50,7 @@ const localDate = (t: number): string => {
   const d = new Date(t)
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
+const zone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone
 const localTime = (t: number): string => {
   const d = new Date(t)
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
@@ -433,6 +434,7 @@ export class Capture {
       title,
       date: localDate(at),
       time: localTime(at),
+      zone: zone(),
       chatId: c.id,
       ...(filesInContext(c, to) ? { fileSafe: true } : {})
     }
@@ -457,6 +459,7 @@ export class Capture {
           'custard-capture': jobId,
           chat: c.id,
           date: from.date,
+          ...(from.zone ? { time_zone: from.zone } : {}),
           // Later chats shown this note count as holding outside text.
           outside: chatHasOutsideText(c) ? 'true' : 'false',
           ...(plugin ? { plugin } : {})

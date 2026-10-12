@@ -19,6 +19,7 @@ import {
   MEMORY_LIMITS,
   previewNote,
   runVaultTool,
+  todayLine,
   vaultSystemPrompt,
   vaultTools
 } from '../vault'
@@ -302,6 +303,33 @@ describe('vault read', () => {
 })
 
 // --- Safeguards ----------------------------------------------------------------
+
+describe('what the chat model is told about the date', () => {
+  const at = (iso: string, tz: string): string => todayLine(new Date(iso), tz)
+  it('names the date, the weekday and the zone, with its offset now', () => {
+    expect(at('2026-10-12T11:32:00Z', 'Europe/Stockholm')).toBe(
+      "Today's date is 2026-10-12 (Monday). The user's time zone is Europe/Stockholm, UTC+02:00 now; offsets change with daylight saving time, so trust this zone over an offset written in a note or memory. You are not told the time of day."
+    )
+  })
+  it('the offset follows the clocks: the same zone is UTC+01:00 after 2026-10-25', () => {
+    expect(at('2026-10-24T12:00:00Z', 'Europe/Stockholm')).toContain('UTC+02:00 now')
+    expect(at('2026-10-26T12:00:00Z', 'Europe/Stockholm')).toContain('UTC+01:00 now')
+  })
+  it('uses the date in the zone, not in UTC', () => {
+    // 23:30 UTC on the 12th is already the 13th in Tokyo and still the 12th in New York.
+    expect(at('2026-10-12T23:30:00Z', 'Asia/Tokyo')).toContain('2026-10-13 (Tuesday)')
+    expect(at('2026-10-12T23:30:00Z', 'America/New_York')).toContain('2026-10-12 (Monday)')
+    expect(at('2026-10-12T23:30:00Z', 'America/New_York')).toContain('UTC-04:00 now')
+  })
+  it('says UTC+00:00 for UTC, and uses the computer zone by default', () => {
+    expect(at('2026-10-12T12:00:00Z', 'UTC')).toContain('UTC, UTC+00:00 now')
+    expect(todayLine()).toContain(Intl.DateTimeFormat().resolvedOptions().timeZone)
+  })
+  it('is in the vault prompt, once', () => {
+    const p = vaultSystemPrompt(vault, 'chat')
+    expect(p.match(/Today's date is/g)).toHaveLength(1)
+  })
+})
 
 describe('vault read in a capped chat', () => {
   it('sizes a part to leave room for the header and footer, within 1,000 and the usual part', () => {

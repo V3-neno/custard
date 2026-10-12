@@ -78,6 +78,7 @@ export function caseSensitiveVault(vault: string): boolean {
 
 export function resolveInVault(vault: string, path: unknown, mustBeNote = true): string {
   if (typeof path !== 'string' || !path.trim()) throw new VaultPathError('A path is required.')
+  if (path.includes('\0')) throw new VaultPathError('A path cannot contain a null character.')
   // A backslash separates folders everywhere, so a path means the same folders to
   // this check, to the grants and to the file system. On Linux and macOS a
   // backslash would otherwise be a letter of a name that the grant check read

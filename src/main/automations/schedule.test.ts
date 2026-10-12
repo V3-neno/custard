@@ -63,8 +63,45 @@ describe('time zones and DST', () => {
       '2026-03-08T02:30',
       '2026-03-09T02:30'
     ])
-    // 02:30 EST does not exist on the 8th; it is 03:30 EDT = 07:30Z.
-    expect(new Date(s[1].instant).toISOString()).toBe('2026-03-08T07:30:00.000Z')
+    // 02:30 does not exist on the 8th: the clocks go from 02:00 EST to 03:00 EDT
+    // = 07:00Z, and that is when it runs. Not 03:30, the time the gap would
+    // shift it to.
+    expect(new Date(s[1].instant).toISOString()).toBe('2026-03-08T07:00:00.000Z')
+    expect(s.map((x) => x.shifted)).toEqual([undefined, true, undefined])
+  })
+  it('a shifted time and the time it is shifted to are one run, in Europe/Stockholm', () => {
+    // 2026-03-29: 02:00 CET becomes 03:00 CEST at 01:00Z.
+    const win: [number, number] = [utc('2026-03-28T12:00:00Z'), utc('2026-03-29T12:00:00Z')]
+    const at = (times: string[]): { label: string; at: string; shifted?: true }[] =>
+      slotsBetween({ times, days: [], timezone: 'Europe/Stockholm' }, ...win).map((x) => ({
+        label: x.label,
+        at: new Date(x.instant).toISOString(),
+        ...(x.shifted ? { shifted: true as const } : {})
+      }))
+    expect(at(['02:30'])).toEqual([
+      { label: '2026-03-29T02:30', at: '2026-03-29T01:00:00.000Z', shifted: true }
+    ])
+    // 03:00 exists and is that same moment: one run, labelled by the time that exists.
+    expect(at(['02:30', '03:00'])).toEqual([
+      { label: '2026-03-29T03:00', at: '2026-03-29T01:00:00.000Z' }
+    ])
+    // 03:30 is half an hour later: two runs, as configured.
+    expect(at(['02:30', '03:30'])).toEqual([
+      { label: '2026-03-29T02:30', at: '2026-03-29T01:00:00.000Z', shifted: true },
+      { label: '2026-03-29T03:30', at: '2026-03-29T01:30:00.000Z' }
+    ])
+    // Two times in the gap are one moment: the first label keeps it.
+    expect(at(['02:15', '02:45'])).toEqual([
+      { label: '2026-03-29T02:15', at: '2026-03-29T01:00:00.000Z', shifted: true }
+    ])
+  })
+  it('finds the moment the clocks jump in a half-hour zone too', () => {
+    // Lord Howe: 02:00 +10:30 becomes 02:30 +11:00 on 2026-10-04, a 30-minute gap.
+    const lh = { times: ['02:15'], days: [], timezone: 'Australia/Lord_Howe' }
+    const s = slotsBetween(lh, utc('2026-10-03T00:00:00Z'), utc('2026-10-05T00:00:00Z'))
+    expect(s.map((x) => x.shifted)).toEqual([true, undefined])
+    // 02:15 on the 4th does not exist; the jump is at 02:00 +10:30 = 15:30Z on the 3rd.
+    expect(new Date(s[0].instant).toISOString()).toBe('2026-10-03T15:30:00.000Z')
   })
   it('runs a time that happens twice the first time only', () => {
     const twice = { times: ['01:30'], days: [], timezone: 'America/New_York' }

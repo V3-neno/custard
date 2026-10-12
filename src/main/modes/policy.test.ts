@@ -154,7 +154,7 @@ describe("skills can't raise permissions", () => {
 
   it('reads only name, description and modes from a skill', () => {
     const [skill] = listSkills(vault)
-    expect(Object.keys(skill).sort()).toEqual(['description', 'modes', 'name', 'path'])
+    expect(Object.keys(skill).sort()).toEqual(['description', 'folder', 'modes', 'name', 'path'])
     expect(skill.modes).toEqual(['design', 'code'])
   })
 

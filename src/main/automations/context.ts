@@ -47,6 +47,7 @@ export function buildContext(
     missed_slots: listed.map((s) => whenOf(s.instant, tz)),
     ...(omitted > 0 ? { missed_slots_omitted: omitted } : {}),
     catch_up: o.catchUp,
-    time_zone: tz
+    time_zone: tz,
+    ...(o.slot?.shifted ? { configured_local_time: o.slot.label } : {})
   }
 }

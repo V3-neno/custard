@@ -521,9 +521,11 @@ describe('capture', () => {
     expect(job().plan).toBeUndefined()
     const a = note(job().notes![0])
     expect(a).toMatch(
-      /^---\ncustard-capture: "chat-1:0-4"\nchat: "chat-1"\ndate: "2026-10-07"\noutside: "true"\n---/
+      /^---\ncustard-capture: "chat-1:0-4"\nchat: "chat-1"\ndate: "2026-10-07"\ntime_zone: "[^"]+"\noutside: "true"\n---/
     )
     expect(a).toContain('# Spotify test')
+    // A date and time with no zone would be ambiguous twice a year.
+    expect(a).toMatch(/on 2026-10-07 at 12:00 \([A-Za-z_]+(\/[A-Za-z_+\-0-9]+)*\)\. Custard writes/)
     expect(a).toContain('Custard writes this note once and never changes it.')
     expect(a).toContain('## Preferences\n\n- Likes Discover Weekly on Mondays')
     expect(a).toContain('### Play Discover Weekly')

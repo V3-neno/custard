@@ -5,7 +5,10 @@ import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/message
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { checkAutomation, type Automation } from '../../shared/automations'
 import type { VaultGrant } from '../../shared/vaultGrants'
+import { listSkills } from '../vault'
 import { versionOf } from '../vault/read'
+import { buildContext } from './context'
+import { slotsBetween } from './schedule'
 import { listEdits } from '../vault/edit'
 import { extensionRefusal, extensionTarget } from '../modes/extensions'
 import {
@@ -246,6 +249,39 @@ describe('the run context', () => {
   })
 })
 
+describe('a time the clocks jump over', () => {
+  it('is named the same way in the prompt and in the context, with the time that was configured', async () => {
+    const a = auto({ times: ['02:30'], timezone: 'Europe/Stockholm' })
+    const [slot] = slotsBetween(
+      a,
+      Date.parse('2026-03-28T12:00:00Z'),
+      Date.parse('2026-03-29T12:00:00Z')
+    )
+    const ctx = buildContext(a, { slot, now: slot.instant, catchUp: false, folded: [], runs: [] })
+    expect(ctx.scheduled_for).toEqual({ local: '2026-03-29T03:00', utc: '2026-03-29T01:00:00Z' })
+    expect(ctx.configured_local_time).toBe('2026-03-29T02:30')
+    const m = script([{ text: 'ok', calls: [] }])
+    await runAutomation(a, slot.label, new AbortController().signal, deps(m.step), ctx)
+    expect(m.seen[0].system).toContain(
+      'Scheduled for 2026-03-29 03:00 (Europe/Stockholm); 2026-03-29 02:30 did not exist that day because the clocks jumped, so this runs when they jump.'
+    )
+    expect(JSON.stringify(m.seen[0].messages[0])).toContain('configured_local_time')
+  })
+  it('an ordinary slot says nothing of the kind', async () => {
+    const a = auto({ times: ['08:00'], timezone: 'Europe/Stockholm' })
+    const [slot] = slotsBetween(
+      a,
+      Date.parse('2026-03-28T12:00:00Z'),
+      Date.parse('2026-03-29T12:00:00Z')
+    )
+    const ctx = buildContext(a, { slot, now: slot.instant, catchUp: false, folded: [], runs: [] })
+    expect(ctx.configured_local_time).toBeUndefined()
+    const m = script([{ text: 'ok', calls: [] }])
+    await runAutomation(a, slot.label, new AbortController().signal, deps(m.step), ctx)
+    expect(m.seen[0].system).toContain('Scheduled for 2026-03-29 08:00 (Europe/Stockholm). ')
+  })
+})
+
 describe('what a run may not do', () => {
   const attempt = async (
     c: StepResult['calls'][number],
@@ -267,6 +303,13 @@ describe('what a run may not do', () => {
     const r = await attempt(call('vault_create_note', { path: 'Inbox/x.md', content: 'x' }))
     expect(existsSync(join(vault, 'Inbox/x.md'))).toBe(false)
     expect(r.calls[0].outcome).toBe('not-run')
+  })
+  it('says why a malformed create path failed, not that the folder is not allowed', async () => {
+    for (const path of ['Notes/bad.', 'Notes/../../x.md', '/etc/x.md', 'Notes/\0x.md']) {
+      const r = await attempt(call('vault_create_note', { path, content: 'x' }))
+      expect([path, r.calls[0].outcome]).toEqual([path, 'not-run'])
+      expect(JSON.stringify(r)).not.toMatch(/may change/)
+    }
   })
   it('cannot change a note outside its folders, even if the user granted that folder to others', async () => {
     put('Journal/j.md', 'j\n')
@@ -707,6 +750,14 @@ describe('how a run ends', () => {
     expect((await run(auto(), deps(script([]).step, { vault: null }))).status).toBe('failed')
     const r = await run(auto({ skill: 'nope' }), deps(script([]).step))
     expect(r).toMatchObject({ status: 'failed', reason: expect.stringMatching(/nope/) })
+  })
+  it('runs a skill whose name: differs from its folder, by folder or by that name', async () => {
+    put('Custard/Skills/log-folder/SKILL.md', '---\nname: Daily log\ndescription: d\n---\nDo it.')
+    for (const skill of ['log-folder', 'Daily log']) {
+      const r = await run(auto({ skill }), deps(script([{ text: 'done', calls: [] }]).step))
+      expect(r.status).toBe('completed')
+    }
+    expect(listSkills(vault).map((s) => s.folder)).toContain('log-folder')
   })
   it('refuses a skill name that leads out of the skills folder', async () => {
     put('Secret.md', 'secret')
