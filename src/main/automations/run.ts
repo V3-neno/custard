@@ -5,7 +5,7 @@ import type {
   BetaToolResultBlockParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { readFileSync } from 'fs'
-import type { Automation, RunRecord } from '../../shared/automations'
+import type { Automation, RunContext, RunRecord } from '../../shared/automations'
 import { chatModels } from '../../shared/chat'
 import { toolLabel } from '../../shared/vault'
 import type { VaultGrant } from '../../shared/vaultGrants'
@@ -80,6 +80,7 @@ export function systemFor(
       ? 'You may change notes only in these folders (mode: what you may do there). Create adds new notes only; append also adds to the end of notes (vault_append); edit also changes text in place (vault_edit). Anywhere else nothing can be written.\n' +
         grants.map((g) => `- ${g.folder}/ (${g.mode})`).join('\n')
       : 'You may not change any notes in this run.',
+    'The run context in the first message says what this run is for: scheduled_for, the window from window_start to window_end, last_successful_run, and time_zone. When catch_up is true this slot was missed because Custard was closed or busy and is being run late; missed_slots lists older slots that were not run at all and are folded into this run. The skill says what a window means. If it needs data that can\'t be had for a past window, record "data unavailable" for it instead of inventing anything.',
     'Tool results start with "Not run:" when nothing was done. Report that as it is.',
     `<skill name="${a.skill}">\n${skill}\n</skill>`
   ].join('\n\n')
@@ -106,6 +107,7 @@ export async function runAutomation(
   slot: string | undefined,
   signal: AbortSignal,
   d: RunDeps,
+  ctx?: RunContext,
   onProgress?: (calls: RunRecord['calls'], changes: RunRecord['changes']) => void
 ): Promise<RunResult> {
   if (!d.vault) return failed('No vault is connected.')
@@ -147,7 +149,14 @@ export async function runAutomation(
   const calls: RunRecord['calls'] = []
   const changes: RunRecord['changes'] = []
   const messages: BetaMessageParam[] = [
-    { role: 'user', content: `Run the automation "${a.name}" now.` }
+    {
+      role: 'user',
+      content:
+        `Run the automation "${a.name}" now.` +
+        (ctx
+          ? `\n\nRun context, from Custard (JSON):\n\`\`\`json\n${JSON.stringify(ctx, null, 2)}\n\`\`\``
+          : '')
+    }
   ]
   const source = `automation ${a.id}`
 

@@ -5,7 +5,8 @@ import {
   checkAutomation,
   MAX_AUTOMATIONS,
   type Automation,
-  type AutomationView
+  type AutomationView,
+  type RunContext
 } from '../../shared/automations'
 import { handle } from '../ipc'
 import {
@@ -59,7 +60,8 @@ function deps(): RunDeps {
 async function runOne(
   a: Automation,
   slot: string | undefined,
-  signal: AbortSignal
+  signal: AbortSignal,
+  ctx: RunContext
 ): Promise<RunResult> {
   const limit = new AbortController()
   let timedOut = false
@@ -70,7 +72,7 @@ async function runOne(
   const onAbort = (): void => limit.abort()
   signal.addEventListener('abort', onAbort, { once: true })
   try {
-    const r = await runAutomation(a, slot, limit.signal, deps())
+    const r = await runAutomation(a, slot, limit.signal, deps(), ctx)
     return timedOut
       ? { ...r, status: 'stopped', reason: `Stopped at the limit of ${a.limits.minutes} minutes.` }
       : r

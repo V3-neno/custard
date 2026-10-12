@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { checkAutomation, type Automation } from '../../shared/automations'
+import { checkAutomation, type Automation, type RunContext } from '../../shared/automations'
 import { loadRuns, saveRuns } from './records'
 import { GRACE_MS, Scheduler, type RunResult } from './scheduler'
 
@@ -108,8 +108,8 @@ describe('firing', () => {
     await t.s.idle()
     expect(t.ran).toEqual([])
   })
-  it('records a slot that was missed, and does not run it', async () => {
-    const t = setup([make()], '2026-03-01T07:00:00Z')
+  it('with catch-up off, records a missed slot and does not run it', async () => {
+    const t = setup([make({ limits: { catchUpRuns: 0 } })], '2026-03-01T07:00:00Z')
     t.s.tick()
     t.at('2026-03-01T08:00:00Z')
     t.adv(GRACE_MS + 60_000)
@@ -118,7 +118,7 @@ describe('firing', () => {
     expect(t.ran).toEqual([])
     const [r] = loadRuns(dir, 'a1').runs
     expect(r).toMatchObject({ status: 'skipped', slot: '2026-03-01T08:00' })
-    expect(r.reason).toMatch(/missed/)
+    expect(r.reason).toMatch(/catch-up is off/)
   })
   it('runs one at a time', async () => {
     let live = 0
@@ -313,7 +313,8 @@ describe('checkAutomation', () => {
       runsPerDay: 24,
       toolCalls: 30,
       minutes: 5,
-      failuresBeforePause: 3
+      failuresBeforePause: 3,
+      catchUpRuns: 3
     })
   })
   it('refuses what is wrong rather than repairing it', () => {
@@ -344,5 +345,165 @@ describe('checkAutomation', () => {
       ['07:30', '19:00'],
       [1, 15]
     ])
+  })
+})
+
+describe('catch-up', () => {
+  const four = { times: ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00'] }
+  it('runs a missed slot late, flagged, with its window', async () => {
+    const ctxs: RunContext[] = []
+    const list = [make()]
+    let clock = T('2026-03-01T07:00:00Z')
+    const s = new Scheduler({
+      dir,
+      now: () => clock,
+      list: () => list,
+      run: async (_a, _slot, _sig, ctx) => {
+        ctxs.push(ctx)
+        return ok
+      }
+    })
+    s.tick()
+    clock = T('2026-03-01T08:40:00Z')
+    s.tick()
+    await s.idle()
+    expect(ctxs).toHaveLength(1)
+    expect(ctxs[0]).toMatchObject({
+      catch_up: true,
+      scheduled_for: { local: '2026-03-01T08:00', utc: '2026-03-01T08:00:00Z' },
+      window_start: { local: '2026-02-28T12:00', utc: '2026-02-28T12:00:00Z' },
+      window_end: { local: '2026-03-01T08:00' },
+      last_successful_run: null,
+      missed_slots: [],
+      time_zone: 'UTC'
+    })
+    expect(loadRuns(dir, 'a1').runs[0].catchUp).toBe(true)
+  })
+  it('runs the newest 3 oldest-first and folds the older ones, never dropping them', async () => {
+    const ctxs: { slot?: string; ctx: RunContext }[] = []
+    const list = [make(four)]
+    let clock = T('2026-03-01T07:00:00Z')
+    const s = new Scheduler({
+      dir,
+      now: () => clock,
+      list: () => list,
+      run: async (_a, slot, _sig, ctx) => {
+        ctxs.push({ slot, ctx })
+        return ok
+      }
+    })
+    s.tick()
+    clock = T('2026-03-01T13:30:00Z') // 08:00 to 13:00 all missed: six slots
+    s.tick()
+    await s.idle()
+    expect(ctxs.map((c) => c.slot)).toEqual([
+      '2026-03-01T11:00',
+      '2026-03-01T12:00',
+      '2026-03-01T13:00'
+    ])
+    expect(ctxs.every((c) => c.ctx.catch_up)).toBe(true)
+    // The three older slots ride in the first run's context only.
+    expect(ctxs[0].ctx.missed_slots.map((m) => m.local)).toEqual([
+      '2026-03-01T08:00',
+      '2026-03-01T09:00',
+      '2026-03-01T10:00'
+    ])
+    expect(ctxs[1].ctx.missed_slots).toEqual([])
+    expect(ctxs[2].ctx.missed_slots).toEqual([])
+    expect(ctxs[1].ctx.window_start?.local).toBe('2026-03-01T11:00')
+    const runs = loadRuns(dir, 'a1').runs
+    const note = runs.find((r) => r.status === 'skipped')
+    expect(note?.reason).toMatch(/3 older scheduled runs were missed and not run/)
+    expect(note?.reason).toMatch(/2026-03-01T11:00/)
+    // Nothing is looked at twice.
+    clock = T('2026-03-01T13:31:00Z')
+    s.tick()
+    await s.idle()
+    expect(ctxs).toHaveLength(3)
+  })
+  it('on-time slots are not catch-up, and the last success is carried', async () => {
+    const ctxs: RunContext[] = []
+    const list = [make()]
+    let clock = T('2026-03-01T07:59:00Z')
+    const s = new Scheduler({
+      dir,
+      now: () => clock,
+      list: () => list,
+      run: async (_a, _slot, _sig, ctx) => {
+        ctxs.push(ctx)
+        return ok
+      }
+    })
+    s.tick()
+    clock = T('2026-03-01T08:00:30Z')
+    s.tick()
+    await s.idle()
+    clock = T('2026-03-01T12:00:30Z')
+    s.tick()
+    await s.idle()
+    expect(ctxs.map((c) => c.catch_up)).toEqual([false, false])
+    expect(ctxs[0].last_successful_run).toBeNull()
+    expect(ctxs[1].last_successful_run).toMatchObject({ slot: '2026-03-01T08:00' })
+    expect(ctxs[1].window_start?.local).toBe('2026-03-01T08:00')
+  })
+  it('the setting limits how many run, and counts against the daily limit', async () => {
+    const t = setup(
+      [make({ ...four, limits: { catchUpRuns: 2, runsPerDay: 1 } })],
+      '2026-03-01T07:00:00Z'
+    )
+    t.s.tick()
+    t.at('2026-03-01T13:30:00Z')
+    t.s.tick()
+    await t.s.idle()
+    // Two were to run; the day limit let one through and noted the other.
+    expect(t.ran.map((r) => r.slot)).toEqual(['2026-03-01T12:00'])
+    const reasons = loadRuns(dir, 'a1').runs.map((r) => r.reason ?? '')
+    expect(reasons.some((r) => /1 runs a day|limit of 1 runs a day/.test(r))).toBe(true)
+    expect(reasons.some((r) => /older scheduled runs were missed/.test(r))).toBe(true)
+  })
+  it('opening Custard (start) catches up what was missed while it was closed', async () => {
+    saveRuns(dir, 'a1', {
+      state: { failures: 0, checkedUntil: T('2026-03-01T07:00:00Z') },
+      runs: []
+    })
+    const t = setup([make()], '2026-03-01T12:30:00Z')
+    t.s.start(3_600_000)
+    await t.s.idle()
+    t.s.stop()
+    expect(t.ran.map((r) => r.slot)).toEqual(['2026-03-01T08:00', '2026-03-01T12:00'])
+  })
+  it('a disabled or paused automation catches up on nothing when it comes back', async () => {
+    const t = setup([make()], '2026-03-01T07:00:00Z')
+    t.s.tick()
+    t.s.pause('a1')
+    t.at('2026-03-01T13:00:00Z')
+    t.s.tick()
+    t.s.resume('a1')
+    t.at('2026-03-01T13:00:30Z')
+    t.s.tick()
+    await t.s.idle()
+    expect(t.ran).toEqual([])
+  })
+  it('lists at most 200 folded slots and counts the rest', async () => {
+    const many = { times: ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00'] }
+    const ctxs: RunContext[] = []
+    const list = [make({ ...many, limits: { catchUpRuns: 1 } })]
+    let clock = T('2026-01-01T00:00:00Z')
+    const s = new Scheduler({
+      dir,
+      now: () => clock,
+      list: () => list,
+      run: async (_a, _slot, _sig, ctx) => {
+        ctxs.push(ctx)
+        return ok
+      }
+    })
+    s.tick()
+    clock = T('2026-02-15T23:00:00Z') // 46 days x 8 slots
+    s.tick()
+    await s.idle()
+    expect(ctxs).toHaveLength(1)
+    expect(ctxs[0].missed_slots).toHaveLength(200)
+    expect(ctxs[0].missed_slots_omitted).toBe(46 * 8 - 1 - 200)
   })
 })

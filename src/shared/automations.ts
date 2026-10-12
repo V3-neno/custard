@@ -10,6 +10,9 @@ export type AutomationLimits = {
   minutes: number
   // Failed runs in a row before the automation pauses itself.
   failuresBeforePause: number
+  // Missed slots run on opening, at most this many (the newest), oldest
+  // first. Older ones are folded into one summary. 0 turns catch-up off.
+  catchUpRuns: number
 }
 
 export type Automation = {
@@ -39,13 +42,15 @@ export const DEFAULT_LIMITS: AutomationLimits = {
   runsPerDay: 24,
   toolCalls: 30,
   minutes: 5,
-  failuresBeforePause: 3
+  failuresBeforePause: 3,
+  catchUpRuns: 3
 }
 export const LIMIT_BOUNDS: Record<keyof AutomationLimits, [number, number]> = {
   runsPerDay: [1, 96],
   toolCalls: [1, 100],
   minutes: [1, 30],
-  failuresBeforePause: [1, 10]
+  failuresBeforePause: [1, 10],
+  catchUpRuns: [0, 10]
 }
 export const MAX_AUTOMATIONS = 50
 
@@ -119,7 +124,8 @@ export function checkAutomation(raw: unknown): AutomationCheck {
           l.failuresBeforePause,
           LIMIT_BOUNDS.failuresBeforePause,
           DEFAULT_LIMITS.failuresBeforePause
-        )
+        ),
+        catchUpRuns: clamp(l.catchUpRuns, LIMIT_BOUNDS.catchUpRuns, DEFAULT_LIMITS.catchUpRuns)
       }
     }
   }
@@ -149,6 +155,8 @@ export type RunRecord = {
   kind: 'scheduled' | 'manual'
   // The slot it ran for, as local "YYYY-MM-DDTHH:MM" (scheduled runs).
   slot?: string
+  // The slot was missed and this is its late run.
+  catchUp?: boolean
   startedAt: number
   endedAt?: number
   status: RunStatus
@@ -179,4 +187,20 @@ export type AutomationView = {
   running: boolean
   // Newest first.
   runs: RunRecord[]
+}
+
+// What a run is told about itself, as JSON, in the names the user confirmed.
+// The skill decides what a window means and can record "data unavailable".
+export type When = { local: string; utc: string }
+export type RunContext = {
+  scheduled_for: When
+  // The slot before this one (null if there is none) and this one.
+  window_start: When | null
+  window_end: When
+  last_successful_run: { slot: string | null; finished_at: string } | null
+  // Older slots that were not run at all and are folded into this run.
+  missed_slots: When[]
+  missed_slots_omitted?: number
+  catch_up: boolean
+  time_zone: string
 }

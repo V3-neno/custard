@@ -1,4 +1,4 @@
-# Automations (Step 2: scheduled runs)
+# Automations (Steps 2 and 3: scheduled runs and catch-up)
 
 A skill the user has Custard run on a schedule, while Custard is open. Created
 in Settings → **Automations**. Nothing here has been tested live, on Windows,
@@ -24,8 +24,8 @@ A new automation starts turned off.
 - Only while Custard is open. A tick every 20 seconds looks for slots that fell
   due since the last look. Each slot is picked up once, even if Custard closes
   during its run (the window is closed before the run starts).
-- A slot more than 10 minutes late (Custard was closed, or busy) is **not**
-  run. It is recorded as skipped ("missed"). Catch-up is Step 3.
+- A slot more than 10 minutes late (Custard was closed, or busy) is a
+  **catch-up**; see below.
 - A new automation, a turned-on one and a resumed one start looking from that
   moment: nothing from before counts.
 - Runs go one at a time, in the order their slots fell due.
@@ -43,6 +43,36 @@ A new automation starts turned off.
   itself, with the last reason. Turning it on or **Resume** clears this. A
   429, a rejected key, a missing key or an unavailable plugin ends the run with
   that reason; there is no retry loop (the provider SDKs' own retries are off).
+
+## Catch-up (Step 3)
+
+When Custard opens (or wakes from sleep), the first look covers everything since
+the last one. Slots more than 10 minutes late are missed slots:
+
+- The **newest N** of them run (N = the automation's catch-up setting, default
+  3), **oldest first**, flagged `catch_up: true`, before any on-time slot. They
+  count against the runs-per-day limit like any scheduled run.
+- Older missed slots are **not run** but never dropped silently: they are listed
+  in the context of the first catch-up run (`missed_slots`, newest 200, with
+  `missed_slots_omitted` counting the rest), and a "skipped" record names how
+  many were folded and which run carries them.
+- N = 0 turns catch-up off: missed slots are recorded as skipped.
+- Nothing before an automation was created, turned on or resumed counts, and a
+  paused or turned-off automation catches up on nothing when it comes back.
+- Each slot is looked at once: the window is closed before anything runs.
+
+**Run context.** Every run's first message carries this JSON (names as Neno
+confirmed), and the instructions say what the fields mean. The skill decides
+what a window means and can record "data unavailable".
+
+| Field                        | Meaning                                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| `scheduled_for`              | `{local, utc}` of the slot (for Run now: the moment it was started).                          |
+| `window_start`, `window_end` | `{local, utc}`: the slot before this one (null if none in the last 100 days) and this one.    |
+| `last_successful_run`        | `{slot, finished_at}` of the newest completed run, or null.                                   |
+| `missed_slots`               | `[{local, utc}]` older slots folded into this run (empty for all but the first catch-up run). |
+| `catch_up`                   | true for a late run of a missed slot.                                                         |
+| `time_zone`                  | The automation's zone.                                                                        |
 
 ## What a run can do
 
@@ -85,7 +115,7 @@ The list of edits that Undo uses is shared with chat and now keeps the newest
 
 ## Not in this step
 
-Catch-up (missed slots are only noted), questions from unattended runs, the
+Questions from unattended runs, the
 hostile-text controls for outside text read by a run (Step 5), plugin write
 tools, web access, notifications when a run fails.
 
@@ -96,6 +126,7 @@ tools, web access, notifications when a run fails.
   undoable while the note is unchanged, but a hostile note or plugin result
   could still make it write something wrong inside those folders until the
   Step 5 controls exist. Choose folders accordingly.
+- A catch-up run for an old slot runs with today's vault and today's plugin data. Whether that makes sense for a past window is the skill's call (the window fields tell it); Custard can't recover data a plugin only offers live.
 - OpenAI runs use the Responses API without streaming and without keeping
   reasoning between steps. Not run against the live API.
 - Time zones come from the system's data; a time zone name Custard doesn't know

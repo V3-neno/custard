@@ -154,6 +154,35 @@ describe('what a run does', () => {
   })
 })
 
+describe('the run context', () => {
+  it('goes to the model as JSON with the names Neno confirmed, and the system says what they mean', async () => {
+    const ctx = {
+      scheduled_for: { local: '2026-03-01T08:00', utc: '2026-03-01T08:00:00Z' },
+      window_start: { local: '2026-02-28T19:00', utc: '2026-02-28T19:00:00Z' },
+      window_end: { local: '2026-03-01T08:00', utc: '2026-03-01T08:00:00Z' },
+      last_successful_run: null,
+      missed_slots: [],
+      catch_up: true,
+      time_zone: 'UTC'
+    }
+    const m = script([{ text: 'ok', calls: [] }])
+    await runAutomation(auto(), '2026-03-01T08:00', new AbortController().signal, deps(m.step), ctx)
+    const first = JSON.stringify(m.seen[0].messages[0])
+    for (const k of [
+      'scheduled_for',
+      'window_start',
+      'window_end',
+      'last_successful_run',
+      'missed_slots',
+      'catch_up',
+      'time_zone'
+    ])
+      expect(first).toContain(k)
+    expect(m.seen[0].system).toContain('data unavailable')
+    expect(m.seen[0].system).toContain('catch_up is true')
+  })
+})
+
 describe('what a run may not do', () => {
   const attempt = async (
     c: StepResult['calls'][number],

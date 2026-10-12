@@ -40,6 +40,7 @@ type Form = {
   folders: string[]
   plugins: string[]
   runsPerDay: string
+  catchUpRuns: string
 }
 
 const blank = (model: string, skill: string): Form => ({
@@ -52,7 +53,8 @@ const blank = (model: string, skill: string): Form => ({
   timezone: '',
   folders: [],
   plugins: [],
-  runsPerDay: String(DEFAULT_LIMITS.runsPerDay)
+  runsPerDay: String(DEFAULT_LIMITS.runsPerDay),
+  catchUpRuns: String(DEFAULT_LIMITS.catchUpRuns)
 })
 
 const split = (s: string): string[] =>
@@ -103,7 +105,8 @@ export default function Automations(): React.JSX.Element {
       timezone: a.timezone ?? '',
       folders: a.folders,
       plugins: a.plugins,
-      runsPerDay: String(a.limits.runsPerDay)
+      runsPerDay: String(a.limits.runsPerDay),
+      catchUpRuns: String(a.limits.catchUpRuns)
     })
   }
 
@@ -123,7 +126,11 @@ export default function Automations(): React.JSX.Element {
       folders: form.folders,
       plugins: form.plugins,
       enabled: existing?.enabled ?? false,
-      limits: { ...(existing?.limits ?? {}), runsPerDay: Number(form.runsPerDay) }
+      limits: {
+        ...(existing?.limits ?? {}),
+        runsPerDay: Number(form.runsPerDay),
+        catchUpRuns: Number(form.catchUpRuns)
+      }
     })
     if (r.ok) {
       setForm(null)
@@ -150,8 +157,9 @@ export default function Automations(): React.JSX.Element {
       <p className="mb-3 text-sm text-ash-300">
         Run a skill on a schedule. It runs only while Custard is open, on its own with nobody to
         ask: it can read your vault, change notes only in the editable folders you pick, and use
-        only the read tools of the plugins you pick. A run that is missed because Custard was closed
-        is skipped and noted below.
+        only the read tools of the plugins you pick. When Custard was closed at a scheduled time,
+        the newest missed runs happen when it opens (you set how many), marked catch-up; older ones
+        are noted and passed to the first of them.
       </p>
       {views.length > 0 && (
         <ul className="mb-3 space-y-2" aria-label="Automations">
@@ -224,6 +232,7 @@ export default function Automations(): React.JSX.Element {
                           <span className="text-ash-300">{STATUS[r.status]}</span>
                           <span>{when(r.startedAt)}</span>
                           {r.kind === 'manual' && <span>started by you</span>}
+                          {r.catchUp && <span>catch-up for {r.slot?.replace('T', ' ')}</span>}
                         </div>
                         {r.reason && <p className="text-ash-300">{r.reason}</p>}
                         {r.calls.length > 0 && (
@@ -323,6 +332,16 @@ export default function Automations(): React.JSX.Element {
               value={form.runsPerDay}
               onChange={(e) => setForm({ ...form, runsPerDay: e.target.value })}
               title="At most this many scheduled runs a day"
+              className={`${input} !w-24`}
+            />
+            <input
+              aria-label="Catch-up runs"
+              type="number"
+              min={0}
+              max={10}
+              value={form.catchUpRuns}
+              onChange={(e) => setForm({ ...form, catchUpRuns: e.target.value })}
+              title="When Custard was closed, how many missed runs to run on opening (the newest; 0 = none)"
               className={`${input} !w-24`}
             />
           </div>
