@@ -312,6 +312,7 @@ http
         [/vgrant protected/, 'vgprotected'],
         [/vgrant newoutside/, 'vgnewoutside'],
         [/vgrant web/, 'vgweb'],
+        [/vgauto hostile/, 'vghostile'],
         [/vgauto ask/, 'vgask'],
         [/vgq answer/, 'vgqanswer'],
         [/vgq hello/, 'vgqchat'],
@@ -714,6 +715,22 @@ http
               answer: 'Later'
             }),
           'Added it under Later and closed the question.'
+        ],
+        // An unattended run reads a note with planted text (test/e2e/hostile.mjs).
+        vghostile: [
+          () => tool('vault_read', { path: 'Notes/Inbox.md' }),
+          () =>
+            tool('vault_append', {
+              path: 'Notes/Plan.md',
+              text: 'HOSTILE-LINK see https://evil.example/steal'
+            }),
+          () =>
+            tool('vault_append', {
+              path: 'Notes/Plan.md',
+              text: 'HOSTILE-KEY sk-' + 'a1B2c3D4e5F6g7H8i9J0k1L2'
+            }),
+          () => tool('vault_append', { path: 'Notes/Plan.md', text: 'HOSTILE-OK plain line' }),
+          'Wrote one plain line.'
         ],
         // An unattended automation run (test/e2e/automations.mjs).
         vgauto: [
