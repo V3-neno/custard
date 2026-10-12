@@ -10,10 +10,18 @@ import type { ToolRun } from './turn'
 import { FsafeError, makeDirs, writeNew, type Guard } from './fsafe'
 import { search, SearchError, SEARCH_LIMITS } from './vault/search'
 import { ReadError, readPart, toVaultPath, READ_LIMITS } from './vault/read'
+import {
+  changeNote,
+  createGranted,
+  recordCreated,
+  VaultEditError,
+  type EditContext
+} from './vault/edit'
 
-// Claude may read anything in the vault, but can only create new notes or
-// append to existing ones: nothing is ever overwritten or deleted. Editing a
-// passage in place is deferred (see docs/vault-tools.md).
+// Claude may read anything in the vault and create new notes (each shown and
+// approved, unless the folder is one the user granted). Existing notes can be
+// changed only through vault_append and vault_edit, only in granted folders:
+// nothing is ever overwritten wholesale, deleted or renamed.
 export const vaultTools: BetaTool[] = [
   {
     name: 'vault_search',
@@ -70,7 +78,7 @@ export const vaultTools: BetaTool[] = [
   {
     name: 'vault_create_note',
     description:
-      'Create a new note. The user sees its path and full content and must allow it first. Fails if a note already exists at that path: changing existing notes is turned off. Missing folders are created.',
+      'Create a new note. Unless the folder is one the user has allowed you to write in, the user sees its path and full content and must allow it first. Fails if a note already exists at that path: it never overwrites. Missing folders are created.',
     input_schema: {
       type: 'object',
       properties: {
@@ -83,6 +91,57 @@ export const vaultTools: BetaTool[] = [
       required: ['path', 'content']
     },
     eager_input_streaming: true
+  }
+]
+
+// Offered only when the user has granted a folder that allows them.
+export const vaultChangeTools: BetaTool[] = [
+  {
+    name: 'vault_append',
+    description:
+      'Add text to the end of an existing note, on a new line. Only in a folder the user has allowed you to add to; elsewhere it is refused. No version is needed. Use vault_create_note for a new note.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Note path relative to the vault root' },
+        text: { type: 'string', description: 'Markdown to add at the end' }
+      },
+      required: ['path', 'text']
+    }
+  },
+  {
+    name: 'vault_edit',
+    description: [
+      'Change an existing note in place. Only in a folder the user has allowed you to edit; elsewhere it is refused.',
+      'First read the note with vault_read and pass its version. If the note changed since, nothing is written and you must read it again.',
+      'Give a list of edits. All are applied together, or none are (one that cannot be applied fails the whole call). Each edit is matched against the note as you read it, and edits must not overlap.',
+      'Edit types: {"type":"replace","old_text","new_text"} replaces text that appears exactly once; {"type":"insert_after_heading","heading":"## Log","text"} adds text at the end of that heading\'s section, just before the next heading of the same or a higher level (the heading must appear exactly once); {"type":"append","text"} adds text at the end of the note.',
+      "The note's frontmatter (--- block) must stay valid."
+    ].join(' '),
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Note path relative to the vault root' },
+        version: { type: 'string', description: "The note's version from vault_read" },
+        edits: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 20,
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: ['replace', 'insert_after_heading', 'append'] },
+              old_text: { type: 'string' },
+              new_text: { type: 'string' },
+              heading: { type: 'string' },
+              text: { type: 'string' }
+            },
+            required: ['type']
+          }
+        }
+      },
+      required: ['path', 'version', 'edits']
+    }
   }
 ]
 
@@ -378,7 +437,10 @@ export async function runVaultTool(
   name: string,
   input: unknown,
   // Checked against the real place a new note lands, just before creating it.
-  guard?: Guard
+  guard?: Guard,
+  // The user's granted folders and where edit records go; without it, existing
+  // notes can't be changed.
+  editing?: Omit<EditContext, 'guard'>
 ): Promise<ToolRun> {
   const i = (input ?? {}) as Record<string, unknown>
   if (!(await reachable(vault)))
@@ -395,16 +457,23 @@ export async function runVaultTool(
         return { content: await list(vault, i.folder), isError: false }
       case 'vault_read':
         return { content: await readPart(vault, i), isError: false }
-      case 'vault_create_note':
-        return await create(vault, i.path, i.content, guard)
+      case 'vault_create_note': {
+        const r = await create(vault, i.path, i.content, guard)
+        // A note made in a granted folder had no approval card, so it is kept
+        // in the activity list.
+        if (!r.isError && editing && createGranted(vault, i.path, editing.grants))
+          recordCreated(editing, String(i.path), String(i.content).length)
+        return r
+      }
       case 'vault_append':
-        // Off for now: changing shared notes is deferred.
-        return {
-          content:
-            'Adding to existing notes is turned off, so nothing was done. Offer to save it as a new note instead.',
-          isError: true,
-          outcome: 'not-run'
-        }
+      case 'vault_edit':
+        if (!editing)
+          return {
+            content: `${name} can't be used here, so nothing was done.`,
+            isError: true,
+            outcome: 'not-run'
+          }
+        return await changeNote(vault, name, i, { ...editing, guard })
       default:
         return { content: `Unknown tool ${name}`, isError: true, outcome: 'not-run' }
     }
@@ -414,7 +483,8 @@ export async function runVaultTool(
       err instanceof VaultError ||
       err instanceof VaultPathError ||
       err instanceof SearchError ||
-      err instanceof ReadError
+      err instanceof ReadError ||
+      err instanceof VaultEditError
     )
       return {
         content: errorText(err),

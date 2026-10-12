@@ -5,6 +5,7 @@ import type { MemorySettings } from '../../../shared/memory'
 
 import PluginsTab from './settings/PluginsTab'
 import DesignTab from './settings/DesignTab'
+import EditableFolders from './settings/EditableFolders'
 import { cleanError, primary, secondary } from './settings/ui'
 
 type Props = { onClose: () => void; onChanged: () => void }
@@ -235,9 +236,10 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
                 Obsidian vault {vault && <span className="text-molten-300">· connected</span>}
               </h3>
               <p className="mb-3 text-sm text-ash-300">
-                The brain behind Custard. The model can search and read your notes, create new ones
-                and add to existing ones, but never overwrites or deletes anything. It keeps a
-                memory of you in <code className="text-molten-200">{MEMORY_NOTE}</code>.
+                The brain behind Custard. The model can search and read your notes and create new
+                ones (you approve each). It changes existing notes only in the folders you allow
+                below, and never overwrites a whole note or deletes anything. It keeps a memory of
+                you in <code className="text-molten-200">{MEMORY_NOTE}</code>.
               </p>
               {vault ? (
                 <>
@@ -284,6 +286,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
                   </button>
                 </div>
               )}
+              {vault && <EditableFolders />}
               {added && <p className="mt-2 text-xs text-ash-400">{added}</p>}
               {vaultError && <p className="mt-2 text-sm text-ember-600">{vaultError}</p>}
             </section>

@@ -12,7 +12,8 @@ import type {
   Provider,
   SendChatRequest
 } from '../shared/chat'
-import type { VaultInfo } from '../shared/vault'
+import type { VaultEditEntry, VaultInfo } from '../shared/vault'
+import type { VaultGrant } from '../shared/vaultGrants'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision } from '../shared/chat'
@@ -54,7 +55,13 @@ const custard = {
     createStarter: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:createStarter'),
     clear: (): Promise<void> => ipcRenderer.invoke('vault:clear'),
     addStarterSkills: (): Promise<{ added: string[]; vault: VaultInfo }> =>
-      ipcRenderer.invoke('vault:addStarterSkills')
+      ipcRenderer.invoke('vault:addStarterSkills'),
+    getGrants: (): Promise<VaultGrant[]> => ipcRenderer.invoke('vault:getGrants'),
+    setGrants: (grants: VaultGrant[]): Promise<VaultGrant[]> =>
+      ipcRenderer.invoke('vault:setGrants', grants),
+    edits: (): Promise<VaultEditEntry[]> => ipcRenderer.invoke('vault:edits'),
+    undoEdit: (id: string): Promise<{ ok: boolean; message: string }> =>
+      ipcRenderer.invoke('vault:undoEdit', id)
   },
   plugins: {
     list: (): Promise<PluginStatus[]> => ipcRenderer.invoke('plugins:list'),

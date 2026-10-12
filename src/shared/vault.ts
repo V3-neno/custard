@@ -1,5 +1,16 @@
 export const MEMORY_NOTE = 'Custard/Memory.md'
 
+// One line of the activity list for Claude's changes to notes.
+export type VaultEditEntry = {
+  id: string
+  time: number
+  kind: 'create' | 'append' | 'edit'
+  path: string
+  change?: { removed: string; added: string; truncated: boolean }
+  undoable: boolean
+  undone: boolean
+}
+
 export type VaultInfo = { path: string; isObsidian: boolean; skills: string[] } | null
 
 // A short human-readable line for a tool call, used in the chat UI.
@@ -17,6 +28,8 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
       return `Created ${str(i.path)}`
     case 'vault_append':
       return str(i.path) === MEMORY_NOTE ? 'Saved to memory' : `Added to ${str(i.path)}`
+    case 'vault_edit':
+      return `Edited ${str(i.path)}`
     case 'fs_list':
       return `Looked in ${str(i.path) || 'the workspace'}`
     case 'fs_read':

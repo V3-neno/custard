@@ -10,7 +10,9 @@ import { attachments, registerAttachmentHandlers } from './attachments'
 import { memory, registerMemoryHandlers } from './memory'
 import { allowOnlyAppPage, handle } from './ipc'
 import { sameAppPage } from './appPage'
-import { pluginHost, registerPluginHandlers, startPlugins } from './plugins'
+import { pluginHost, protectedRoots, registerPluginHandlers, startPlugins } from './plugins'
+import { extensionRefusal, extensionTarget } from './modes/extensions'
+import { listEdits, undoEdit } from './vault/edit'
 import { isPluginContents } from './plugins/runtime'
 import { registerWidgetHandlers, widgets } from './widgets'
 import { designChatDeleted, registerDesignHandlers } from './design'
@@ -20,7 +22,10 @@ import {
   getVaultPath,
   listConversations,
   setChatSettings,
-  setVaultPath
+  setVaultPath,
+  getVaultGrants,
+  setVaultGrants,
+  vaultEditsDir
 } from './store'
 import type { VaultInfo } from '../shared/vault'
 import type { ChatSettings, Mode, Provider } from '../shared/chat'
@@ -155,6 +160,27 @@ app.whenReady().then(() => {
     return vaultInfo()
   })
   handle('vault:clear', () => setVaultPath(null))
+  handle('vault:getGrants', () => getVaultGrants())
+  handle('vault:setGrants', (_, grants: unknown) => setVaultGrants(grants))
+  handle('vault:edits', () =>
+    listEdits(vaultEditsDir()).map((r) => ({
+      id: r.id,
+      time: r.time,
+      kind: r.kind,
+      path: r.path,
+      change: r.change,
+      undoable: r.kind !== 'create' && !r.undone,
+      undone: !!r.undone
+    }))
+  )
+  handle('vault:undoEdit', (_, id: string) => {
+    const path = getVaultPath()
+    if (!path || !existsSync(path)) return { ok: false, message: 'Connect a vault first.' }
+    return undoEdit(path, vaultEditsDir(), String(id), (real) => {
+      const t = extensionTarget(real, path, protectedRoots())
+      return t ? extensionRefusal(t, 'Settings') : null
+    })
+  })
   handle('vault:addStarterSkills', () => {
     const path = getVaultPath()
     if (!path || !existsSync(path)) throw new Error('Connect a vault first.')

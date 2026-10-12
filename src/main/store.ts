@@ -22,6 +22,7 @@ import {
 import type { SecurityDefaults } from '../shared/plugins'
 import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import { defaultMemorySettings, type MemorySettings } from '../shared/memory'
+import { normalizeGrants, type VaultGrant } from '../shared/vaultGrants'
 
 // Conversations are plain JSON files in the app's data folder, one per chat.
 const dir = (): string => {
@@ -146,6 +147,7 @@ type Config = {
   vaultPath: string | null
   security: SecurityDefaults
   memory: MemorySettings
+  vaultGrants: VaultGrant[]
 }
 
 const defaultSecurity: SecurityDefaults = { askBeforeWriteTools: true }
@@ -161,7 +163,8 @@ function readConfig(): Config {
     design: normalizeDesignSettings(raw.design),
     vaultPath: raw.vaultPath ?? null,
     security: { ...defaultSecurity, ...raw.security },
-    memory: { ...defaultMemorySettings, ...raw.memory }
+    memory: { ...defaultMemorySettings, ...raw.memory },
+    vaultGrants: normalizeGrants(raw.vaultGrants).grants
   }
 }
 
@@ -182,3 +185,14 @@ export const getSecurityDefaults = (): SecurityDefaults => readConfig().security
 export const setSecurityDefaults = (security: SecurityDefaults): void => writeConfig({ security })
 export const getMemorySettings = (): MemorySettings => readConfig().memory
 export const setMemorySettings = (memory: MemorySettings): void => writeConfig({ memory })
+
+// Folders the user lets Claude change without asking about each edit.
+export const getVaultGrants = (): VaultGrant[] => readConfig().vaultGrants
+export const setVaultGrants = (grants: unknown): VaultGrant[] => {
+  const vaultGrants = normalizeGrants(grants).grants
+  writeConfig({ vaultGrants })
+  return vaultGrants
+}
+
+// Where the record of Claude's changes to notes is kept: app data, not the vault.
+export const vaultEditsDir = (): string => join(app.getPath('userData'), 'vault-edits')

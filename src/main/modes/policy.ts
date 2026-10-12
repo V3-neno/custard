@@ -12,7 +12,7 @@ import { DESIGN_TOOLS } from '../../shared/design'
 // What a tool can do, by where it comes from.
 export type ToolKind =
   | 'vault-read' // vault_search, vault_list, vault_read
-  | 'vault-write' // vault_create_note (vault_append is turned off)
+  | 'vault-write' // vault_create_note, vault_append, vault_edit
   | 'web' // web_search, web_read
   | 'plugin' // an enabled plugin's tool, <plugin>__<tool>
   | 'widget' // widget_show, widget_hide
@@ -65,7 +65,7 @@ export type ToolSources = {
 
 export function toolKind(name: string, sources: ToolSources): ToolKind {
   if (/^vault_(search|list|read)$/.test(name)) return 'vault-read'
-  if (/^vault_(create_note|append)$/.test(name)) return 'vault-write'
+  if (/^vault_(create_note|append|edit)$/.test(name)) return 'vault-write'
   if (sources.isWorkspace(name)) return 'workspace'
   if (sources.isWeb(name)) return 'web'
   if (name === 'widget_show' || name === 'widget_hide') return 'widget'

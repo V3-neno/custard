@@ -1,27 +1,29 @@
-# Vault tools (Step 4)
+# Vault tools
 
 How Custard searches and reads the user's Obsidian vault, and what protects
 the notes. Nothing here has been tested live, on Windows, or with Obsidian
 running at the same time. Everything is covered by unit tests on a real
 temporary folder and by an end-to-end test against a mock provider.
 
-**Targeted editing is deferred, not built.** The model can only create new
-notes, and each one needs the user's approval first. Nothing is ever replaced
-in place, overwritten, renamed or deleted. See "Deferred: targeted editing"
-below for why.
+**Editing existing notes: only in folders the user allows (2026-10-12).**
+By default the model can only create new notes, and each one needs the user's
+approval. In Settings → Obsidian vault → **Editable folders** the user can allow
+a folder with a mode: create, append or edit. Inside it, Claude changes notes
+without a card for each change. Nothing is ever overwritten wholesale, renamed
+or deleted. See "Editing in allowed folders" below.
 
 **Approval and appends (hardening pass, 2026-10-08).**
+
 - **Creating a note asks every time.** The approval card shows the note's path
   and its whole content, and "Allow for this chat" isn't offered. Notes in
   folders Custard reads into every chat (`Custard/Memory.md`,
   `Custard/Captures`, `Custard/Skills`, `Custard/Plugins`) get an extra
   warning line.
-- **`vault_append` is off.** It is no longer offered, and a call to it does
-  nothing. This includes `Memory.md`. Shared-note changes stay deferred, so
-  the model offers a new note instead, or asks the user to edit the note.
-  Turning it off also removes the model's side of the race with Obsidian and
-  sync clients writing the same note. Approval would not have closed that
-  race.
+- **`vault_append` and `vault_edit` are off unless a folder is allowed** (they
+  were off for everything in the hardening pass). With no allowed folder
+  they are not offered, and a call to one is refused. Outside the allowed
+  folders the model offers a new note instead, or asks the user to edit the
+  note.
 - **Links (M4).** Before any write, every part of the path below the vault is
   checked. A link must lead to something that exists inside the vault, and a
   broken link (one whose target doesn't exist yet) is refused. That covers
@@ -39,6 +41,7 @@ below for why.
 ## Search (`vault_search`, `src/main/vault/search.ts`)
 
 The query supports:
+
 - plain words;
 - `"quoted phrases"`, matched in order across any spacing or line break;
 - `folder:Projects` or `folder:"Area/Sub folder"` (also `path:`);
@@ -49,6 +52,7 @@ Matching ignores case and accents: text is normalized to NFD and the diacritics
 are removed. Snippets quote the note as written.
 
 Ranking:
+
 1. Notes that match every word and phrase.
 2. Then notes that match some, ordered by how many. These are labelled "(k of n
    terms)".
@@ -58,6 +62,7 @@ Ranking:
 Each note gets up to two snippets of about 160 characters.
 
 The scan is asynchronous and bounded:
+
 - 8 files are read at a time;
 - notes over 2 MB are skipped and counted;
 - the scan stops at 20,000 notes or after 5 seconds.
@@ -91,6 +96,7 @@ the same path check as every other tool.
 
 Each call returns up to 40,000 characters, cut at a line break. The first line
 gives:
+
 - the note;
 - its **version** (the first 12 hex characters of a SHA-256 of the whole note);
 - the character range and the total;
@@ -114,6 +120,7 @@ changing afterwards, and nothing is written based on it.
   It refuses anything outside the vault, hidden folders, links that lead out
   of the vault, `:` in a path (a Windows stream name) and Windows short names
   such as `OBSIDI~1`.
+
 - **`vault_list`** shows links that stay inside the vault. It leaves out links
   that lead outside or are broken, and says how many.
 - **Disconnected vault.** Every vault tool first checks that the folder is
@@ -140,41 +147,65 @@ changing afterwards, and nothing is written based on it.
   Custard reads back whatever the user wrote. Custard's own automatic writes
   never change an existing capture note.
 
-## Deferred: targeted editing
+## Editing in allowed folders
 
-A tool to replace one exact passage of a note was built, then taken out of this
-PR before review. It is not in the code.
+**What the user controls.** Nothing is allowed by default. The user adds a
+folder (inside the vault) and a mode, listed and removable in Settings. Which
+folders can be allowed is the user's choice: core has no list. Modes nest:
 
-The reason is the cross-editor race. Custard and Obsidian (or a sync client)
-write the same files with no shared lock. The design had:
-- the version checked three times (when requested, after approval, and just
-  before writing);
-- a write to a temporary file, renamed over the note;
-- a read-back;
-- a copy of the previous version;
-- an Undo that refused if the note had changed.
+- **create**: new notes, with no approval card, never overwriting;
+- **append**: also add text to the end of an existing note (`vault_append`);
+- **edit**: also change an existing note in place (`vault_edit`).
 
-All of that reduces the risk, but none of it guarantees that a concurrent edit is
-preserved:
-- Another program saving between the last check and the rename loses one of the
-  two changes. The read-back catches this only if that save lands before it.
-- Obsidian can hold unsaved typing in an open note and save it over the edit, or
-  reload around it. Custard can't see that buffer.
-- Sync from another device can overwrite the note or create a conflict copy.
+The most specific folder wins. `vault_append` and `vault_edit` are offered
+only when some folder allows them, and a call outside every allowed folder is
+refused with nothing written. The path is checked as given and where it really
+leads, so a link inside an allowed folder can't reach a place the grants don't
+cover. The mode's own protection still applies: Chat and Design can't change
+skills or plugin files, whatever the grants say.
 
-A saved copy of the note from before the edit would not make every such loss
-recoverable:
-- it holds the note as it was when Custard read it;
-- it doesn't hold an external save that landed after Custard's last check;
-- it doesn't hold typing that was never saved.
+**Protected places.** A grant on a parent folder does not cover
+`Custard/Skills`, `Custard/Captures`, `Custard/Plugins/<plugin>/Activity` or
+`Custard/Memory.md`. A grant covers one of the folders only when it names that
+folder (or something inside it). `Memory.md` is a file, so no folder grant can
+name it.
 
-Closing the race would need Obsidian to apply the change itself (for example, a
-companion Obsidian plugin using Obsidian's own note-update API). That is a
-materially different integration. It is not being started.
+**`vault_edit`.** The model reads the note, then sends its `version` and a list
+of at most 20 edits: replace text that appears exactly once, insert after a
+heading, or append at the end. An insert after a heading lands at the end of
+that heading's section, just before the next heading of the same or a higher
+level (headings inside code fences don't count; the heading must appear
+exactly once). Every edit is matched against the note as it was read, edits may
+not overlap, and all are applied together or none are. A stale version, a note
+over 200,000 characters, an edit over 20,000 characters, or an edit that would
+leave the frontmatter (the leading `---` block) unclosed or with a line that
+isn't `key: value` all write nothing. The frontmatter check is a heuristic,
+not a YAML parser. The note is replaced with an atomic write, after the
+version is checked again just before.
+
+**Record and undo.** Each change in an allowed folder (including a new note)
+is listed under Settings → Recent changes, with what changed. The previous
+text of an appended or edited note is kept in Custard's app data (not in the
+vault, so nothing hidden syncs), for the newest 50 changes. **Undo** restores
+it only if the note is still exactly as the edit left it; otherwise the note
+is left alone. A created note has no undo, because nothing is ever deleted.
+
+**Accepted risk (Neno, 2026-10-12).** Custard and Obsidian (or a sync client)
+still write the same files with no shared lock. The version check catches
+changes already saved to disk, not typing that is unsaved in Obsidian, and
+another program saving between the last check and the replace can lose one of
+the two changes. Neno: there shouldn't be unsaved changes in Obsidian, so the
+risk is accepted. This replaces the 2026-10-07 decision to defer editing.
+
+**Open for review.** Inside an allowed folder an edit needs no card, even in a
+chat that has read web pages or plugin text. A prompt-injected page could ask
+Claude to change a note in an allowed folder. Notes in `Custard/Plugins` are
+also read into later chats' instructions.
 
 ## Tests
 
 **Unit** (`src/main/vault/vault.test.ts`, 26 tests, on real temporary folders):
+
 - search:
   - query parsing, ranking and partial labels;
   - phrases, folder and tag filters, accents;
@@ -193,14 +224,21 @@ materially different integration. It is not being started.
   - create outcomes, recorded through the Step 1 turn log;
   - the `Memory.md` bound and its offset;
   - the counts of what was left out;
-  - no edit tool offered;
+  - no edit tool offered (until a folder is allowed);
   - capture code never using the vault tools.
 
 **End-to-end** (`test/e2e/vault.mjs`, 11 checks, with `test/e2e/interrupt-mock.mjs`):
+
 - the search result through the app (ranking, partial labels, accents);
-- no note-editing tool offered;
+- no note-editing tool offered (until a folder is allowed);
 - a long note read in two parts that join back exactly;
 - nothing in the vault changes.
+
+**Editing** (`src/main/vault/edit.test.ts`, `src/shared/vaultGrants.test.ts`,
+`test/e2e/vault-edit.mjs`): grants and protected places, every edit type,
+atomic failure, stale version, frontmatter, links, limits, records and undo; and
+in the app, no card inside an allowed folder, refusal outside, Settings add and
+remove, Recent changes and Undo.
 
 ## Limits
 

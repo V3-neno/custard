@@ -3,6 +3,7 @@
 // result never came back.
 import http from 'http'
 import fs from 'fs'
+import { createHash } from 'crypto'
 const [, , OUT] = process.argv
 const anth = []
 const spotify = []
@@ -303,6 +304,13 @@ http
       const step = b.messages.slice(last + 1).filter((m) => m.role === 'user').length
       // Hardening checks (test/e2e/hardening.mjs).
       const hardening = [
+        // Editable folders (test/e2e/vault-edit.mjs).
+        [/vgrant create/, 'vgcreate'],
+        [/vgrant append/, 'vgappend'],
+        [/vgrant edit/, 'vgedit'],
+        [/vgrant elsewhere/, 'vgelsewhere'],
+        [/vgrant protected/, 'vgprotected'],
+        [/vgrant newoutside/, 'vgnewoutside'],
         [/fs write test/, 'fswrite'],
         [/forged test/, 'forged'],
         [/note test/, 'note'],
@@ -573,8 +581,7 @@ http
         ],
         // Appending to an existing note, which is turned off.
         append: [
-          () =>
-            tool('vault_append', { path: 'Areas/README.md', content: 'APPENDED-9001' }),
+          () => tool('vault_append', { path: 'Areas/README.md', content: 'APPENDED-9001' }),
           'Tried to append.'
         ],
         // Plugin widgets: each shows (or hides) one, then answers.
@@ -626,6 +633,42 @@ http
         mfs: [
           () => tool('fs_write', { path: 'plugin/forged/index.ts', content: 'FORGED-FS' }),
           'Tried a file.'
+        ],
+        // Editable folders (vault-edit.mjs): changes inside and outside the granted folders.
+        vgcreate: [
+          () => tool('vault_create_note', { path: 'Notes/Made.md', content: 'MADE-BY-CLAUDE\n' }),
+          'Made the note.'
+        ],
+        vgappend: [
+          () => tool('vault_append', { path: 'Journal/Log.md', text: 'APPENDED-LINE-7731' }),
+          'Appended.'
+        ],
+        vgedit: [
+          () =>
+            tool('vault_edit', {
+              path: 'Notes/Plan.md',
+              version: createHash('sha256')
+                .update(fs.readFileSync(OUT + '/vault/Notes/Plan.md', 'utf8'), 'utf8')
+                .digest('hex')
+                .slice(0, 12),
+              edits: [
+                { type: 'replace', old_text: 'draft', new_text: 'final' },
+                { type: 'insert_after_heading', heading: '## Log', text: '- EDITED-ENTRY-5528' }
+              ]
+            }),
+          'Edited.'
+        ],
+        vgelsewhere: [
+          () => tool('vault_append', { path: 'Areas/README.md', text: 'ELSEWHERE-9912' }),
+          'Tried elsewhere.'
+        ],
+        vgprotected: [
+          () => tool('vault_append', { path: 'Custard/Captures/Old.md', text: 'PROTECTED-4417' }),
+          'Tried a protected note.'
+        ],
+        vgnewoutside: [
+          () => tool('vault_create_note', { path: 'Inbox/Outside.md', content: 'OUTSIDE-NOTE' }),
+          'Asked to create it.'
         ],
         // A drafted prompt in a code block, for the Copy button (copy.mjs).
         copy: ['Here is the prompt:\n\n```\nBuild a tea timer.\nUse the forge style.\n```'],
