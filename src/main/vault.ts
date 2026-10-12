@@ -214,7 +214,14 @@ export function boundMemory(text: string): string {
   return `${text.slice(0, cutAt)}\n[… characters ${n(cutAt)}–${n(resume)} of ${n(text.length)} are left out here for length. Read them with vault_read, path "${MEMORY_NOTE}", offset ${cutAt} …]\n\n${text.slice(resume)}`
 }
 
-export function vaultSystemPrompt(vault: string, mode: Mode, memoryAuto = true): string {
+// `recall.outside` is set when a capture shown in the prompt was made from a
+// chat that held text from the web or a plugin (or from before captures said).
+export function vaultSystemPrompt(
+  vault: string,
+  mode: Mode,
+  memoryAuto = true,
+  recall?: { outside: boolean }
+): string {
   // Skills mode sees every skill so it can maintain them; other modes only
   // get the skills meant for them.
   const all = listSkills(vault).filter(
@@ -228,10 +235,11 @@ export function vaultSystemPrompt(vault: string, mode: Mode, memoryAuto = true):
   } catch {
     // Not there yet, or a link out of the vault.
   }
-  const none = { remembered: [], activity: [], notes: 0, cut: 0 }
+  const none = { remembered: [], activity: [], notes: 0, cut: 0, outside: false }
   let captured: ReturnType<typeof readCaptures> = none
   try {
     if (memoryAuto) captured = readCaptures(vault)
+    if (recall && captured.outside) recall.outside = true
   } catch {
     // Unreadable capture folder: nothing from it this turn.
   }

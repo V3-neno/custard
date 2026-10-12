@@ -165,10 +165,20 @@ cover. The mode's own protection still applies: Chat and Design can't change
 skills or plugin files, whatever the grants say.
 
 **Protected places.** A grant on a parent folder does not cover
-`Custard/Skills`, `Custard/Captures`, `Custard/Plugins/<plugin>/Activity` or
-`Custard/Memory.md`. A grant covers one of the folders only when it names that
-folder (or something inside it). `Memory.md` is a file, so no folder grant can
-name it.
+`Custard/Skills`, `Custard/Captures`, `Custard/Plugins/<plugin>/Activity`,
+`Custard/Plugins/<plugin>/Overview.md` or `Custard/Memory.md`. A grant covers a
+folder among them only when it names that folder (or something inside it).
+`Memory.md` and `Overview.md` are files, so no folder grant can name them.
+
+**One reading of a path.** A backslash means a folder boundary on every system
+(`resolveInVault` turns it into `/` first), so the grant check, the protected
+places and the file system all see the same folders; on Linux and macOS a
+backslash used to be a letter of a name that the grant check read as a boundary.
+A folder or note name that ends in a dot or a space is refused everywhere
+(Windows drops them). Protected places are matched without case. A grant covers
+a path by its exact spelling where the vault's file system tells `Notes` from
+`notes` apart (found by trying it on the vault, `caseSensitiveVault`), and
+without case where it doesn't (Windows, usually macOS).
 
 **`vault_edit`.** The model reads the note, then sends its `version` and a list
 of at most 20 edits: replace text that appears exactly once, insert after a
@@ -206,6 +216,18 @@ edit) shows the approval card with what would change, for the rest of that chat:
   plugin tool. A call that never ran doesn't count. Calls in the same round as
   such a call count, because they run together.
 - A chat continued from another one counts, because it carries that chat's text.
+- Reading a note counts, unless the note is `Custard/Memory.md`, a skill, a
+  plugin's `Overview.md`, or in an allowed folder: any other note may hold
+  something the user pasted. A search that finds something counts. This is a rule
+  about where a note is, not about what it says; a granted folder the user pastes
+  web text into is still trusted by it. Listing a folder doesn't count (names
+  only). Captures and plugin activity always count, even under a grant that names
+  them.
+- A chat shown captures that were made from a chat with outside text counts.
+  New captures say so in their frontmatter (`outside: "true"` or `"false"`); a
+  capture without the field (made before it existed, or edited) is treated as
+  made from outside text, because nothing says it wasn't. Only captures that
+  contribute a line to the prompt count.
 - Chats without outside text keep no-card changes.
 - A top-bar pill, "Outside text", shows when the chat on screen has some. A new
   chat clears it.
@@ -215,6 +237,12 @@ edit) shows the approval card with what would change, for the rest of that chat:
   hostile-text controls of Step 5.
 - `Custard/Memory.md` can't be allowed (it is a file), and Skills and Captures
   stay protected under a parent grant. There is no way to grant them by accident.
+
+**Capture text.** What the summarizer writes into a capture note (preferences,
+decisions, titles, uncertainties, and action labels, which are cut at 300
+characters) has links, `[[wikilinks]]`, HTML tags and key-shaped text removed
+(`plain` in `src/main/memory/render.ts`). This is a heuristic: it removes the
+address syntaxes it knows, not every way to write one.
 
 The indicator reads the saved chat, so it can show up once the turn that brought
 the text has finished. The card doesn't wait for that: it already applies within

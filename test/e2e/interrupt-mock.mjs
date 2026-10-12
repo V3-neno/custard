@@ -312,6 +312,8 @@ http
         [/vgrant protected/, 'vgprotected'],
         [/vgrant newoutside/, 'vgnewoutside'],
         [/vgrant web/, 'vgweb'],
+        [/vgrant readgranted/, 'vgreadgranted'],
+        [/vgrant readother/, 'vgreadother'],
         [/vgauto hostile/, 'vghostile'],
         [/vgauto ask/, 'vgask'],
         [/vgq answer/, 'vgqanswer'],
@@ -677,6 +679,18 @@ http
           () => tool('web_read', { url: 'https://tea.example.com/guide' }),
           () => tool('vault_append', { path: 'Journal/Log.md', text: 'WEB-APPEND-4410' }),
           () => tool('vault_create_note', { path: 'Notes/WebMade.md', content: 'WEB-MADE-2203' }),
+          'Done.'
+        ],
+        // Reads a note, then changes an allowed one: a note in an allowed folder
+        // is trusted, any other note may hold pasted outside text.
+        vgreadgranted: [
+          () => tool('vault_read', { path: 'Journal/Log.md' }),
+          () => tool('vault_append', { path: 'Journal/Log.md', text: 'GRANTED-READ-3301' }),
+          'Done.'
+        ],
+        vgreadother: [
+          () => tool('vault_read', { path: 'Areas/README.md' }),
+          () => tool('vault_append', { path: 'Journal/Log.md', text: 'READ-OTHER-6602' }),
           'Done.'
         ],
         // An automation run that leaves a question, and the chat that asks it

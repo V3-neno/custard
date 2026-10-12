@@ -4,6 +4,7 @@ import {
   grantFor,
   modeAllows,
   normalizeGrants,
+  placeKind,
   protectedDepth
 } from './vaultGrants'
 
@@ -82,6 +83,8 @@ describe('protected places', () => {
     expect(protectedDepth('Custard/Skills/x/SKILL.md')).toBe(2)
     expect(protectedDepth('Custard/Captures/a.md')).toBe(2)
     expect(protectedDepth('Custard/Plugins/Spotify/Activity/a.md')).toBe(4)
+    expect(protectedDepth('Custard/Plugins/Spotify/Overview.md')).toBe(4)
+    expect(protectedDepth('Custard/Plugins/Spotify/Listening/Overview.md')).toBe(0)
     expect(protectedDepth('Custard/Plugins/Spotify/Listening/a.md')).toBe(0)
     expect(protectedDepth('Projects/a.md')).toBe(0)
   })
@@ -97,7 +100,7 @@ describe('protected places', () => {
     expect(grantFor([g('Custard/Plugins/Spotify')], 'Custard/Plugins/Spotify/Listening/a.md')).toBe(
       'edit'
     )
-    expect(grantFor([g('Custard')], 'Custard/Plugins/Spotify/Overview.md')).toBe('edit')
+    expect(grantFor([g('Custard')], 'Custard/Plugins/Spotify/Listening/a.md')).toBe('edit')
   })
   it('an explicit grant on the protected folder covers it', () => {
     expect(grantFor([g('Custard/Captures', 'append')], 'Custard/Captures/a.md')).toBe('append')
@@ -110,5 +113,40 @@ describe('protected places', () => {
   })
   it('case and trailing dots do not get around it', () => {
     expect(grantFor([g('Custard')], 'custard/SKILLS./x/SKILL.md')).toBeNull()
+    expect(grantFor([g('Custard')], 'custard/SKILLS./x/SKILL.md', true)).toBeNull()
+    expect(grantFor([g('Custard')], 'CUSTARD/plugins/x/OVERVIEW.MD', true)).toBeNull()
+  })
+  it('no grant can cover Overview.md, which is a note, not a folder', () => {
+    for (const f of [
+      'Custard',
+      'Custard/Plugins',
+      'Custard/Plugins/Spotify',
+      'Custard/Plugins/Spotify/Overview.md'
+    ])
+      expect(grantFor([g(f)], 'Custard/Plugins/Spotify/Overview.md')).toBeNull()
+  })
+})
+
+describe('separators and case', () => {
+  it('a backslash is not a separator in a vault path: it is part of a name', () => {
+    expect(grantFor([g('Notes')], 'Notes\\evil.md')).toBeNull()
+    expect(grantFor([g('Notes')], 'Notes/ok.md')).toBe('edit')
+    expect(protectedDepth('Custard\\Skills\\x')).toBe(0)
+  })
+  it('where the file system folds case, a grant covers any spelling; where it does not, only its own', () => {
+    expect(grantFor([g('Notes')], 'notes/a.md')).toBe('edit')
+    expect(grantFor([g('Notes')], 'Notes./a.md')).toBe('edit')
+    expect(grantFor([g('Notes')], 'notes/a.md', true)).toBeNull()
+    expect(grantFor([g('Notes')], 'Notes./a.md', true)).toBeNull()
+    expect(grantFor([g('Notes')], 'Notes/a.md', true)).toBe('edit')
+  })
+  it('placeKind says whose text a place holds', () => {
+    expect(placeKind('Custard/Memory.md')).toBe('own')
+    expect(placeKind('custard/skills/x/SKILL.md')).toBe('own')
+    expect(placeKind('Custard/Captures/a.md')).toBe('derived')
+    expect(placeKind('Custard/Plugins/Spotify/Activity/a.md')).toBe('derived')
+    expect(placeKind('Custard/Plugins/Spotify/Overview.md')).toBe('own')
+    expect(placeKind('Custard/Plugins/Spotify/Listening/a.md')).toBeNull()
+    expect(placeKind('Projects/a.md')).toBeNull()
   })
 })

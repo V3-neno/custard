@@ -58,6 +58,7 @@ import {
   vaultTools
 } from './vault'
 import { createGranted, previewChange } from './vault/edit'
+import { noteOutside, noteReadIsOutside, searchIsOutside } from './vault/outside'
 import { openQuestions } from './automations/questions'
 import {
   QUESTION_TOOL,
@@ -326,11 +327,15 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   let vaultPrompt: string | null = null
   if (vaultReady)
     try {
+      const recall = { outside: false }
       vaultPrompt = vaultSystemPrompt(
         vault,
         conversation.mode,
-        getMemorySettings().auto && !conversation.memory?.off
+        getMemorySettings().auto && !conversation.memory?.off,
+        recall
       )
+      // Captures made from chats that held outside text are in the prompt.
+      if (recall.outside) noteOutside(conversation, 'memory')
     } catch (err) {
       console.error('Vault prompt:', err)
     }
@@ -381,8 +386,10 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   // Notes about the plugins this message is about (at most two).
   if (vaultReady) {
     try {
-      const notes = pluginContext(vault, conversation, req.text, allPluginInfo())
+      const recall = { outside: false }
+      const notes = pluginContext(vault, conversation, req.text, allPluginInfo(), recall)
       if (notes) {
+        if (recall.outside) noteOutside(conversation, 'memory')
         system.push({ type: 'text', text: notes })
         injected.push('notes about your plugins')
       }
@@ -688,7 +695,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       }
       // The mode's protection is checked again on the real place the note
       // lands, just before it is created.
-      return runVaultTool(
+      const result = await runVaultTool(
         vault,
         c.name,
         c.input,
@@ -700,6 +707,15 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         },
         { grants, recordsDir: vaultEditsDir(), source: `chat ${conversation.id}` }
       )
+      // Notes the model reads can carry text from anywhere; see vault/outside.
+      if (!result.isError) {
+        const outsideRead =
+          c.name === 'vault_read'
+            ? noteReadIsOutside(vault, (c.input as { path?: unknown })?.path, grants)
+            : c.name === 'vault_search' && !result.isError && searchIsOutside(result.content)
+        if (outsideRead) noteOutside(conversation, 'notes')
+      }
+      return result
     }
     if (kindOf(c.name) === 'design')
       return runDesignTool(design(), c.name, c.input, {

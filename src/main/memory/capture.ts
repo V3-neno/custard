@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import type { CaptureJob, ChatMemory, Conversation, Provider } from '../../shared/chat'
 import type { MemorySettings } from '../../shared/memory'
+import { chatHasOutsideText } from '../../shared/outsideText'
 import {
   buildEvidence,
   eligible,
@@ -456,6 +457,8 @@ export class Capture {
           'custard-capture': jobId,
           chat: c.id,
           date: from.date,
+          // Later chats shown this note count as holding outside text.
+          outside: chatHasOutsideText(c) ? 'true' : 'false',
           ...(plugin ? { plugin } : {})
         }),
         { job: jobId, plugin }

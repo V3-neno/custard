@@ -195,6 +195,10 @@ export type Conversation = ConversationSummary & {
   // Open questions from automation runs shown to the model in this chat (ids).
   // Their text came from a run that read notes and plugin text.
   questions?: string[]
+  // Why the chat holds text Custard can't vouch for besides web and plugin
+  // results, which show in `actions`: it read notes it can't vouch for, or
+  // was shown captures made from chats that held outside text.
+  outside?: ('notes' | 'memory')[]
   // Where a provider's compaction summarized everything before message
   // `after`. The messages themselves are kept and shown in full.
   compactions?: Compaction[]

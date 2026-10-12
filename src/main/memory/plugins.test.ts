@@ -222,6 +222,29 @@ describe('retrieval', () => {
     expect(ctx).not.toContain('custard-capture')
   })
 
+  it('says when a note it shows was made from a chat that held outside text', () => {
+    ensurePluginFolder(vault, spotify())
+    const entry = (name: string, fm: string): void =>
+      write(
+        `Custard/Plugins/Spotify/Activity/2026-10-0${name} 1200 Chat.md`,
+        `---\ncustard-capture: "c${name}"\nplugin: "spotify"\n${fm}---\n\n## Preferences\n\n- Use the Desktop device.\n`
+      )
+    const ask = (): boolean => {
+      const recall = { outside: false }
+      pluginContext(vault, chat(), 'play something on spotify', [spotify()], recall)
+      return recall.outside
+    }
+    expect(ask()).toBe(false)
+    entry('1', 'outside: "false"\n')
+    expect(ask()).toBe(false)
+    entry('2', 'outside: "true"\n')
+    expect(ask()).toBe(true)
+    // Made before notes said so: nothing says it was clean.
+    rmSync(join(vault, 'Custard/Plugins/Spotify/Activity/2026-10-02 1200 Chat.md'))
+    entry('3', '')
+    expect(ask()).toBe(true)
+  })
+
   it('stays within its size limits', () => {
     ensurePluginFolder(vault, spotify())
     for (let n = 1; n <= 30; n++)

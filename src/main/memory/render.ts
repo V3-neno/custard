@@ -1,5 +1,6 @@
 import type { ActionStatus } from '../../shared/chat'
-import type { Evidence, EvidenceAction } from './evidence'
+import { redactSecrets } from '../automations/untrusted'
+import { redact, type Evidence, type EvidenceAction } from './evidence'
 import type { Requested, Summary } from './summarize'
 
 // Turns a summary into note text. Everything here is code: the model's words
@@ -47,14 +48,34 @@ const REQUESTED_WORDS: Record<Requested, string> = {
   unchecked: 'not checked: nothing looked afterwards'
 }
 
-// Model text can't start a heading, a list or a comment, or break out of
-// its line.
-export const plain = (s: string): string =>
-  s
-    .replace(/<!--|-->/g, '')
+// Model text can't start a heading, a list or a comment, break out of its
+// line, or carry a clickable link, a wikilink or something shaped like a key.
+// The text comes from a chat that may have held web or plugin results, and a
+// later chat reads this note as background, so a link planted in one chat
+// must not become a link in the vault. This is a backstop and a heuristic: it
+// removes the link syntaxes below (not every way to write an address) and
+// the key shapes `redact` knows.
+const LINK_SYNTAX = [
+  // ![[x]] and [[x|y]] keep the name, drop the link.
+  [/!?\[\[([^\]|#\n]*)(?:[#|][^\]\n]*)?\]\]/g, '$1'],
+  // [text](target) and ![alt](target) keep the text.
+  [/!?\[([^\]\n]*)\]\(\s*<?[^)\n]*\)/g, '$1'],
+  // <https://x> and HTML tags.
+  [/<\/?[a-z][^>\n]*>/gi, ''],
+  // Bare addresses with a scheme (https://, obsidian://, file://) or www.
+  [/\b[a-z][a-z0-9+.-]{1,20}:\/\/\S+/gi, '[link removed]'],
+  [/\b(?:mailto:|www\.)\S+/gi, '[link removed]']
+] as const
+
+export const plain = (s: string, max = 1000): string => {
+  let t = redactSecrets(redact(s)).replace(/<!--|-->/g, '')
+  for (const [re, to] of LINK_SYNTAX) t = t.replace(re, to)
+  t = t
     .replace(/\s+/g, ' ')
     .replace(/^[#>\s-]+/, '')
     .trim()
+  return t.length > max ? `${t.slice(0, max).trimEnd()}… [shortened]` : t
+}
 
 const num = (id: string): number => Number(id.slice(1))
 
@@ -115,9 +136,9 @@ export function render(
         plugin ? `- Plugin: ${plain(pluginName(plugin))}` : '',
         w.request ? `- Asked: ${plain(w.request)}` : '',
         actions.length ? "- Done (Custard's record of each action):" : '',
-        ...actions.map((a) => `  - ${plain(a.label)}: ${executionWords(a)}`),
+        ...actions.map((a) => `  - ${plain(a.label, 300)}: ${executionWords(a)}`),
         checks.length
-          ? `- Checked afterwards (${checks.map((a) => plain(a.label)).join(', ')}): ${w.observed ? plain(w.observed) : 'no summary of what it showed'}`
+          ? `- Checked afterwards (${checks.map((a) => plain(a.label, 300)).join(', ')}): ${w.observed ? plain(w.observed) : 'no summary of what it showed'}`
           : '- Checked afterwards: nothing checked it',
         `- Requested outcome: ${actions.length && !attempted ? 'not attempted' : REQUESTED_WORDS[requested]}`,
         w.uncertain ? `- Still unsure: ${plain(w.uncertain)}` : ''
