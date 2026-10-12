@@ -1,4 +1,6 @@
 import { SpotifyApiError, type SpotifyClient } from './client'
+import { observationClock } from './time'
+import { acceptedNote, verificationLine, verifyPlayback } from './verify'
 
 export type PlaybackDevice = {
   id?: string | null
@@ -12,7 +14,7 @@ export type PlaybackDevice = {
 export type PlaybackItem = {
   uri?: string
   name?: string
-  artists?: { name: string }[]
+  artists?: { name: string; id?: string }[]
   album?: { name?: string; images?: { url?: string }[] }
   external_urls?: { spotify?: string }
   duration_ms?: number | null
@@ -44,6 +46,7 @@ const commands = [...Object.keys(actionKeys), 'adjust_volume'] as PlaybackComman
 const fail = (content: string): Result => ({ content, isError: true })
 const validMs = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0
 const volume = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 100
+const ARTIST_ID = /^[0-9A-Za-z]{22}$/
 
 export function disallows(p: Player | null): Record<string, boolean> | null {
   const source = p?.actions?.disallows ?? p?.actions
@@ -54,6 +57,8 @@ export function disallows(p: Player | null): Record<string, boolean> | null {
 export type PlaybackMetadata = {
   schema_version: 1
   observed_at: string
+  observed_at_local: string | null
+  time_zone: string | null
   spotify_timestamp_ms: number | null
   playback_available: boolean
   currently_playing_type: string | null
@@ -64,6 +69,7 @@ export type PlaybackMetadata = {
   track: {
     title: string | null
     artists: string[]
+    artist_ids: (string | null)[]
     album: string | null
     cover_artwork_url: string | null
     uri: string | null
@@ -85,11 +91,13 @@ export type PlaybackMetadata = {
 }
 
 // An observation, not a continuously advancing clock or a promise that a write succeeds.
-export function playbackMetadata(p: Player | null, observedAt = new Date().toISOString()): PlaybackMetadata {
+// observed_at stays UTC; observed_at_local is added when the time zone is computable.
+export function playbackMetadata(p: Player | null, observedAt = new Date().toISOString(), timeZone?: string): PlaybackMetadata {
   const d = p?.device
   const item = p?.item
   const track = item?.uri?.startsWith('spotify:track:') ? item : null
   const flags = disallows(p)
+  const clock = observationClock(timeZone, Date.parse(observedAt))
   const availability = Object.fromEntries(commands.map((name) => {
     let available: boolean | null = null
     if (!d || d.is_active === false || d.is_restricted === true) available = false
@@ -100,6 +108,8 @@ export function playbackMetadata(p: Player | null, observedAt = new Date().toISO
   return {
     schema_version: 1,
     observed_at: observedAt,
+    observed_at_local: Number.isFinite(Date.parse(observedAt)) ? clock.fields.observed_at_local : null,
+    time_zone: clock.zone,
     spotify_timestamp_ms: validMs(p?.timestamp) ? p.timestamp : null,
     playback_available: p !== null,
     currently_playing_type: p?.currently_playing_type ?? (track ? 'track' : null),
@@ -110,6 +120,7 @@ export function playbackMetadata(p: Player | null, observedAt = new Date().toISO
     track: track ? {
       title: track.name ?? null,
       artists: (track.artists ?? []).map((artist) => artist.name),
+      artist_ids: (track.artists ?? []).map((artist) => (typeof artist.id === 'string' && ARTIST_ID.test(artist.id) ? artist.id : null)),
       album: track.album?.name ?? null,
       cover_artwork_url: track.album?.images?.find((image) => !!image.url)?.url ?? null,
       uri: track.uri ?? null,
@@ -182,6 +193,7 @@ export async function playbackCommand(deps: Deps, name: PlaybackCommand, input: 
       return { content: `No change needed: Spotify reports volume already at ${d.volume_percent}%. No volume command was sent.`, isError: false }
   }
   if (deps.signal?.aborted) return fail('Not run: playback command cancelled before sending.')
+  const sentAt = Date.now()
   try {
     // Deliberately no body on resume: no uris, context_uri, offset or position_ms.
     // No plugin retries, even for otherwise idempotent commands. The host may
@@ -193,8 +205,18 @@ export async function playbackCommand(deps: Deps, name: PlaybackCommand, input: 
     return fail(`Outcome unknown: ${name} was sent but ${err instanceof SpotifyApiError ? 'Spotify returned a server error' : 'the response was not received reliably'}. It may have taken effect. Check spotify__now_playing or ask the user before retrying; never blindly repeat next/previous. No automatic retry was performed.`)
   }
   const detail = name === 'adjust_volume' ? ` to ${query.volume_percent}%` : name === 'seek' ? ` to ${query.position_ms} ms` : ''
+  // Accepted (above) and verified (below) are separate facts. One follow-up read,
+  // never a retry, and it can never trigger another write.
+  const verification = await verifyPlayback(deps.client, deps.signal, name, p as Player, {
+    volume: query.volume_percent as number | undefined,
+    position: query.position_ms as number | undefined,
+    sentAt
+  })
   return {
-    content: `Spotify accepted ${name}${detail} on ${d.name ?? d.id}. Playback has not been verified. Use a separate spotify__now_playing observation to check; do not repeat the command just because state has not updated.`,
+    content: [
+      `Spotify accepted ${name}${detail} on ${d.name ?? d.id}. ${acceptedNote(verification)}`,
+      verificationLine(verification)
+    ].join('\n'),
     isError: false
   }
 }

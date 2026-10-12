@@ -18,13 +18,13 @@ const cases = [
 ]
 
 for (const example of cases) {
-  test(`${example.name}: one preflight, one authorized write, no fallback or verification claim`, async () => {
+  test(`${example.name}: one preflight, one authorized write, one follow-up read, no fallback or retry`, async () => {
     const { t, calls, ctx } = setup((c) => c.method === 'GET' ? json(200, player()) : json(204))
     const result = await t[example.name]({ ...example.input, device_id: 'desk' })
     assert.equal(result.isError, false)
     assert.match(result.content, /Spotify accepted/)
-    assert.match(result.content, /not been verified/)
-    assert.equal(calls.length, 2)
+    assert.match(result.content, /\nverification: (confirmed|not_observed|inconclusive|not_checked) — /)
+    assert.equal(calls.length, 3)
     assert.equal(calls[0].path, '/me/player')
     assert.equal(calls[0].method, 'GET')
     assert.equal(calls[1].path, `/me/player/${example.path}`)
@@ -32,6 +32,8 @@ for (const example of cases) {
     assert.equal(calls[1].query.get('device_id'), 'desk')
     assert.equal(calls[1].init.auth, true)
     assert.equal(calls[1].body, undefined)
+    assert.equal(calls[2].path, '/me/player', 'verification is a read, not a second write')
+    assert.equal(calls[2].method, 'GET')
     assert.deepEqual(ctx.opened, [])
   })
 }
@@ -44,9 +46,24 @@ test('manifest registers every handler and every new playback mutation is approv
     assert.equal(tool?.effect, 'write')
     assert.equal(tool?.inputSchema.additionalProperties, false)
   }
-  assert.deepEqual(manifest.auth.scopes, ['user-read-playback-state', 'user-read-currently-playing', 'user-modify-playback-state'])
+  assert.deepEqual(manifest.auth.scopes, [
+    'user-read-playback-state', 'user-read-currently-playing', 'user-modify-playback-state',
+    'user-read-recently-played', 'user-top-read'
+  ])
   assert.equal(manifest.permissions.storage, false)
   assert.deepEqual(manifest.permissions.network, ['api.spotify.com', 'accounts.spotify.com'])
+})
+
+test('the new history tools are read-only and nothing was added to the widget allowlist', () => {
+  for (const name of ['recently_played', 'top_items', 'artist_genres']) {
+    const tool = manifest.tools.find((entry) => entry.name === name)
+    assert(tool, `registered ${name}`)
+    assert.equal(tool?.effect, 'read')
+    assert.equal(tool?.inputSchema.additionalProperties, false)
+  }
+  assert.equal(manifest.tools.length, 16)
+  assert.deepEqual(manifest.widgets[0].tools, ['now_playing', 'pause_playback', 'resume_playback', 'next_track', 'seek', 'adjust_volume'])
+  assert.equal(manifest.tools.filter((tool) => tool.effect === 'write').length, 9)
 })
 
 test('all new public handlers work through the SDK context', async () => {
@@ -55,7 +72,7 @@ test('all new public handlers work through the SDK context', async () => {
     const r = await plugin.tools[example.name](example.input, ctx)
     assert(typeof r !== 'string')
     if (typeof r !== 'string') assert.equal(r.isError, false)
-    assert.equal(ctx.calls.length, 2)
+    assert.equal(ctx.calls.length, 3)
   }
 })
 
@@ -65,7 +82,8 @@ test('resume on a paused item sends no context, queue, offset or position', asyn
   await t.resume_playback({})
   assert.equal(calls[1].init.body, undefined)
   assert.equal(calls[1].query.toString(), 'device_id=desk')
-  assert.equal(calls.length, 2)
+  assert.equal(calls.length, 3)
+  assert.equal(calls.filter((c) => c.method !== 'GET').length, 1)
 })
 
 test('resume refuses absent item instead of starting a new context', async () => {
@@ -128,6 +146,7 @@ test('volume at limit is a no-op, not an API-accepted write', async () => {
   assert.equal(r.isError, false)
   assert.match(r.content, /No volume command was sent/)
   assert.notMatch(r.content, /accepted/)
+  assert.notMatch(r.content, /verification:/)
   assert.equal(calls.length, 1)
 })
 
@@ -196,17 +215,18 @@ for (const [status, reason, message, pattern] of [
   [404, 'NO_ACTIVE_DEVICE', '', /No active Spotify device/],
   [429, '', '', /Retry-After: 12 seconds/]
 ] as const) {
-  test(`write rejection ${status} ${reason || message}: clear failure, never retried`, async () => {
+  test(`write rejection ${status} ${reason || message}: clear failure, never retried, never verified`, async () => {
     const { t, calls } = setup((c) => c.method === 'GET' ? json(200, player()) : json(status, { error: { reason, message } }, { 'Retry-After': '12' }))
     const r = await t.next_track({})
     assert.equal(r.isError, true)
     assert.match(r.content, pattern)
     assert.match(r.content, /Spotify rejected/)
+    assert.notMatch(r.content, /verification:/)
     assert.equal(calls.length, 2)
   })
 }
 
-test('every new control reports uncertain writes without any replay or fallback', async () => {
+test('every new control reports uncertain writes without any replay, fallback or verification', async () => {
   for (const example of cases) {
     for (const status of [500, 502, 0]) {
       const { t, calls } = setup((c) => {
@@ -218,6 +238,7 @@ test('every new control reports uncertain writes without any replay or fallback'
       assert.equal(r.isError, true)
       assert.match(r.content, /^Outcome unknown:/)
       assert.match(r.content, /No automatic retry/)
+      assert.notMatch(r.content, /verification:/)
       assert.equal(calls.length, 2)
     }
   }

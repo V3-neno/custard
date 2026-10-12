@@ -1,6 +1,11 @@
 import { PluginError } from 'custard-plugin-sdk'
 import { SpotifyApiError, type SpotifyClient } from './client'
+import { artistGenres, recentlyPlayed, topItems } from './history'
 import { playbackCommand, playbackMetadata, type Player } from './playback'
+import {
+  acceptedNote, pause, readQueue, timing, verificationLine, verifyQueue, verifyTransfer,
+  type QueueEntryStatus
+} from './verify'
 
 // Opening, queueing, transferring and individual playback commands are separate.
 // None implicitly invokes another.
@@ -45,6 +50,8 @@ export type SpotifyDeps = {
   seen: SeenTracks
   openExternal: (url: string) => Promise<void>
   signal?: AbortSignal
+  // IANA zone for local times in results; UTC is always included.
+  timeZone?: string
 }
 export type ToolResult = { content: string; isError: boolean }
 const ok = (content: string): ToolResult => ({ content, isError: false })
@@ -72,7 +79,7 @@ async function search(deps: SpotifyDeps, input: Record<string, unknown>): Promis
 
 async function nowPlaying(deps: SpotifyDeps): Promise<ToolResult> {
   const p = await deps.client.request<Player>('GET', '/me/player', { idempotent: true })
-  const metadata = playbackMetadata(p)
+  const metadata = playbackMetadata(p, undefined, deps.timeZone)
   const lines: string[] = []
   // Preserve the existing human-readable lines, with an additive JSON snapshot.
   if (!p || !p.device) lines.push('Nothing is playing and no Spotify device is active.')
@@ -105,6 +112,13 @@ async function devices(deps: SpotifyDeps): Promise<ToolResult> {
 
 type QueueOutcome = { uri: string; status: 'queued' | 'failed' | 'unknown' | 'skipped'; note?: string }
 
+const entryText: Record<QueueEntryStatus, string> = {
+  new_entry_observed: 'new entry observed',
+  already_present_ambiguous: 'already present before, so a new entry cannot be told apart',
+  visible_no_baseline: 'visible, but no baseline was read, so it may have been there already',
+  not_visible: 'not visible (the visible queue shows only the next part; this does not mean it failed)'
+}
+
 // Ordered, non-retrying queue writes. Existing partial-success behavior retained.
 async function addToQueue(deps: SpotifyDeps, input: Record<string, unknown>): Promise<ToolResult> {
   const uris = Array.isArray(input.uris) ? input.uris : []
@@ -115,6 +129,8 @@ async function addToQueue(deps: SpotifyDeps, input: Record<string, unknown>): Pr
   if (invalid.length) return fail(`Not Spotify track URIs: ${invalid.join(', ')}. Nothing was queued.`)
   const unseen = (uris as string[]).filter((u) => !deps.seen.get(u))
   if (unseen.length) return fail(`These URIs didn't come from a Spotify search in this session: ${unseen.join(', ')}. Find them with spotify__search first. Nothing was queued.`)
+  // Best-effort read-only baseline so a later read can tell a new entry from one already there.
+  const baseline = deps.signal?.aborted ? null : await readQueue(deps.client)
   const outcomes: QueueOutcome[] = []
   let stopped: string | null = null
   for (const uri of uris as string[]) {
@@ -142,19 +158,36 @@ async function addToQueue(deps: SpotifyDeps, input: Record<string, unknown>): Pr
   }
   const queued = outcomes.filter((o) => o.status === 'queued').length
   let check = ''
+  let verification = ''
   if (queued > 0) {
-    try {
-      const q = await deps.client.request<{ queue?: { uri: string }[] }>('GET', '/me/player/queue', { idempotent: true })
-      const inQueue = new Set((q?.queue ?? []).map((t) => t.uri))
-      const shown = outcomes.filter((o) => o.status === 'queued' && inQueue.has(o.uri)).length
-      check = `Spotify's queue now lists ${shown} of the ${queued} accepted tracks${shown < queued ? ' (it only shows the next part of the queue, so the rest may still be further down)' : ''}.`
-    } catch { check = "Couldn't read the queue back to double-check." }
+    // One follow-up read after a short delay. Never a retry or another write.
+    const waited = await pause(timing.verifyDelayMs, deps.signal)
+    if (!waited) {
+      verification = verificationLine({ state: 'not_checked', detail: 'the call was cancelled before the follow-up queue read' })
+    } else {
+      try {
+        const q = await deps.client.request<{ queue?: { uri: string }[] }>('GET', '/me/player/queue', { idempotent: true })
+        const after = (q?.queue ?? []).map((t) => t.uri)
+        const inQueue = new Set(after)
+        const shown = outcomes.filter((o) => o.status === 'queued' && inQueue.has(o.uri)).length
+        check = `Spotify's queue now lists ${shown} of the ${queued} accepted tracks${shown < queued ? ' (it only shows the next part of the queue, so the rest may still be further down)' : ''}.`
+        const accepted = outcomes.filter((o) => o.status === 'queued').map((o) => o.uri)
+        const v = verifyQueue(accepted, baseline, after)
+        verification = [
+          verificationLine(v.verification),
+          ...v.entries.map((e) => `  - ${deps.seen.get(e.uri) ?? e.uri}: ${e.positions.length ? `position ${e.positions.join(', ')} in the visible queue; ` : ''}${entryText[e.status]}`)
+        ].join('\n')
+      } catch {
+        check = "Couldn't read the queue back to double-check."
+        verification = verificationLine({ state: 'inconclusive', detail: 'the follow-up queue read failed' })
+      }
+    }
   }
   const label: Record<QueueOutcome['status'], string> = { queued: 'added to queue', failed: 'not added', unknown: 'unknown', skipped: 'not attempted' }
   const lines = outcomes.map((o, i) => `${i + 1}. ${deps.seen.get(o.uri)}: ${label[o.status]}${o.note ? ` (${o.note})` : ''}`)
   const summary = queued === outcomes.length ? `All ${queued} tracks were accepted into the queue, in this order.` : `${queued} of ${outcomes.length} tracks were accepted into the queue.`
   return {
-    content: [summary, ...lines, stopped ? `Stopped: ${stopped}` : '', check,
+    content: [summary, ...lines, stopped ? `Stopped: ${stopped}` : '', check, verification,
       'Accepted means queued, not playing. Spotify does not guarantee order if other playback changes happen at the same time.'
     ].filter(Boolean).join('\n'),
     isError: queued === 0
@@ -179,7 +212,11 @@ async function transfer(deps: SpotifyDeps, input: Record<string, unknown>): Prom
   if (!device) return fail('That device is not available. List devices again with spotify__devices.')
   if (device.is_restricted) return fail(`${device.name} can't be controlled through the Web API.`)
   await deps.client.request('PUT', '/me/player', { body: { device_ids: [deviceId], play: input.play }, idempotent: true })
-  return ok(`Spotify accepted moving playback to ${device.name}${input.play ? ' and starting it' : ' without changing play/pause'}.`)
+  const verification = await verifyTransfer(deps.client, deps.signal, deviceId, input.play)
+  return ok([
+    `Spotify accepted moving playback to ${device.name}${input.play ? ' and starting it' : ' without changing play/pause'}. ${acceptedNote(verification)}`,
+    verificationLine(verification)
+  ].join('\n'))
 }
 
 export function tools(deps: SpotifyDeps): Record<string, (input: Record<string, unknown>) => Promise<ToolResult>> {
@@ -194,6 +231,9 @@ export function tools(deps: SpotifyDeps): Record<string, (input: Record<string, 
     search: wrap((i) => search(deps, i)),
     now_playing: wrap(() => nowPlaying(deps)),
     devices: wrap(() => devices(deps)),
+    recently_played: wrap((i) => recentlyPlayed(deps, i)),
+    top_items: wrap((i) => topItems(deps, i)),
+    artist_genres: wrap((i) => artistGenres(deps, i)),
     add_to_queue: wrap((i) => addToQueue(deps, i)),
     open: wrap((i) => open(deps, i)),
     transfer_playback: wrap((i) => transfer(deps, i)),
