@@ -207,9 +207,11 @@ function ChatView(props: Props): React.JSX.Element {
     [filter]
   )
 
+  // Also on opening History: chat notes finish after a turn, with the
+  // summary each row shows.
   useEffect(() => {
     refreshList()
-  }, [refreshList])
+  }, [refreshList, historyOpen])
 
   useEffect(
     () =>

@@ -254,7 +254,13 @@ export function parseHandoff(raw: string): HandoffSummary {
 
 export type HandoffSummarizer = (evidence: string, signal?: AbortSignal) => Promise<HandoffSummary>
 
-export function handoffSummarizer(provider: Provider, apiKey: string): HandoffSummarizer {
+// `system` swaps the instructions (chat notes use their own); the schema and
+// limits stay the same.
+export function handoffSummarizer(
+  provider: Provider,
+  apiKey: string,
+  system = HANDOFF_SYSTEM
+): HandoffSummarizer {
   const opts = { timeout: HANDOFF_LIMITS.timeoutMs, maxRetries: HANDOFF_LIMITS.retries }
   if (provider === 'openai') {
     const client = new OpenAI({ apiKey, ...opts, ...openaiEndpoint() })
@@ -262,7 +268,7 @@ export function handoffSummarizer(provider: Provider, apiKey: string): HandoffSu
       const r = await client.responses.create(
         {
           model: HANDOFF_MODELS.openai,
-          instructions: HANDOFF_SYSTEM,
+          instructions: system,
           input: evidence,
           max_output_tokens: HANDOFF_LIMITS.maxTokens,
           reasoning: { effort: 'low' },
@@ -283,7 +289,7 @@ export function handoffSummarizer(provider: Provider, apiKey: string): HandoffSu
       {
         model: HANDOFF_MODELS.claude,
         max_tokens: HANDOFF_LIMITS.maxTokens,
-        system: HANDOFF_SYSTEM,
+        system,
         messages: [{ role: 'user', content: evidence }],
         output_config: { format: { type: 'json_schema', schema: HANDOFF_SCHEMA } }
       },

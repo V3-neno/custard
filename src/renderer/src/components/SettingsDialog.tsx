@@ -107,7 +107,9 @@ function MemorySection(): React.JSX.Element {
           tests, failures) or that went on for a while, Custard makes one short summary with your
           provider&apos;s cheapest model and saves it as a new note in Custard/Captures in your
           vault. Small talk and plain questions aren&apos;t saved, and neither are keys, passwords,
-          note contents or web pages.
+          note contents or web pages. Each chat also gets one summary note in Custard/Chats (what it
+          was for, where it stands, what was decided), which Custard keeps up to date as the chat
+          goes on and stops updating once you change it.
         </span>
       </label>
       <p className="mt-2 text-xs text-ash-400">
@@ -117,8 +119,8 @@ function MemorySection(): React.JSX.Element {
       </p>
       <p className="mt-2 text-xs text-ash-400">
         {settings && !settings.auto
-          ? "Off: nothing new is saved, and waiting summaries are cancelled. Notes already in your vault stay until you edit them, and chats from while it was off aren't saved later."
-          : "To keep one chat out, start it as a Temporary chat from the top bar; Forget in History deletes a chat's notes. You can also turn it off for a plugin with Manage in Plugins mode. Edit or delete anything in your vault; what you delete is not added back."}
+          ? "Off: nothing new is saved, and waiting summaries and chat notes are cancelled. Notes already in your vault stay until you edit them, and chats from while it was off aren't saved later."
+          : "To keep one chat out, start it as a Temporary chat from the top bar; Forget in History deletes a chat's notes, its chat note included. You can also turn it off for a plugin with Manage in Plugins mode. Edit or delete anything in your vault; what you delete is not added back."}
       </p>
     </section>
   )

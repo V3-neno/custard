@@ -8,7 +8,7 @@ import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
-import { memory, registerMemoryHandlers } from './memory'
+import { chatNotes, memory, registerMemoryHandlers } from './memory'
 import { allowOnlyAppPage, handle } from './ipc'
 import { sameAppPage } from './appPage'
 import { pluginHost, protectedRoots, registerPluginHandlers, startPlugins } from './plugins'
@@ -113,6 +113,7 @@ app.whenReady().then(() => {
   handle('apiKey:set', (_, p: Provider, key: string) => {
     setApiKey(p, key)
     void memory().run()
+    void chatNotes().runAll()
   })
   handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
   handle('settings:get', () => getChatSettings())
@@ -145,6 +146,7 @@ app.whenReady().then(() => {
     if (!result.canceled && result.filePaths[0]) {
       setVaultPath(result.filePaths[0])
       void memory().run()
+      void chatNotes().runAll()
     }
     return vaultInfo()
   })
@@ -160,6 +162,7 @@ app.whenReady().then(() => {
     if (!result.canceled && result.filePaths[0]) {
       setVaultPath(createStarterVault(result.filePaths[0]))
       void memory().run()
+      void chatNotes().runAll()
     }
     return vaultInfo()
   })

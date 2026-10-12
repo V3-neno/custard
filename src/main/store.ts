@@ -51,7 +51,12 @@ export function listConversations(mode: Mode | null): ConversationSummary[] {
                 mode: c.mode,
                 title: c.title,
                 updatedAt: c.updatedAt,
-                ...(c.memory?.temporary ? { temporary: true } : {})
+                ...(c.memory?.temporary ? { temporary: true } : {}),
+                // Where the chat stands, from its note in Custard/Chats.
+                ...(c.chatNote?.state &&
+                (c.chatNote.status === 'saved' || c.chatNote.status === 'edited')
+                  ? { summary: c.chatNote.state }
+                  : {})
               }
             ]
           : []

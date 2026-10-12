@@ -18,6 +18,8 @@ import { Capture } from './capture'
 import { continuationsOf } from '../continue'
 import { ensurePluginFolder, type PluginInfo } from './plugins'
 import { summarizer } from './summarize'
+import { CHAT_NOTE_DELAY_MS, CHAT_NOTE_SYSTEM, ChatNotes } from '../chatNotes'
+import { handoffSummarizer } from '../handoff'
 
 let instance: Capture | null = null
 
@@ -90,11 +92,36 @@ export function memory(): Capture {
   return instance
 }
 
+let notesInstance: ChatNotes | null = null
+
+// The app's one queue of chat notes (Custard/Chats).
+export function chatNotes(): ChatNotes {
+  notesInstance ??= new ChatNotes({
+    load: getConversation,
+    update: updateConversation,
+    vaultPath: getVaultPath,
+    auto: () => getMemorySettings().auto,
+    summarizer: (provider) => {
+      const key = getApiKey(provider)
+      return key ? handoffSummarizer(provider, key, CHAT_NOTE_SYSTEM) : null
+    },
+    queueFile: join(app.getPath('userData'), 'chat-note-queue.json'),
+    // Tests set a short pause.
+    delayMs: () =>
+      (globalThis as { __custardChatNoteDelay?: number }).__custardChatNoteDelay ??
+      CHAT_NOTE_DELAY_MS
+  })
+  return notesInstance
+}
+
 export function registerMemoryHandlers(): void {
   handle('memory:getSettings', () => getMemorySettings())
   handle('memory:setSettings', (_, s: MemorySettings) => {
     setMemorySettings(s)
-    if (!s.auto) memory().cancelAll()
+    if (!s.auto) {
+      memory().cancelAll()
+      chatNotes().cancelAll()
+    }
   })
   handle(
     'memory:setChat',
@@ -128,6 +155,7 @@ export function registerMemoryHandlers(): void {
     }
     const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
     if (r.response !== 1) return getConversation(id)?.memory ?? null
+    for (const i of ids) chatNotes().forget(i)
     const left = ids.flatMap((i) => memory().forget(i).left)
     if (left.length)
       await dialog.showMessageBox({
@@ -137,6 +165,7 @@ export function registerMemoryHandlers(): void {
       })
     return getConversation(id)?.memory ?? null
   })
-  // Waiting captures from before a restart.
+  // Waiting captures and chat notes from before a restart.
   void memory().run()
+  void chatNotes().runAll()
 }

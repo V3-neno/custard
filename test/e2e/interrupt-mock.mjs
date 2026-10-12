@@ -6,6 +6,7 @@ import fs from 'fs'
 import { createHash } from 'crypto'
 const [, , OUT] = process.argv
 const anth = []
+const chatNotes = []
 const spotify = []
 const memory = []
 // Step 3: token counts, handoff summaries and the beta header of each chat request.
@@ -142,6 +143,38 @@ http
         return j(404, { error: { status: 404, message: 'nope' } })
       }
       const b = JSON.parse(body)
+      // A chat's summary note in Custard/Chats: no tools, JSON out. Recorded
+      // on its own so the chat's request list stays as the other tests expect.
+      if (typeof b.system === 'string' && b.system.startsWith('You summarize a chat for a note')) {
+        const evidence = String(b.messages[0].content)
+        chatNotes.push({ model: b.model, tools: b.tools ?? null, evidence })
+        fs.writeFileSync(OUT + '/chatnotes.json', JSON.stringify(chatNotes, null, 1))
+        if (/note fail test/.test(evidence))
+          return j(500, { type: 'error', error: { type: 'api_error', message: 'Internal error' } })
+        const n = chatNotes.length
+        return j(200, {
+          id: 'msg_chatnote',
+          type: 'message',
+          role: 'assistant',
+          model: b.model,
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 10 },
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                goal: 'Plan a calm evening playlist',
+                constraints: ['Ask before queueing anything'],
+                decisions: ['Keep it instrumental'],
+                // A link and markup the note must not keep.
+                open: ['Check [this](https://evil.example/x) **soon**'],
+                state: `Summary number ${n}: the playlist is half done.`
+              })
+            }
+          ]
+        })
+      }
       // The handoff for "Continue in a new chat": no tools, JSON out. Fails
       // for a chat meant to show a failed summary.
       if (typeof b.system === 'string' && b.system.startsWith('You write a handoff')) {

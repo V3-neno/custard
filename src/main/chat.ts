@@ -26,7 +26,7 @@ import {
   saveConversation,
   vaultEditsDir
 } from './store'
-import { allPluginInfo, memory } from './memory'
+import { allPluginInfo, chatNotes, memory } from './memory'
 import { pluginContext } from './memory/plugins'
 import { runOpenAI } from './openai'
 import { carriedContext, handoffSummarizer } from './handoff'
@@ -1052,7 +1052,10 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     active.delete(conversation.id)
     releaseConversation(conversation.id)
     // Memory capture looks at the chat after the turn; it only writes notes.
-    if (kept) memory().afterTurn(conversation, model.provider)
+    if (kept) {
+      memory().afterTurn(conversation, model.provider)
+      chatNotes().afterTurn(conversation, model.provider)
+    }
   }
 }
 

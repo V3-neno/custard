@@ -58,6 +58,8 @@ export type ConversationSummary = {
   mode: Mode
   title: string
   updatedAt: number
+  // Where the chat stands, from its summary note (History shows it).
+  summary?: string
   // A temporary chat: never remembered.
   temporary?: boolean
 }
@@ -154,6 +156,25 @@ export type ChatMemory = {
   job?: CaptureJob
 }
 
+// Each chat's compacted summary, kept as one note in Custard/Chats that
+// Custard rewrites as the chat goes on (see main/chatNotes).
+export type ChatNote = {
+  // Not written (yet), written, couldn't be written, not for this chat, or
+  // changed or deleted outside Custard, so Custard leaves it alone for good.
+  status: 'pending' | 'saved' | 'failed' | 'off' | 'edited' | 'deleted'
+  // Vault path, once written.
+  path?: string
+  // Messages the note covers.
+  upTo: number
+  // Of the text Custard last wrote, to tell when someone else changed it.
+  hash?: string
+  at: number
+  reason?: string
+  goal?: string
+  state?: string
+  provider?: Provider
+}
+
 // A chat that continues an earlier one that grew too long. The earlier chat
 // is left exactly as it was.
 export type Continuation = {
@@ -193,6 +214,8 @@ export type Conversation = ConversationSummary & {
   notices?: Notice[]
   sources?: WebSource[]
   memory?: ChatMemory
+  // Its summary note in Custard/Chats.
+  chatNote?: ChatNote
   continuedFrom?: Continuation
   // Open questions from automation runs shown to the model in this chat (ids).
   // Their text came from a run that read notes and plugin text.

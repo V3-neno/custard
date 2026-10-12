@@ -28,7 +28,12 @@ function HistoryDrawer(props: Props): React.JSX.Element {
   const { onForget, onClose } = props
   const [find, setFind] = useState('')
   const q = find.trim().toLowerCase()
-  const shown = q ? conversations.filter((c) => c.title.toLowerCase().includes(q)) : conversations
+  // Finds by title, and by where the chat stands (from its note).
+  const shown = q
+    ? conversations.filter(
+        (c) => c.title.toLowerCase().includes(q) || !!c.summary?.toLowerCase().includes(q)
+      )
+    : conversations
   const label = (m: Mode): string => modes.find((x) => x.id === m)?.label ?? m
   const filterChip = (on: boolean): string =>
     `rounded-full px-2.5 py-0.5 text-xs transition-colors ${
@@ -108,6 +113,11 @@ function HistoryDrawer(props: Props): React.JSX.Element {
             >
               <button onClick={() => onOpen(c.id)} className="min-w-0 flex-1 px-3 py-2.5 text-left">
                 <div className="truncate text-sm">{c.title}</div>
+                {c.summary && (
+                  <div className="line-clamp-2 text-xs text-ash-400" data-chat-summary>
+                    {c.summary}
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5 text-xs text-ash-500">
                   {when(c.updatedAt)}
                   {!filter && <span>· {label(c.mode)}</span>}

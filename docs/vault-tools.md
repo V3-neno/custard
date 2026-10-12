@@ -181,7 +181,7 @@ cover. The mode's own protection still applies: Chat and Design can't change
 skills or plugin files, whatever the grants say.
 
 **Protected places.** A grant on a parent folder does not cover
-`Custard/Skills`, `Custard/Captures`, `Custard/Plugins/<plugin>/Activity`,
+`Custard/Skills`, `Custard/Captures`, `Custard/Chats`, `Custard/Plugins/<plugin>/Activity`,
 `Custard/Plugins/<plugin>/Overview.md` or `Custard/Memory.md`. A grant covers a
 folder among them only when it names that folder (or something inside it).
 `Memory.md` and `Overview.md` are files, so no folder grant can name them.
@@ -237,8 +237,8 @@ edit) shows the approval card with what would change, for the rest of that chat:
   something the user pasted. A search that finds something counts. This is a rule
   about where a note is, not about what it says; a granted folder the user pastes
   web text into is still trusted by it. Listing a folder doesn't count (names
-  only). Captures and plugin activity always count, even under a grant that names
-  them.
+  only). Captures, chat notes and plugin activity always count, even under a
+  grant that names them.
 - A chat shown captures that were made from a chat with outside text counts.
   New captures say so in their frontmatter (`outside: "true"` or `"false"`); a
   capture without the field (made before it existed, or edited) is treated as
@@ -251,8 +251,8 @@ edit) shows the approval card with what would change, for the rest of that chat:
   the whole chat, and a call that would be refused is refused without a card.
 - Unattended automations are not chats and stay card-free; they rely on the
   hostile-text controls of Step 5.
-- `Custard/Memory.md` can't be allowed (it is a file), and Skills and Captures
-  stay protected under a parent grant. There is no way to grant them by accident.
+- `Custard/Memory.md` can't be allowed (it is a file), and Skills, Captures and
+  Chats stay protected under a parent grant. There is no way to grant them by accident.
 
 **Capture text.** What the summarizer writes into a capture note (preferences,
 decisions, titles, uncertainties, and action labels, which are cut at 300
