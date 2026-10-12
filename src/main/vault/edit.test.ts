@@ -17,6 +17,7 @@ import { extensionRefusal, extensionTarget } from '../modes/extensions'
 import {
   applyEdits,
   EDIT_LIMITS,
+  KEEP_RECORDS,
   listEdits,
   previewChange,
   summarizeChange,
@@ -417,9 +418,9 @@ describe('undo', () => {
     await run(CREATE, 'vault_create_note', { path: 'Notes/n.md', content: 'x' })
     expect(undoEdit(vault, records, listEdits(records)[0].id).ok).toBe(false)
     note('Notes/a.md', 'one\n')
-    for (let i = 0; i < 55; i++)
+    for (let i = 0; i < KEEP_RECORDS + 5; i++)
       await run(APPEND, 'vault_append', { path: 'Notes/a.md', text: `l${i}` })
-    expect(listEdits(records).length).toBe(50)
+    expect(listEdits(records).length).toBe(KEEP_RECORDS)
   })
 })
 

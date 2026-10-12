@@ -906,6 +906,50 @@ export class PluginHost {
     return { tools, snapshot, instructions }
   }
 
+  // The read tools of the listed plugins, for an unattended run. A plugin that
+  // is off, changed, missing a permission or not opted in to Chat and Design
+  // is reported in `unavailable` rather than skipped silently. Write tools are
+  // never offered here, and the snapshot holds nothing else, so a call to one
+  // is refused when it comes to run.
+  readToolSet(ids: string[]): {
+    tools: BetaTool[]
+    snapshot: ToolSnapshot
+    instructions: string[]
+    unavailable: string[]
+  } {
+    const tools: BetaTool[] = []
+    const snapshot: ToolSnapshot = new Map()
+    const instructions: string[] = []
+    const unavailable: string[] = []
+    for (const id of ids) {
+      try {
+        const st = this.d.store.state(id)
+        if (!st.enabled || !st.active) throw new Error('off')
+        const { manifest, instructions: text } = this.build(id, st.active.buildId)
+        if (permissionsOf(manifest).some((p) => !st.granted.includes(p))) throw new Error('perm')
+        if (chatDesignState(manifest, st.chatDesign) !== 'on') throw new Error('chat')
+        const media = mediaTools(manifest)
+        for (const t of manifest.tools) {
+          if (t.effect !== 'read' || media.has(t.name)) continue
+          const name = fullToolName(id, t.name)
+          tools.push({
+            name,
+            description: `[${manifest.name} plugin] ${t.description}`,
+            input_schema: t.inputSchema as BetaTool['input_schema']
+          })
+          snapshot.set(name, { pluginId: id, buildId: st.active.buildId })
+        }
+        if (text.trim())
+          instructions.push(
+            `<plugin name="${manifest.name}" tools="${id}__*">\n${text.trim()}\n</plugin>`
+          )
+      } catch {
+        unavailable.push(id)
+      }
+    }
+    return { tools, snapshot, instructions, unavailable }
+  }
+
   // Widgets the assistant may show now in a conversation of this mode:
   // declared by an enabled plugin's active build and approved by the user.
   widgetCatalog(mode: Mode): {

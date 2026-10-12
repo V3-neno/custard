@@ -1,3 +1,4 @@
+import { registerAutomationHandlers, startAutomations, stopAutomations } from './automations'
 import { app, dialog, shell, BrowserWindow } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
@@ -166,6 +167,7 @@ app.whenReady().then(() => {
     listEdits(vaultEditsDir()).map((r) => ({
       id: r.id,
       time: r.time,
+      source: r.source,
       kind: r.kind,
       path: r.path,
       change: r.change,
@@ -192,10 +194,13 @@ app.whenReady().then(() => {
   registerMemoryHandlers()
   registerWidgetHandlers()
   registerDesignHandlers()
+  registerAutomationHandlers()
 
   createWindow()
   // Plugins start after the window so a slow plugin can't delay the app.
   void startPlugins()
+  // Scheduled runs happen only while Custard is open.
+  startAutomations()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
@@ -215,7 +220,10 @@ app.on('browser-window-created', (_, win) => {
   })
 })
 
-app.on('before-quit', () => pluginHost().shutdown())
+app.on('before-quit', () => {
+  stopAutomations()
+  pluginHost().shutdown()
+})
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

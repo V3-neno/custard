@@ -137,7 +137,7 @@ export function toInput(messages: BetaMessageParam[]): ResponseInputItem[] {
 }
 
 // The parts of an OpenAI reply that are worth keeping, as Claude-format blocks.
-function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
+export function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
   const blocks: BetaContentBlockParam[] = []
   for (const item of output) {
     if (item.type === 'message') {

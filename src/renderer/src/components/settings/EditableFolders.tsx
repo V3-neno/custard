@@ -18,6 +18,8 @@ export default function EditableFolders(): React.JSX.Element {
     window.custard.vault.edits().then(setEdits)
   }, [])
   useEffect(refresh, [refresh])
+  // An automation's run adds to the list.
+  useEffect(() => window.custard.automations.onChanged(refresh), [refresh])
 
   const save = async (next: VaultGrant[]): Promise<boolean> => {
     setError(null)
@@ -133,6 +135,9 @@ export default function EditableFolders(): React.JSX.Element {
                   <span className="min-w-0 flex-1 truncate">
                     {e.kind === 'create' ? 'Created' : e.kind === 'append' ? 'Added to' : 'Edited'}{' '}
                     {e.path}
+                    {e.source.startsWith('automation') && (
+                      <span className="text-xs text-ash-500"> (automation)</span>
+                    )}
                   </span>
                   <span className="text-xs text-ash-500">
                     {new Date(e.time).toLocaleString(undefined, {

@@ -6,6 +6,7 @@ import type { MemorySettings } from '../../../shared/memory'
 import PluginsTab from './settings/PluginsTab'
 import DesignTab from './settings/DesignTab'
 import EditableFolders from './settings/EditableFolders'
+import Automations from './settings/Automations'
 import { cleanError, primary, secondary } from './settings/ui'
 
 type Props = { onClose: () => void; onChanged: () => void }
@@ -287,6 +288,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
                 </div>
               )}
               {vault && <EditableFolders />}
+              {vault && <Automations />}
               {added && <p className="mt-2 text-xs text-ash-400">{added}</p>}
               {vaultError && <p className="mt-2 text-sm text-ember-600">{vaultError}</p>}
             </section>

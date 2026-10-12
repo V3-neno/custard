@@ -232,7 +232,8 @@ export type EditRecord = {
   undone?: number
 }
 
-const KEEP_RECORDS = 50
+// Chats and automations share this list.
+export const KEEP_RECORDS = 200
 
 const recordFile = (dir: string, id: string): string => join(dir, `${id}.json`)
 

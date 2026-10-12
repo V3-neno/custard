@@ -23,6 +23,7 @@ import type { SecurityDefaults } from '../shared/plugins'
 import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import { defaultMemorySettings, type MemorySettings } from '../shared/memory'
 import { normalizeGrants, type VaultGrant } from '../shared/vaultGrants'
+import { normalizeAutomations, type Automation } from '../shared/automations'
 
 // Conversations are plain JSON files in the app's data folder, one per chat.
 const dir = (): string => {
@@ -148,6 +149,7 @@ type Config = {
   security: SecurityDefaults
   memory: MemorySettings
   vaultGrants: VaultGrant[]
+  automations: Automation[]
 }
 
 const defaultSecurity: SecurityDefaults = { askBeforeWriteTools: true }
@@ -164,7 +166,8 @@ function readConfig(): Config {
     vaultPath: raw.vaultPath ?? null,
     security: { ...defaultSecurity, ...raw.security },
     memory: { ...defaultMemorySettings, ...raw.memory },
-    vaultGrants: normalizeGrants(raw.vaultGrants).grants
+    vaultGrants: normalizeGrants(raw.vaultGrants).grants,
+    automations: normalizeAutomations(raw.automations)
   }
 }
 
@@ -196,3 +199,9 @@ export const setVaultGrants = (grants: unknown): VaultGrant[] => {
 
 // Where the record of Claude's changes to notes is kept: app data, not the vault.
 export const vaultEditsDir = (): string => join(app.getPath('userData'), 'vault-edits')
+
+// Automations the user created in Settings, and where their run records go.
+export const getAutomations = (): Automation[] => readConfig().automations
+export const setAutomations = (automations: Automation[]): void =>
+  writeConfig({ automations: normalizeAutomations(automations) })
+export const automationRunsDir = (): string => join(app.getPath('userData'), 'automation-runs')

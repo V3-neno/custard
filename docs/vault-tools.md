@@ -183,10 +183,10 @@ isn't `key: value` all write nothing. The frontmatter check is a heuristic,
 not a YAML parser. The note is replaced with an atomic write, after the
 version is checked again just before.
 
-**Record and undo.** Each change in an allowed folder (including a new note)
+**Record and undo.** Each change in an allowed folder, from a chat or an automation, (including a new note)
 is listed under Settings → Recent changes, with what changed. The previous
 text of an appended or edited note is kept in Custard's app data (not in the
-vault, so nothing hidden syncs), for the newest 50 changes. **Undo** restores
+vault, so nothing hidden syncs), for the newest 200 changes (shared with automations; see automations.md). **Undo** restores
 it only if the note is still exactly as the edit left it; otherwise the note
 is left alone. A created note has no undo, because nothing is ever deleted.
 

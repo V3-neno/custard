@@ -14,6 +14,7 @@ import type {
 } from '../shared/chat'
 import type { VaultEditEntry, VaultInfo } from '../shared/vault'
 import type { VaultGrant } from '../shared/vaultGrants'
+import type { AutomationView } from '../shared/automations'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision } from '../shared/chat'
@@ -48,6 +49,21 @@ const custard = {
   settings: {
     get: (): Promise<ChatSettings> => ipcRenderer.invoke('settings:get'),
     set: (s: ChatSettings): Promise<void> => ipcRenderer.invoke('settings:set', s)
+  },
+  automations: {
+    list: (): Promise<AutomationView[]> => ipcRenderer.invoke('automations:list'),
+    save: (a: unknown): Promise<{ ok: true; id: string } | { ok: false; problem: string }> =>
+      ipcRenderer.invoke('automations:save', a),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('automations:delete', id),
+    setEnabled: (id: string, enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke('automations:setEnabled', id, enabled),
+    resume: (id: string): Promise<void> => ipcRenderer.invoke('automations:resume', id),
+    runNow: (id: string): Promise<boolean> => ipcRenderer.invoke('automations:runNow', id),
+    onChanged: (cb: () => void): (() => void) => {
+      const h = (): void => cb()
+      ipcRenderer.on('automations:changed', h)
+      return () => ipcRenderer.removeListener('automations:changed', h)
+    }
   },
   vault: {
     get: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:get'),

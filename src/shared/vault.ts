@@ -6,6 +6,8 @@ export type VaultEditEntry = {
   time: number
   kind: 'create' | 'append' | 'edit'
   path: string
+  // Who made it: a chat, or an automation.
+  source: string
   change?: { removed: string; added: string; truncated: boolean }
   undoable: boolean
   undone: boolean

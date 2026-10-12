@@ -1186,6 +1186,41 @@ export default defineWidget({ mount(root) { root.textContent = 'board-7712' } })
   })
 })
 
+describe('readToolSet (unattended runs)', () => {
+  it('offers read tools only, after Use in Chat and Design, and says what is unavailable', async () => {
+    writePlugin({})
+    await activate()
+    const before = host.readToolSet(['demo', 'nope'])
+    expect(before.tools).toEqual([])
+    expect(before.unavailable.sort()).toEqual(['demo', 'nope'])
+    host.setChatDesign('demo', true)
+    const set = host.readToolSet(['demo'])
+    expect(set.unavailable).toEqual([])
+    expect(set.tools.map((t) => t.name)).toContain('demo__echo')
+    const writes = host
+      .status('demo')
+      .tools.filter((t) => t.effect === 'write')
+      .map((t) => t.fullName)
+    expect(writes.length).toBeGreaterThan(0)
+    for (const w of writes) {
+      expect(set.tools.map((t) => t.name)).not.toContain(w)
+      expect(set.snapshot.has(w)).toBe(false)
+    }
+    // A write tool called anyway is refused, not run.
+    const r = await host.invoke(
+      writes[0],
+      {},
+      {
+        snapshot: set.snapshot,
+        signal: new AbortController().signal,
+        approve: async () => true,
+        mode: 'chat'
+      }
+    )
+    expect(r).toMatchObject({ isError: true, outcome: 'not-run' })
+  })
+})
+
 describe('Use in Chat and Design', () => {
   const chatInvoke = (
     name: string,

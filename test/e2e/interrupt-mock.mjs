@@ -312,6 +312,7 @@ http
         [/vgrant protected/, 'vgprotected'],
         [/vgrant newoutside/, 'vgnewoutside'],
         [/vgrant web/, 'vgweb'],
+        [/vgauto/, 'vgauto'],
         [/fs write test/, 'fswrite'],
         [/forged test/, 'forged'],
         [/note test/, 'note'],
@@ -673,6 +674,13 @@ http
           () => tool('vault_append', { path: 'Journal/Log.md', text: 'WEB-APPEND-4410' }),
           () => tool('vault_create_note', { path: 'Notes/WebMade.md', content: 'WEB-MADE-2203' }),
           'Done.'
+        ],
+        // An unattended automation run (test/e2e/automations.mjs).
+        vgauto: [
+          () => tool('vault_read', { path: 'Notes/Plan.md' }),
+          () => tool('vault_append', { path: 'Notes/Plan.md', text: 'AUTO-LINE-6102' }),
+          () => tool('vault_create_note', { path: 'Inbox/Nope.md', content: 'NOPE-NOTE' }),
+          'Logged one line; the inbox note was refused.'
         ],
         vgnewoutside: [
           () => tool('vault_create_note', { path: 'Inbox/Outside.md', content: 'OUTSIDE-NOTE' }),
