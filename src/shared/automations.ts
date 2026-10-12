@@ -155,6 +155,8 @@ export type RunRecord = {
   kind: 'scheduled' | 'manual'
   // The slot it ran for, as local "YYYY-MM-DDTHH:MM" (scheduled runs).
   slot?: string
+  // The same slot as an instant (epoch ms); older records only have the label.
+  slotAt?: number
   // The slot was missed and this is its late run.
   catchUp?: boolean
   startedAt: number
@@ -193,6 +195,9 @@ export type AutomationView = {
 
 // What a run is told about itself, as JSON, in the names the user confirmed.
 // The skill decides what a window means and can record "data unavailable".
+// `local` is ISO 8601 with the offset then ("2026-10-25T02:30+01:00"), so a
+// repeated hour when clocks go back is two different values; `utc` is the same
+// instant.
 export type When = { local: string; utc: string }
 export type RunContext = {
   scheduled_for: When
@@ -207,7 +212,8 @@ export type RunContext = {
   time_zone: string
   // Set when the time of day this slot was configured for does not exist on
   // that date (the clocks jump over it). The run is at the moment they jump,
-  // which is what scheduled_for says; this is the time that was configured.
+  // which is what scheduled_for says; this is the time that was configured,
+  // with the offset in force just before the jump.
   configured_local_time?: string
 }
 

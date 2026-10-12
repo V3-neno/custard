@@ -3,7 +3,12 @@ import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { checkAutomation, type Automation } from '../../shared/automations'
+import {
+  checkAutomation,
+  type Automation,
+  type RunContext,
+  type RunRecord
+} from '../../shared/automations'
 import type { VaultGrant } from '../../shared/vaultGrants'
 import { listSkills } from '../vault'
 import { versionOf } from '../vault/read'
@@ -258,12 +263,15 @@ describe('a time the clocks jump over', () => {
       Date.parse('2026-03-29T12:00:00Z')
     )
     const ctx = buildContext(a, { slot, now: slot.instant, catchUp: false, folded: [], runs: [] })
-    expect(ctx.scheduled_for).toEqual({ local: '2026-03-29T03:00', utc: '2026-03-29T01:00:00Z' })
-    expect(ctx.configured_local_time).toBe('2026-03-29T02:30')
+    expect(ctx.scheduled_for).toEqual({
+      local: '2026-03-29T03:00+02:00',
+      utc: '2026-03-29T01:00:00Z'
+    })
+    expect(ctx.configured_local_time).toBe('2026-03-29T02:30+01:00')
     const m = script([{ text: 'ok', calls: [] }])
     await runAutomation(a, slot.label, new AbortController().signal, deps(m.step), ctx)
     expect(m.seen[0].system).toContain(
-      'Scheduled for 2026-03-29 03:00 (Europe/Stockholm); 2026-03-29 02:30 did not exist that day because the clocks jumped, so this runs when they jump.'
+      'Scheduled for 2026-03-29 03:00+02:00 (Europe/Stockholm); 2026-03-29 02:30+01:00 did not exist that day because the clocks jumped, so this runs when they jump.'
     )
     expect(JSON.stringify(m.seen[0].messages[0])).toContain('configured_local_time')
   })
@@ -278,7 +286,51 @@ describe('a time the clocks jump over', () => {
     expect(ctx.configured_local_time).toBeUndefined()
     const m = script([{ text: 'ok', calls: [] }])
     await runAutomation(a, slot.label, new AbortController().signal, deps(m.step), ctx)
-    expect(m.seen[0].system).toContain('Scheduled for 2026-03-29 08:00 (Europe/Stockholm). ')
+    expect(m.seen[0].system).toContain('Scheduled for 2026-03-29 08:00+02:00 (Europe/Stockholm). ')
+  })
+})
+
+describe('offsets in the run context', () => {
+  const stockholm = auto({ times: ['02:30'], timezone: 'Europe/Stockholm' })
+  it('runs a repeated hour once, at its first pass, and says which pass by offset', () => {
+    const slots = slotsBetween(
+      stockholm,
+      Date.parse('2026-10-24T12:00:00Z'),
+      Date.parse('2026-10-25T12:00:00Z')
+    )
+    const ctx = slots.map((slot) =>
+      buildContext(stockholm, { slot, now: slot.instant, catchUp: false, folded: [], runs: [] })
+    )
+    expect(ctx.map((c) => c.scheduled_for.local)).toEqual(['2026-10-25T02:30+02:00'])
+    // A time that happens twice runs once, at its first pass; its window still
+    // says which pass by offset.
+    expect(ctx[0].scheduled_for.utc).toBe('2026-10-25T00:30:00Z')
+  })
+  it('gives the last success its slot with an offset, from the instant or from an old record', () => {
+    const base = {
+      id: 'r',
+      automationId: 'a1',
+      kind: 'scheduled' as const,
+      startedAt: 0,
+      endedAt: Date.parse('2026-07-01T09:00:00Z'),
+      status: 'completed' as const,
+      calls: [],
+      changes: []
+    }
+    const slot = slotsBetween(
+      stockholm,
+      Date.parse('2026-07-02T00:00:00Z'),
+      Date.parse('2026-07-03T00:00:00Z')
+    )[0]
+    const ctx = (runs: RunRecord[]): RunContext =>
+      buildContext(stockholm, { slot, now: slot.instant, catchUp: false, folded: [], runs })
+    expect(
+      ctx([{ ...base, slot: '2026-07-01T02:30', slotAt: Date.parse('2026-07-01T00:30:00Z') }])
+        .last_successful_run?.slot
+    ).toBe('2026-07-01T02:30+02:00')
+    expect(ctx([{ ...base, slot: '2026-07-01T02:30' }]).last_successful_run?.slot).toBe(
+      '2026-07-01T02:30+02:00'
+    )
   })
 })
 

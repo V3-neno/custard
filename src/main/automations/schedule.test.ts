@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { localDay, slotsBetween, zonedInstant } from './schedule'
+import { isoLocal, localDay, slotsBetween, zonedInstant } from './schedule'
 
 const utc = (s: string): number => Date.parse(s)
 const labels = (a: Parameters<typeof slotsBetween>[0], from: string, to: string): string[] =>
@@ -147,5 +147,23 @@ describe('localDay', () => {
   it('names the day in the zone', () => {
     expect(localDay(utc('2026-05-01T20:00:00Z'), 'Asia/Tokyo')).toBe('2026-05-02')
     expect(localDay(utc('2026-05-01T20:00:00Z'), 'UTC')).toBe('2026-05-01')
+  })
+})
+
+describe('local times with their offset', () => {
+  const at = (iso: string, tz: string): string => isoLocal(Date.parse(iso), tz)
+  it('writes the offset in force at that instant, in half-hour and negative zones too', () => {
+    expect(at('2026-03-01T08:00:00Z', 'UTC')).toBe('2026-03-01T08:00+00:00')
+    expect(at('2026-07-01T08:00:00Z', 'Europe/Stockholm')).toBe('2026-07-01T10:00+02:00')
+    expect(at('2026-01-01T08:00:00Z', 'Europe/Stockholm')).toBe('2026-01-01T09:00+01:00')
+    expect(at('2026-01-01T08:00:00Z', 'Asia/Kolkata')).toBe('2026-01-01T13:30+05:30')
+    expect(at('2026-01-01T08:00:00Z', 'America/St_Johns')).toBe('2026-01-01T04:30-03:30')
+    expect(at('2026-07-01T08:00:00Z', 'America/St_Johns')).toBe('2026-07-01T05:30-02:30')
+    expect(at('2026-01-01T08:00:00Z', 'Australia/Lord_Howe')).toBe('2026-01-01T19:00+11:00')
+  })
+  it('tells the two passes of a repeated hour apart', () => {
+    // Stockholm goes back at 03:00 local on 2026-10-25: 02:30 happens twice.
+    expect(at('2026-10-25T00:30:00Z', 'Europe/Stockholm')).toBe('2026-10-25T02:30+02:00')
+    expect(at('2026-10-25T01:30:00Z', 'Europe/Stockholm')).toBe('2026-10-25T02:30+01:00')
   })
 })

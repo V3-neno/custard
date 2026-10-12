@@ -41,7 +41,7 @@ export function localParts(instant: number, tz: string): Local {
 }
 
 // The zone's offset from UTC at an instant, in ms (positive east of UTC).
-function offsetAt(instant: number, tz: string): number {
+export function offsetAt(instant: number, tz: string): number {
   const l = localParts(instant, tz)
   return Date.UTC(l.y, l.m - 1, l.d, l.h, l.mi) - Math.floor(instant / 60000) * 60000
 }
@@ -80,6 +80,18 @@ export const zonedInstant = (l: Local, tz: string): number => zonedMoment(l, tz)
 const pad = (n: number): string => String(n).padStart(2, '0')
 export const slotLabel = (l: Local): string =>
   `${l.y}-${pad(l.m)}-${pad(l.d)}T${pad(l.h)}:${pad(l.mi)}`
+
+// An offset as ISO 8601 writes it: +02:00, -03:30, +00:00 for UTC.
+export function isoOffset(ms: number): string {
+  const min = Math.round(ms / 60000)
+  const a = Math.abs(min)
+  return `${min < 0 ? '-' : '+'}${pad(Math.floor(a / 60))}:${pad(a % 60)}`
+}
+
+// The wall time at an instant with the zone's offset then ("2026-10-25T02:30+01:00"),
+// so the repeated hour when clocks go back reads as two different moments.
+export const isoLocal = (instant: number, tz: string): string =>
+  `${slotLabel(localParts(instant, tz))}${isoOffset(offsetAt(instant, tz))}`
 
 // `shifted`: the time of day does not exist on that date, so the slot runs when
 // the clocks jump (its label is still the time that was configured).

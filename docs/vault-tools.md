@@ -143,7 +143,10 @@ past 20, a long passage or summary) and a web page (links past 50).
 - **Injected memory is bounded, never silently cut:**
   - **`Memory.md`** over 12,000 characters keeps its first ~4,000 and its newest
     end. A marker gives the exact character range left out and the `vault_read`
-    offset to read it.
+    offset to read it. **`Memory.md` should record a time zone name
+    (`Europe/Stockholm`), not an offset (`UTC+2`)**: an offset goes out of date
+    when the clocks change, and nothing in Custard rewrites a stored one (the
+    chat is told the zone by name and trusts that over a note's offset).
   - **Capture items and older capture notes** left out for length are counted,
     with how to find them (`vault_search folder:Custard/Captures`).
   - **Skills** beyond 60 are counted, with how to list them.
