@@ -179,7 +179,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
       setAdded(
         r.added.length
           ? `Added ${r.added.join(', ')}`
-          : 'Your vault already has every starter skill.'
+          : 'Your vault already has every starter skill and Custard reference note.'
       )
     } catch (e) {
       setVaultError(cleanError(e))
@@ -265,9 +265,9 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
                     <button
                       onClick={addSkills}
                       className={secondary}
-                      title="Copies starter skills you don't have yet. Nothing is overwritten."
+                      title="Copies starter skills and the Custard reference notes (Resources) you don't have yet. Nothing is overwritten."
                     >
-                      Add missing starter skills
+                      Add missing starter skills and notes
                     </button>
                     <button
                       onClick={clearVault}
