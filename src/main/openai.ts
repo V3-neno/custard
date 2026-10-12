@@ -24,8 +24,13 @@ import {
 } from './compaction'
 import { compactTrigger, estimateTokens, openaiCounter } from './context'
 import { openaiEndpoint } from './endpoints'
+import type { TokenUsage } from '../shared/pricing'
+import { fromOpenAI } from './usage'
 
 type Emit = (e: ChatEvent) => void
+
+const searchesIn = (output: ResponseOutputItem[]): number =>
+  output.filter((o) => o.type === 'web_search_call').length
 
 type Turn = {
   requestId: string
@@ -41,6 +46,8 @@ type Turn = {
   // when it is too large to send.
   fits: (estimate: number, count: () => Promise<number>) => Promise<boolean>
   tools: BetaTool[]
+  // What each model call used (see usage.ts).
+  onUsage?: (model: string, u: TokenUsage) => void
   signal: AbortSignal
   emit: Emit
   // Records the reply and each tool call as it happens (see turn.ts).
@@ -234,9 +241,11 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
         emit({ requestId, type: 'text', text: event.delta })
       } else if (event.type === 'response.completed') {
         output = event.response.output
+        turn.onUsage?.(turn.model, fromOpenAI(event.response.usage, searchesIn(output)))
       } else if (event.type === 'response.incomplete') {
         output = event.response.output
         incomplete = true
+        turn.onUsage?.(turn.model, fromOpenAI(event.response.usage, searchesIn(output)))
       } else if (event.type === 'response.failed') {
         throw new Error(event.response.error?.message ?? 'OpenAI could not finish the reply.')
       } else if (event.type === 'error') {

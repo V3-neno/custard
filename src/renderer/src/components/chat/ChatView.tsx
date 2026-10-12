@@ -29,6 +29,9 @@ import WorkspaceBar from './WorkspaceBar'
 import SkillsHub from '../hubs/SkillsHub'
 import PluginsHub from '../hubs/PluginsHub'
 import WidgetSlot from './WidgetSlot'
+import UsageMeter from './UsageMeter'
+import { formatCost } from '../../../../shared/pricing'
+import type { UsageMonth } from '../../../../shared/chat'
 import { cleanError } from '../settings/ui'
 import {
   CompactionLine,
@@ -213,6 +216,19 @@ function ChatView(props: Props): React.JSX.Element {
     refreshList()
   }, [refreshList, historyOpen])
 
+  // This month's estimated spend, for the budget line. Read again after
+  // each turn.
+  const [month, setMonth] = useState<UsageMonth | null>(null)
+  const refreshMonth = useCallback(
+    () =>
+      void window.custard.usage
+        .month()
+        .then(setMonth)
+        .catch(() => {}),
+    []
+  )
+  useEffect(() => refreshMonth(), [refreshMonth])
+
   useEffect(
     () =>
       window.custard.chat.onEvent((e) => {
@@ -273,6 +289,7 @@ function ChatView(props: Props): React.JSX.Element {
             pending.current = null
             setCurrent(e.conversation)
             setLive(null)
+            refreshMonth()
             // When the turn was kept, what happened is in the chat with a
             // notice, and the message isn't put back to be sent twice.
             if (e.type === 'error' && !e.kept) {
@@ -289,7 +306,7 @@ function ChatView(props: Props): React.JSX.Element {
             break
         }
       }),
-    [refreshList]
+    [refreshList, refreshMonth]
   )
 
   // Memory capture finishes after the turn; its status comes separately.
@@ -695,7 +712,18 @@ function ChatView(props: Props): React.JSX.Element {
             />
           )}
           <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
+          {month?.budget && month.cost >= month.budget * 0.8 && (
+            <p
+              className={`mb-2 text-center text-xs ${month.cost >= month.budget ? 'text-molten-300' : 'text-ash-400'}`}
+              data-budget-line
+            >
+              {month.cost >= month.budget
+                ? `This month's estimated spend, ${formatCost(month.cost)}, is over your ${formatCost(month.budget)} budget. Custard keeps working; change the budget in Settings.`
+                : `This month's estimated spend is ${formatCost(month.cost)} of your ${formatCost(month.budget)} budget.`}
+            </p>
+          )}
           <Composer
+            meter={<UsageMeter usage={current?.usage} context={current?.context} />}
             busy={!!live}
             placeholder={copy[mode].placeholder.replace('{provider}', providerName)}
             settings={settings}

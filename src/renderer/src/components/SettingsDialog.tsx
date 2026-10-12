@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { providerNames, type Provider } from '../../../shared/chat'
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
+import type { UsageMonth } from '../../../shared/chat'
+import { formatCost } from '../../../shared/pricing'
 
 import DesignTab from './settings/DesignTab'
 import EditableFolders from './settings/EditableFolders'
@@ -77,6 +79,67 @@ function KeySection({
           Remove key
         </button>
       )}
+    </section>
+  )
+}
+
+// A monthly budget for model calls. Custard warns under the message box from
+// 80% of it and when it is passed; it never stops a chat.
+function SpendingSection(): React.JSX.Element {
+  const [month, setMonth] = useState<UsageMonth | null>(null)
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    window.custard.usage.month().then((m) => {
+      setMonth(m)
+      setDraft(m.budget === null ? '' : String(m.budget))
+    })
+  }, [])
+  const save = async (): Promise<void> => {
+    const text = draft.trim().replace(/^\$/, '')
+    const dollars = text === '' ? null : Number(text)
+    if (dollars !== null && !(Number.isFinite(dollars) && dollars > 0 && dollars <= 1_000_000)) {
+      setError('Enter an amount in dollars, like 20, or leave it empty for no budget.')
+      return
+    }
+    setError(null)
+    const m = await window.custard.usage.setBudget(dollars)
+    setMonth(m)
+    setDraft(m.budget === null ? '' : String(m.budget))
+  }
+  const saved = month?.budget === null ? '' : String(month?.budget ?? '')
+  return (
+    <section className="mb-6">
+      <h3 className="mb-1 text-sm font-medium">Spending</h3>
+      <p className="mb-3 text-sm text-ash-300">
+        {month
+          ? `This month so far: about ${formatCost(month.cost)} across ${month.calls} model ${month.calls === 1 ? 'call' : 'calls'}${month.budget ? `, of your ${formatCost(month.budget)} budget` : ''}.`
+          : 'This month so far: …'}{' '}
+        Custard estimates it from each provider&apos;s published prices, including its own summaries
+        and automations. Image generation isn&apos;t counted, and your provider&apos;s bill is what
+        counts.
+      </p>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-ash-400">$</span>
+        <input
+          inputMode="decimal"
+          aria-label="Monthly budget in dollars"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && save()}
+          placeholder="No budget"
+          className="w-32 rounded-lg border border-forge-700 bg-forge-900 px-3 py-2 text-sm outline-none focus:border-molten-500/60"
+        />
+        <span className="text-sm text-ash-400">a month</span>
+        <button onClick={save} disabled={draft.trim() === saved} className={primary}>
+          Save
+        </button>
+      </div>
+      {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
+      <p className="mt-2 text-xs text-ash-400">
+        From 80% of the budget, and when it is passed, a line under the message box says so. Custard
+        never stops a chat because of it.
+      </p>
     </section>
   )
 }
@@ -202,6 +265,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
             </p>
             <KeySection provider="claude" onChanged={onChanged} />
             <KeySection provider="openai" onChanged={onChanged} />
+            <SpendingSection />
 
             <section>
               <h3 className="mb-1 text-sm font-medium">

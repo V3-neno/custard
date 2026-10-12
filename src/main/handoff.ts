@@ -4,6 +4,8 @@ import type { ActionRecord, Continuation, Conversation, Provider } from '../shar
 import { redact } from './memory/evidence'
 import { filesNote } from '../shared/attachments'
 import { anthropicEndpoint, openaiEndpoint } from './endpoints'
+import type { OnUsage } from '../shared/pricing'
+import { fromClaude, fromOpenAI } from './usage'
 
 // "Continue in a new chat": a bounded handoff from a chat that is too long
 // to go on. It is built from the saved chat in code, so it works however
@@ -259,7 +261,9 @@ export type HandoffSummarizer = (evidence: string, signal?: AbortSignal) => Prom
 export function handoffSummarizer(
   provider: Provider,
   apiKey: string,
-  system = HANDOFF_SYSTEM
+  system = HANDOFF_SYSTEM,
+  // Told what each call used (see usage.ts).
+  onUsage?: OnUsage
 ): HandoffSummarizer {
   const opts = { timeout: HANDOFF_LIMITS.timeoutMs, maxRetries: HANDOFF_LIMITS.retries }
   if (provider === 'openai') {
@@ -279,6 +283,7 @@ export function handoffSummarizer(
         },
         { signal }
       )
+      onUsage?.(HANDOFF_MODELS.openai, fromOpenAI(r.usage))
       if (r.status === 'incomplete') throw new Error('The summary was cut off.')
       return parseHandoff(r.output_text)
     }
@@ -295,6 +300,7 @@ export function handoffSummarizer(
       },
       { signal }
     )
+    onUsage?.(m.model || HANDOFF_MODELS.claude, fromClaude(m.usage))
     if (m.stop_reason === 'refusal') throw new Error('The summary was declined.')
     if (m.stop_reason === 'max_tokens') throw new Error('The summary was cut off.')
     return parseHandoff(m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))

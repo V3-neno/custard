@@ -462,7 +462,12 @@ http
           content: [],
           stop_reason: null,
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 0 }
+          // A message asking for it reports a large usage (for the budget
+          // test): 2M input tokens, $8 at Opus 5.5's rate.
+          usage: {
+            input_tokens: JSON.stringify(b.messages).includes('big usage test') ? 2_000_000 : 10,
+            output_tokens: 0
+          }
         }
       })
       let idx = 0

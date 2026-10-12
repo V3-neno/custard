@@ -1,3 +1,4 @@
+import type { TokenUsage } from './pricing'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { Workspace } from './plugins'
 import type { Attachment, AttachmentKind } from './attachments'
@@ -216,6 +217,8 @@ export type Conversation = ConversationSummary & {
   memory?: ChatMemory
   // Its summary note in Custard/Chats.
   chatNote?: ChatNote
+  // What its model calls used and cost, background summaries included.
+  usage?: ChatUsage
   continuedFrom?: Continuation
   // Open questions from automation runs shown to the model in this chat (ids).
   // Their text came from a run that read notes and plugin text.
@@ -249,6 +252,21 @@ export type ContinueResult =
   { ok: true; conversation: Conversation } | { ok: false; error: string; canSkipSummary: boolean }
 
 export type ChatLink = { id: string; title: string; mode: Mode }
+
+// A chat's token use and estimated cost (see shared/pricing). `unpriced`:
+// calls to a model with no known price, left out of `cost`.
+export type ChatUsage = TokenUsage & { cost: number; calls: number; unpriced: number }
+
+// This month's estimated spend across every chat and automation, for the
+// budget in Settings.
+export type UsageMonth = {
+  month: string
+  cost: number
+  calls: number
+  unpriced: number
+  // Dollars a month, or null for no budget.
+  budget: number | null
+}
 
 export type ContextUse = {
   tokens: number

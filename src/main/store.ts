@@ -17,8 +17,10 @@ import {
   type ChatSettings,
   type Conversation,
   type ConversationSummary,
-  type Mode
+  type Mode,
+  type UsageMonth
 } from '../shared/chat'
+import { charger, normalizeBudget, UsageLedger, type Charge } from './usage'
 import type { SecurityDefaults } from '../shared/plugins'
 import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import { defaultMemorySettings, type MemorySettings } from '../shared/memory'
@@ -156,6 +158,8 @@ type Config = {
   memory: MemorySettings
   vaultGrants: VaultGrant[]
   automations: Automation[]
+  // Monthly spending budget in dollars, or null for none.
+  budget: number | null
 }
 
 const defaultSecurity: SecurityDefaults = { askBeforeWriteTools: true }
@@ -173,7 +177,8 @@ function readConfig(): Config {
     security: { ...defaultSecurity, ...raw.security },
     memory: { ...defaultMemorySettings, ...raw.memory },
     vaultGrants: normalizeGrants(raw.vaultGrants).grants,
-    automations: normalizeAutomations(raw.automations)
+    automations: normalizeAutomations(raw.automations),
+    budget: normalizeBudget(raw.budget)
   }
 }
 
@@ -182,6 +187,21 @@ function writeConfig(patch: Partial<Config>): void {
   const raw = readSettingsFile(settingsFile())
   writeSettingsFile(settingsFile(), { ...raw, ...readConfig(), ...patch })
 }
+
+export const getBudget = (): number | null => readConfig().budget
+export const setBudget = (budget: unknown): number | null => {
+  const b = normalizeBudget(budget)
+  writeConfig({ budget: b })
+  return b
+}
+
+// What model calls used and cost (see usage.ts).
+let ledger: UsageLedger | null = null
+export const usageLedger = (): UsageLedger =>
+  (ledger ??= new UsageLedger(join(app.getPath('userData'), 'usage.json')))
+export const charge: Charge = (chat, model, u) =>
+  charger(usageLedger(), updateConversation)(chat, model, u)
+export const usageThisMonth = (): UsageMonth => usageLedger().thisMonth(getBudget())
 
 export const getDesignSettings = (): DesignSettings => readConfig().design
 export const setDesignSettings = (design: unknown): void =>

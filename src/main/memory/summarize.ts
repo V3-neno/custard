@@ -2,6 +2,8 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import type { Provider } from '../../shared/chat'
 import { anthropicEndpoint, openaiEndpoint } from '../endpoints'
+import type { OnUsage } from '../../shared/pricing'
+import { fromClaude, fromOpenAI } from '../usage'
 
 // The one model call a capture makes: the evidence in, a structured summary
 // out. It has no tools of any kind, so it can't act, read anything else or
@@ -149,7 +151,8 @@ export function parseSummary(raw: string): Summary {
 
 export type Summarizer = (evidence: string, signal?: AbortSignal) => Promise<Summary>
 
-export function summarizer(provider: Provider, apiKey: string): Summarizer {
+// `onUsage` is told what each call used (see usage.ts).
+export function summarizer(provider: Provider, apiKey: string, onUsage?: OnUsage): Summarizer {
   const opts = { timeout: SUMMARY_LIMITS.timeoutMs, maxRetries: SUMMARY_LIMITS.retries }
   if (provider === 'openai') {
     const client = new OpenAI({ apiKey, ...opts, ...openaiEndpoint() })
@@ -168,6 +171,7 @@ export function summarizer(provider: Provider, apiKey: string): Summarizer {
         },
         { signal }
       )
+      onUsage?.(SUMMARY_MODELS.openai, fromOpenAI(r.usage))
       if (r.status === 'incomplete') throw new Error('The summary was cut off.')
       return parseSummary(r.output_text)
     }
@@ -184,6 +188,7 @@ export function summarizer(provider: Provider, apiKey: string): Summarizer {
       },
       { signal }
     )
+    onUsage?.(m.model || SUMMARY_MODELS.claude, fromClaude(m.usage))
     if (m.stop_reason === 'refusal') throw new Error('The summary was declined.')
     if (m.stop_reason === 'max_tokens') throw new Error('The summary was cut off.')
     return parseSummary(m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))

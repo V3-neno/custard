@@ -16,6 +16,7 @@ import {
   type SearchOutcome
 } from './search'
 import { anthropicEndpoint, openaiEndpoint } from '../endpoints'
+import type { OnUsage } from '../../shared/pricing'
 
 export const isWebTool = (name: string): boolean => name === 'web_read' || name === 'web_search'
 
@@ -52,6 +53,8 @@ export type WebContext = {
   // messages and its fixed instructions, e.g. "your vault notes". Any of it
   // could end up in a query.
   injected: string[]
+  // Told what a search's own model call used (see usage.ts).
+  onUsage?: OnUsage
 }
 
 const notRun = (content: string): ToolRun => ({ content, isError: true, outcome: 'not-run' })
@@ -179,6 +182,7 @@ export async function runWebTool(
             ctx.signal
           ))
   const outcome = await search(query)
+  if (outcome.usage) ctx.onUsage?.(ctx.model.id, outcome.usage)
   addSources(
     c,
     outcome.hits.map((h) => ({

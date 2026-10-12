@@ -14,6 +14,7 @@ import { getApiKey } from './apiKey'
 import { describeError } from './providerError'
 import {
   allConversations,
+  charge,
   getChatSettings,
   getConversation,
   getMemorySettings,
@@ -26,6 +27,7 @@ import {
   saveConversation,
   vaultEditsDir
 } from './store'
+import { claudeParts } from './usage'
 import { allPluginInfo, chatNotes, memory } from './memory'
 import { pluginContext } from './memory/plugins'
 import { runOpenAI } from './openai'
@@ -632,6 +634,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         injected,
         model,
         apiKey,
+        onUsage: (m, u) => charge(conversation, m, u),
         signal: controller.signal,
         turn: log.startLength,
         approve: (label, input, warning) =>
@@ -950,6 +953,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         conversation,
         fits,
         tools,
+        onUsage: (m, u) => charge(conversation, m, u),
         signal: controller.signal,
         emit,
         log,
@@ -1005,6 +1009,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
           }
         }
         message = await stream.finalMessage()
+        for (const part of claudeParts(message.usage, message.model || model.id))
+          charge(conversation, part.model, part.usage)
       } catch (err) {
         // The model doesn't take compaction: send without it from now on.
         if (streamed || !params.context_management || !isCompactionRejected(err)) throw err
@@ -1084,7 +1090,10 @@ async function continueFrom(id: string, withoutSummary: boolean): Promise<Contin
         summarizer: (original) => {
           const p = providerOf(original.context?.model ?? getChatSettings().model)
           const key = getApiKey(p)
-          return key ? handoffSummarizer(p, key) : null
+          // Charged to the chat being summarized.
+          return key
+            ? handoffSummarizer(p, key, undefined, (m, u) => charge(original.id, m, u))
+            : null
         }
       },
       id,

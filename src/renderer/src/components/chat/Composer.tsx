@@ -20,6 +20,8 @@ type Props = {
   onStop: () => void
   draft: string
   setDraft: (text: string) => void
+  // The chat's context and cost meter, beside the model pills.
+  meter?: React.ReactNode
   // Chat and Design only: files to send with the message.
   files?: {
     items: DraftAttachment[]
@@ -37,6 +39,7 @@ const chip =
 
 function Composer(props: Props): React.JSX.Element {
   const { busy, placeholder, settings, onSettings, onSend, onStop, draft, setDraft, files } = props
+  const { meter } = props
   const [focused, setFocused] = useState(false)
   const [dragging, setDragging] = useState(false)
   const hasFiles = !!files?.items.length
@@ -156,6 +159,7 @@ function Composer(props: Props): React.JSX.Element {
             ))}
           </select>
         )}
+        {meter}
         <div className="ml-auto">
           {busy ? (
             <button

@@ -46,7 +46,8 @@ export type ChatNoteDeps = {
   vaultPath: () => string | null
   // "Remember automatically".
   auto: () => boolean
-  summarizer: (provider: Provider) => HandoffSummarizer | null
+  // `chatId`: whose note it is, for its cost.
+  summarizer: (provider: Provider, chatId: string) => HandoffSummarizer | null
   queueFile: string
   delayMs?: () => number
   now?: () => number
@@ -287,7 +288,7 @@ export class ChatNotes {
     }
     // Checked before the summary too, so a note left alone costs no call.
     if (note?.path && !this.ours(vault, id, note.path, note.hash)) return
-    const summarize = this.deps.summarizer(note?.provider ?? 'claude')
+    const summarize = this.deps.summarizer(note?.provider ?? 'claude', id)
     if (!summarize) {
       // Stays queued for when a key is added.
       this.set(id, (n) => {

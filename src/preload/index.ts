@@ -10,7 +10,8 @@ import type {
   ConversationSummary,
   Mode,
   Provider,
-  SendChatRequest
+  SendChatRequest,
+  UsageMonth
 } from '../shared/chat'
 import type { SkillEntry, SkillText, VaultEditEntry, VaultInfo } from '../shared/vault'
 import type { VaultGrant } from '../shared/vaultGrants'
@@ -107,6 +108,12 @@ const custard = {
       ipcRenderer.invoke('plugins:create', id, name),
     labels: (): Promise<Record<string, string>> => ipcRenderer.invoke('plugins:labels'),
     sourceRoot: (): Promise<string> => ipcRenderer.invoke('plugins:sourceRoot')
+  },
+  // Estimated spend this month, and the monthly budget.
+  usage: {
+    month: (): Promise<UsageMonth> => ipcRenderer.invoke('usage:month'),
+    setBudget: (dollars: number | null): Promise<UsageMonth> =>
+      ipcRenderer.invoke('usage:setBudget', dollars)
   },
   memory: {
     getSettings: (): Promise<MemorySettings> => ipcRenderer.invoke('memory:getSettings'),

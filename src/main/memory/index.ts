@@ -5,6 +5,9 @@ import { pluginHost } from '../plugins'
 import { isPluginContents } from '../plugins/runtime'
 import {
   allConversations,
+  charge,
+  setBudget,
+  usageThisMonth,
   getConversation,
   getMemorySettings,
   getVaultPath,
@@ -66,9 +69,9 @@ export function memory(): Capture {
     update: updateConversation,
     vaultPath: getVaultPath,
     settings: getMemorySettings,
-    summarizer: (provider) => {
+    summarizer: (provider, chatId) => {
       const key = getApiKey(provider)
-      return key ? summarizer(provider, key) : null
+      return key ? summarizer(provider, key, (m, u) => charge(chatId, m, u)) : null
     },
     queueFile: join(app.getPath('userData'), 'capture-queue.json'),
     pluginName: (id) => {
@@ -101,9 +104,11 @@ export function chatNotes(): ChatNotes {
     update: updateConversation,
     vaultPath: getVaultPath,
     auto: () => getMemorySettings().auto,
-    summarizer: (provider) => {
+    summarizer: (provider, chatId) => {
       const key = getApiKey(provider)
-      return key ? handoffSummarizer(provider, key, CHAT_NOTE_SYSTEM) : null
+      return key
+        ? handoffSummarizer(provider, key, CHAT_NOTE_SYSTEM, (m, u) => charge(chatId, m, u))
+        : null
     },
     queueFile: join(app.getPath('userData'), 'chat-note-queue.json'),
     // Tests set a short pause.
@@ -116,6 +121,11 @@ export function chatNotes(): ChatNotes {
 
 export function registerMemoryHandlers(): void {
   handle('memory:getSettings', () => getMemorySettings())
+  handle('usage:month', () => usageThisMonth())
+  handle('usage:setBudget', (_, dollars: unknown) => {
+    setBudget(dollars)
+    return usageThisMonth()
+  })
   handle('memory:setSettings', (_, s: MemorySettings) => {
     setMemorySettings(s)
     if (!s.auto) {

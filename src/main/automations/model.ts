@@ -8,6 +8,8 @@ import { toBlocks, toInput } from '../openai'
 import { describeError } from '../providerError'
 import { chatModels, providerNames } from '../../shared/chat'
 import type { Step, StepResult } from './run'
+import { charge } from '../store'
+import { claudeParts, fromOpenAI } from '../usage'
 
 // One model call per step, not streamed to anyone, with no retry of its own:
 // a rate limit or a rejected key ends the run with the reason, and the
@@ -39,6 +41,9 @@ function claudeStep(modelId: string, apiKey: string): Step {
     } catch (err) {
       return fail(err, provider)
     }
+    // Automations belong to no chat: counted for the month only.
+    for (const part of claudeParts(message.usage, message.model || modelId))
+      charge(null, part.model, part.usage)
     if (message.stop_reason === 'refusal') throw new Error('Claude declined this request.')
     const calls = message.content.flatMap((b) =>
       b.type === 'tool_use' ? [{ id: b.id, name: b.name, input: b.input }] : []
@@ -81,6 +86,7 @@ function openaiStep(modelId: string, apiKey: string): Step {
     } catch (err) {
       return fail(err, provider)
     }
+    charge(null, modelId, fromOpenAI(response.usage))
     if (response.status === 'incomplete')
       throw new Error('The answer was cut off, so nothing more was run.')
     if (response.status === 'failed')
