@@ -32,7 +32,8 @@ import type { VaultInfo } from '../shared/vault'
 import type { ChatSettings, Mode, Provider } from '../shared/chat'
 import { listSkills } from './vault'
 import { pinProviderEndpoints } from './endpoints'
-import { addMissingStarterSkills, createStarterVault } from './vaultTemplate'
+import { addMissingStarterSkills, createStarterVault, starterSkillFolders } from './vaultTemplate'
+import { readSkill, skillEntries } from './skillsHub'
 
 function vaultInfo(): VaultInfo {
   const path = getVaultPath()
@@ -187,6 +188,16 @@ app.whenReady().then(() => {
     const path = getVaultPath()
     if (!path || !existsSync(path)) throw new Error('Connect a vault first.')
     return { added: addMissingStarterSkills(path), vault: vaultInfo() }
+  })
+  // The Skills hub. Read only.
+  handle('skills:list', () => {
+    const path = getVaultPath()
+    return path && existsSync(path) ? skillEntries(path, starterSkillFolders()) : null
+  })
+  handle('skills:read', (_, folder: string) => {
+    const path = getVaultPath()
+    if (!path || !existsSync(path)) throw new Error('Connect a vault first.')
+    return readSkill(path, folder)
   })
   registerChatHandlers()
   registerAttachmentHandlers()

@@ -5,7 +5,7 @@ A personal desktop Claude client with four modes:
 - **Chat**: normal conversations through the Claude API
 - **Design**: generate UI and preview it live
 - **Plugins**: build and improve a plugin in `plugin/<id>`. File access is checked by the app, and there is no shell. (This was Code mode; its General Code folder workspace was removed, and old General Code chats open read-only.)
-- **Skills**: teach Custard skills and tidy the vault
+- **Skills**: opens on a hub of every skill in `Custard/Skills` (what each does, its modes, the automations that run it), where you inspect one or start a chat to add or improve one; the chat also tidies the vault
 
 Built with Electron, React, TypeScript, Vite (electron-vite) and Tailwind CSS.
 

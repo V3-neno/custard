@@ -26,6 +26,7 @@ import {
 } from '../../../../shared/attachments'
 import Working, { type Approval, type Segment } from './Working'
 import WorkspaceBar from './WorkspaceBar'
+import SkillsHub from '../hubs/SkillsHub'
 import WidgetSlot from './WidgetSlot'
 import { cleanError } from '../settings/ui'
 import {
@@ -533,7 +534,20 @@ function ChatView(props: Props): React.JSX.Element {
       <div className={`min-h-0 min-w-0 flex-1 flex-col ${chatHidden ? 'hidden' : 'flex'}`}>
         {showPane && narrow && <SideSwitch side={side} onSide={setSide} count={outputs.length} />}
         <div className="flex-1 overflow-y-auto">
-          {empty ? (
+          {empty && mode === 'skills' ? (
+            <SkillsHub
+              onOpenSettings={onOpenSettings}
+              onStart={(text) => {
+                setDraft(text)
+                // After the box has the text, so the cursor lands at its end.
+                setTimeout(() => {
+                  const box = document.querySelector<HTMLTextAreaElement>('textarea')
+                  box?.focus()
+                  box?.setSelectionRange(text.length, text.length)
+                })
+              }}
+            />
+          ) : empty ? (
             <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
               <Orb size={128} state={copy[mode].orb} />
               <div className="text-center">

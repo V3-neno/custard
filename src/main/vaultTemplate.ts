@@ -55,3 +55,13 @@ export function addMissingStarterSkills(vault: string): string[] {
   }
   return added
 }
+
+// Folder names of the starter skills.
+export function starterSkillFolders(): Set<string> {
+  const names = new Set<string>()
+  for (const key of Object.keys(templateFiles)) {
+    const m = /^Custard\/Skills\/([^/]+)\//.exec(key.slice(PREFIX.length))
+    if (m) names.add(m[1])
+  }
+  return names
+}

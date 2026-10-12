@@ -12,7 +12,7 @@ import type {
   Provider,
   SendChatRequest
 } from '../shared/chat'
-import type { VaultEditEntry, VaultInfo } from '../shared/vault'
+import type { SkillEntry, SkillText, VaultEditEntry, VaultInfo } from '../shared/vault'
 import type { VaultGrant } from '../shared/vaultGrants'
 import type { AutomationView, PendingQuestion } from '../shared/automations'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
@@ -75,6 +75,11 @@ const custard = {
     edits: (): Promise<VaultEditEntry[]> => ipcRenderer.invoke('vault:edits'),
     undoEdit: (id: string): Promise<{ ok: boolean; message: string }> =>
       ipcRenderer.invoke('vault:undoEdit', id)
+  },
+  skills: {
+    // null when no vault is connected.
+    list: (): Promise<SkillEntry[] | null> => ipcRenderer.invoke('skills:list'),
+    read: (folder: string): Promise<SkillText> => ipcRenderer.invoke('skills:read', folder)
   },
   plugins: {
     list: (): Promise<PluginStatus[]> => ipcRenderer.invoke('plugins:list'),
