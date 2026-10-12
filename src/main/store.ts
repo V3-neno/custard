@@ -37,13 +37,14 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // Conversations saved before modes existed belong to Chat.
 const withMode = (c: Conversation): Conversation => ({ ...c, mode: c.mode ?? 'chat' })
 
-export function listConversations(mode: Mode): ConversationSummary[] {
+// Every mode's when `mode` is null.
+export function listConversations(mode: Mode | null): ConversationSummary[] {
   return readdirSync(dir())
     .filter((f) => f.endsWith('.json'))
     .flatMap((f) => {
       try {
         const c = withMode(JSON.parse(readFileSync(join(dir(), f), 'utf8')))
-        return c.mode === mode
+        return mode === null || c.mode === mode
           ? [
               {
                 id: c.id,

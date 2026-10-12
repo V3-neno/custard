@@ -196,7 +196,8 @@ const custard = {
     set: (s: SecurityDefaults): Promise<void> => ipcRenderer.invoke('security:set', s)
   },
   conversations: {
-    list: (mode: Mode): Promise<ConversationSummary[]> =>
+    // Every mode's chats when `mode` is null.
+    list: (mode: Mode | null): Promise<ConversationSummary[]> =>
       ipcRenderer.invoke('conversations:list', mode),
     get: (id: string): Promise<Conversation | null> => ipcRenderer.invoke('conversations:get', id),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id),

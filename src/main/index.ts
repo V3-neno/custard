@@ -29,7 +29,7 @@ import {
   vaultEditsDir
 } from './store'
 import type { VaultInfo } from '../shared/vault'
-import type { ChatSettings, Mode, Provider } from '../shared/chat'
+import { isMode, type ChatSettings, type Mode, type Provider } from '../shared/chat'
 import { listSkills } from './vault'
 import { pinProviderEndpoints } from './endpoints'
 import { addMissingStarterSkills, createStarterVault, starterSkillFolders } from './vaultTemplate'
@@ -117,7 +117,9 @@ app.whenReady().then(() => {
   handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
   handle('settings:get', () => getChatSettings())
   handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
-  handle('conversations:list', (_, mode: Mode) => listConversations(mode))
+  handle('conversations:list', (_, mode: Mode | null) =>
+    mode === null ? listConversations(null) : isMode(mode) ? listConversations(mode) : []
+  )
   handle('conversations:get', (_, id: string) => openConversation(id))
   handle('conversations:delete', async (_, id: string) => {
     if (chatBusy(id))

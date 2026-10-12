@@ -107,6 +107,8 @@ const unsent = new Map<Mode, { text: string; draftId: string; files: DraftAttach
 // The chat open in each mode, so leaving a mode (say, to manage a plugin in
 // Plugins mode) and coming back returns to it.
 const openChats = new Map<Mode, string>()
+// History's mode filter (null: every mode), kept across modes.
+let historyFilter: Mode | null = null
 
 const NARROW = 900
 const PANE_MIN = 320
@@ -146,6 +148,7 @@ function ChatView(props: Props): React.JSX.Element {
   const { historyOpen, onCloseHistory, temporary, onTemporary, newChat, onBusy, onOutsideText } =
     props
   const [list, setList] = useState<ConversationSummary[]>([])
+  const [filter, setFilter] = useState<Mode | null>(historyFilter)
   const [current, setCurrent] = useState<Conversation | null>(null)
   const restoring = useRef(openChats.has(mode))
   useEffect(() => {
@@ -200,8 +203,8 @@ function ChatView(props: Props): React.JSX.Element {
   } | null>(null)
 
   const refreshList = useCallback(
-    () => window.custard.conversations.list(mode).then(setList),
-    [mode]
+    () => window.custard.conversations.list(filter).then(setList),
+    [filter]
   )
 
   useEffect(() => {
@@ -751,8 +754,24 @@ function ChatView(props: Props): React.JSX.Element {
         <HistoryDrawer
           modeLabel={modeLabel}
           conversations={list}
+          filter={filter}
+          onFilter={(f) => {
+            historyFilter = f
+            setFilter(f)
+          }}
           currentId={current?.id ?? null}
-          onOpen={open}
+          onOpen={(id) => {
+            // A chat from another mode opens in that mode.
+            const other = list.find((c) => c.id === id)?.mode
+            if (!other || other === mode) {
+              void open(id)
+              return
+            }
+            if (live) return
+            openChats.set(other, id)
+            onCloseHistory()
+            onModeChange(other)
+          }}
           onNew={startNew}
           onDelete={remove}
           onForget={forgetChat}

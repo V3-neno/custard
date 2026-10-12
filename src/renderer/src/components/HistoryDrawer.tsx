@@ -1,9 +1,13 @@
-import type { ConversationSummary } from '../../../shared/chat'
+import { useState } from 'react'
+import { modes, type ConversationSummary, type Mode } from '../../../shared/chat'
 import { CloseIcon, PlusIcon, TemporaryIcon } from './icons'
 
 type Props = {
   modeLabel: string
+  // Every mode's chats, or one mode's (filter).
   conversations: ConversationSummary[]
+  filter: Mode | null
+  onFilter: (f: Mode | null) => void
   currentId: string | null
   onOpen: (id: string) => void
   onNew: () => void
@@ -20,7 +24,16 @@ function when(ts: number): string {
 }
 
 function HistoryDrawer(props: Props): React.JSX.Element {
-  const { modeLabel, conversations, currentId, onOpen, onNew, onDelete, onForget, onClose } = props
+  const { modeLabel, conversations, filter, onFilter, currentId, onOpen, onNew, onDelete } = props
+  const { onForget, onClose } = props
+  const [find, setFind] = useState('')
+  const q = find.trim().toLowerCase()
+  const shown = q ? conversations.filter((c) => c.title.toLowerCase().includes(q)) : conversations
+  const label = (m: Mode): string => modes.find((x) => x.id === m)?.label ?? m
+  const filterChip = (on: boolean): string =>
+    `rounded-full px-2.5 py-0.5 text-xs transition-colors ${
+      on ? 'bg-forge-700 text-ash-100' : 'text-ash-400 hover:text-ash-100'
+    }`
   return (
     <div className="fixed inset-0 z-20 flex" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" />
@@ -31,7 +44,9 @@ function HistoryDrawer(props: Props): React.JSX.Element {
         <div className="flex items-center px-5 pt-5 pb-3">
           <div>
             <div className="text-xs tracking-[0.2em] text-ash-500 uppercase">History</div>
-            <div className="text-lg font-semibold text-molten-200">{modeLabel}</div>
+            <div className="text-lg font-semibold text-molten-200">
+              {filter ? label(filter) : 'All chats'}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -46,14 +61,43 @@ function HistoryDrawer(props: Props): React.JSX.Element {
         >
           <PlusIcon /> {modeLabel === 'Chat' ? 'New chat' : `New ${modeLabel.toLowerCase()} chat`}
         </button>
+        <div
+          role="group"
+          aria-label="Show chats from"
+          className="mx-4 mb-2 flex flex-wrap gap-1 rounded-2xl border border-forge-700 p-0.5"
+        >
+          <button className={filterChip(filter === null)} onClick={() => onFilter(null)}>
+            All
+          </button>
+          {modes.map((m) => (
+            <button
+              key={m.id}
+              className={filterChip(filter === m.id)}
+              onClick={() => onFilter(m.id)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <input
+          aria-label="Find a chat"
+          value={find}
+          onChange={(e) => setFind(e.target.value)}
+          placeholder="Find a chat…"
+          className="mx-4 mb-3 rounded-full border border-forge-700 bg-forge-900 px-3 py-1 text-xs outline-none focus:border-molten-500/60"
+        />
         <div className="forge-line mx-4 mb-2" />
         <div className="flex-1 overflow-y-auto px-3 pb-4">
-          {conversations.length === 0 && (
+          {shown.length === 0 && (
             <p className="px-2 py-6 text-center text-sm text-ash-500">
-              Nothing here yet. Chats you start in {modeLabel} will show up here.
+              {q
+                ? 'No chat title matches that.'
+                : filter
+                  ? `Nothing here yet. Chats you start in ${label(filter)} will show up here.`
+                  : 'Nothing here yet. Your chats will show up here.'}
             </p>
           )}
-          {conversations.map((c) => (
+          {shown.map((c) => (
             <div
               key={c.id}
               className={`group flex items-center rounded-xl transition-colors ${
@@ -66,6 +110,7 @@ function HistoryDrawer(props: Props): React.JSX.Element {
                 <div className="truncate text-sm">{c.title}</div>
                 <div className="flex items-center gap-1.5 text-xs text-ash-500">
                   {when(c.updatedAt)}
+                  {!filter && <span>· {label(c.mode)}</span>}
                   {c.temporary && (
                     <span className="flex items-center gap-1 text-ash-500">
                       · <TemporaryIcon /> Temporary
