@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import OpenAI from 'openai'
 import type { ActionRecord, Conversation, WebSource } from '../../shared/chat'
 import type { ToolRun } from '../turn'
 import { originWarning, rememberLinks, urlOrigin } from './provenance'
@@ -15,18 +14,23 @@ import {
   webSearchTool,
   type SearchOutcome
 } from './search'
-import { anthropicEndpoint, openaiEndpoint } from '../endpoints'
+import { anthropicEndpoint } from '../endpoints'
+import { responsesClient } from '../providers'
+import { providers, responsesFeatures, type Provider } from '../../shared/providers'
 import type { OnUsage } from '../../shared/pricing'
 
 export const isWebTool = (name: string): boolean => name === 'web_read' || name === 'web_search'
 
-export type WebModel = { id: string; provider: 'claude' | 'openai' }
+export type WebModel = { id: string; provider: Provider }
 
 // web_read works with any model. Search needs the provider's hosted search
-// for that model (see claudeSearchTool; every OpenAI model Custard offers
-// lists web search).
+// for that model (see claudeSearchTool; a Responses provider says whether it
+// has one, and every OpenAI model Custard offers lists web search).
 export function webTools(model: WebModel): { tools: BetaTool[]; prompt: string } {
-  const search = model.provider === 'openai' || claudeSearchTool(model.id) !== null
+  const search =
+    providers[model.provider].api === 'responses'
+      ? responsesFeatures(model.provider).webSearch
+      : claudeSearchTool(model.id) !== null
   return {
     tools: search ? [webSearchTool, webReadTool] : [webReadTool],
     prompt: [
@@ -168,7 +172,7 @@ export async function runWebTool(
   const search =
     deps.search ??
     ((q: string) =>
-      ctx.model.provider === 'claude'
+      providers[ctx.model.provider].api === 'anthropic'
         ? searchClaude(
             new Anthropic({ apiKey: ctx.apiKey, ...anthropicEndpoint() }),
             ctx.model.id,
@@ -176,7 +180,7 @@ export async function runWebTool(
             ctx.signal
           )
         : searchOpenAI(
-            new OpenAI({ apiKey: ctx.apiKey, ...openaiEndpoint() }),
+            responsesClient(ctx.model.provider, ctx.apiKey),
             ctx.model.id,
             q,
             ctx.signal

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { providerNames, type Provider } from '../../../shared/chat'
+import { providerIds, providers, providerNames, type Provider } from '../../../shared/providers'
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
 import type { UsageMonth } from '../../../shared/chat'
@@ -12,11 +12,6 @@ import { cleanError, primary, secondary } from './settings/ui'
 
 type Props = { onClose: () => void; onChanged: () => void }
 type Tab = 'general' | 'design'
-
-const keyInfo: Record<Provider, { placeholder: string; where: string }> = {
-  claude: { placeholder: 'sk-ant-…', where: 'console.anthropic.com' },
-  openai: { placeholder: 'sk-…', where: 'platform.openai.com' }
-}
 
 function KeySection({
   provider,
@@ -58,7 +53,7 @@ function KeySection({
         {providerNames[provider]} API key{' '}
         {hasKey && <span className="text-molten-300">· saved</span>}
       </h3>
-      <p className="mb-3 text-sm text-ash-300">Get one at {keyInfo[provider].where}.</p>
+      <p className="mb-3 text-sm text-ash-300">Get one at {providers[provider].keyWhere}.</p>
       <div className="flex gap-2">
         <input
           type="password"
@@ -66,7 +61,9 @@ function KeySection({
           value={key}
           onChange={(e) => setKey(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && key.trim() && save()}
-          placeholder={hasKey ? 'Paste a new key to replace it' : keyInfo[provider].placeholder}
+          placeholder={
+            hasKey ? 'Paste a new key to replace it' : providers[provider].keyPlaceholder
+          }
           className="flex-1 rounded-lg border border-forge-700 bg-forge-900 px-3 py-2 text-sm outline-none focus:border-molten-500/60"
         />
         <button onClick={save} disabled={!key.trim()} className={primary}>
@@ -263,8 +260,9 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
               Keys are encrypted with Windows secure storage and stay on this computer. Pick a model
               from either provider under the message box.
             </p>
-            <KeySection provider="claude" onChanged={onChanged} />
-            <KeySection provider="openai" onChanged={onChanged} />
+            {providerIds.map((p) => (
+              <KeySection key={p} provider={p} onChanged={onChanged} />
+            ))}
             <SpendingSection />
 
             <section>

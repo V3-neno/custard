@@ -1,7 +1,7 @@
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
-import { providerOf } from '../shared/chat'
+import { providerOf, type Provider } from '../shared/chat'
 
 // How much of a model's context window a request may use, checked before
 // every model call so a long chat stops cleanly instead of failing at the
@@ -42,7 +42,7 @@ export const COUNT_AT = 0.5
 export const COMPACT_TRIGGER = 400_000
 // Smallest trigger each provider accepts (Claude: 50,000; OpenAI's
 // compact_threshold: 1,000).
-const MIN_TRIGGER = { claude: 50_000, openai: 1_000 }
+const MIN_TRIGGER: Record<Provider, number> = { claude: 50_000, openai: 1_000 }
 
 // Input tokens a request may use for this model.
 export const budgetFor = (model: string): number => {

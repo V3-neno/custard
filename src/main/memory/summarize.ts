@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
-import OpenAI from 'openai'
-import type { Provider } from '../../shared/chat'
-import { anthropicEndpoint, openaiEndpoint } from '../endpoints'
+import { providerIds, providers, type Provider } from '../../shared/providers'
+import { anthropicEndpoint } from '../endpoints'
+import { responsesClient } from '../providers'
 import type { OnUsage } from '../../shared/pricing'
 import { fromClaude, fromOpenAI } from '../usage'
 
@@ -9,10 +9,9 @@ import { fromClaude, fromOpenAI } from '../usage'
 // out. It has no tools of any kind, so it can't act, read anything else or
 // reach the web; its answer is only ever turned into note text by code.
 
-export const SUMMARY_MODELS: Record<Provider, string> = {
-  claude: 'claude-haiku-4-5',
-  openai: 'gpt-6-luna'
-}
+export const SUMMARY_MODELS: Record<Provider, string> = Object.fromEntries(
+  providerIds.map((p) => [p, providers[p].summaryModel])
+) as Record<Provider, string>
 export const SUMMARY_LIMITS = { maxTokens: 1500, timeoutMs: 30_000, retries: 2 }
 
 // Whether what the user asked for was seen at a later check. Separate from
@@ -154,12 +153,12 @@ export type Summarizer = (evidence: string, signal?: AbortSignal) => Promise<Sum
 // `onUsage` is told what each call used (see usage.ts).
 export function summarizer(provider: Provider, apiKey: string, onUsage?: OnUsage): Summarizer {
   const opts = { timeout: SUMMARY_LIMITS.timeoutMs, maxRetries: SUMMARY_LIMITS.retries }
-  if (provider === 'openai') {
-    const client = new OpenAI({ apiKey, ...opts, ...openaiEndpoint() })
+  if (providers[provider].api === 'responses') {
+    const client = responsesClient(provider, apiKey, opts)
     return async (evidence, signal) => {
       const r = await client.responses.create(
         {
-          model: SUMMARY_MODELS.openai,
+          model: SUMMARY_MODELS[provider],
           instructions: SUMMARY_SYSTEM,
           input: evidence,
           max_output_tokens: SUMMARY_LIMITS.maxTokens,
@@ -171,7 +170,7 @@ export function summarizer(provider: Provider, apiKey: string, onUsage?: OnUsage
         },
         { signal }
       )
-      onUsage?.(SUMMARY_MODELS.openai, fromOpenAI(r.usage))
+      onUsage?.(SUMMARY_MODELS[provider], fromOpenAI(r.usage))
       if (r.status === 'incomplete') throw new Error('The summary was cut off.')
       return parseSummary(r.output_text)
     }
@@ -180,7 +179,7 @@ export function summarizer(provider: Provider, apiKey: string, onUsage?: OnUsage
   return async (evidence, signal) => {
     const m = await client.messages.create(
       {
-        model: SUMMARY_MODELS.claude,
+        model: SUMMARY_MODELS[provider],
         max_tokens: SUMMARY_LIMITS.maxTokens,
         system: SUMMARY_SYSTEM,
         messages: [{ role: 'user', content: evidence }],
@@ -188,7 +187,7 @@ export function summarizer(provider: Provider, apiKey: string, onUsage?: OnUsage
       },
       { signal }
     )
-    onUsage?.(m.model || SUMMARY_MODELS.claude, fromClaude(m.usage))
+    onUsage?.(m.model || SUMMARY_MODELS[provider], fromClaude(m.usage))
     if (m.stop_reason === 'refusal') throw new Error('The summary was declined.')
     if (m.stop_reason === 'max_tokens') throw new Error('The summary was cut off.')
     return parseSummary(m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))

@@ -86,6 +86,7 @@ import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type Tool
 import {
   chatModels,
   isMode,
+  introduce,
   providerOf,
   type ActionStatus,
   type ApprovalDecision,
@@ -97,6 +98,7 @@ import {
   type SendChatRequest
 } from '../shared/chat'
 import { toolLabel } from '../shared/vault'
+import { providers } from '../shared/providers'
 import { setRequestLookup, widgets } from './widgets'
 import { anthropicEndpoint } from './endpoints'
 import { modeName, modePolicy, refuseKind, toolKind } from './modes/policy'
@@ -167,7 +169,7 @@ const isCoreWrite = (name: string, input: unknown): boolean =>
   (name === 'design_jobs' && (input as { action?: unknown } | null)?.action === 'cancel')
 
 const systemPrompt = (model: (typeof chatModels)[number]): string =>
-  `${model.provider === 'claude' ? 'You are Claude' : `You are ${model.label}, an OpenAI model`}, ` +
+  `${introduce(model)}, ` +
   'working with the user through Custard, their personal desktop client. ' +
   'Format responses in Markdown when it helps readability.'
 
@@ -461,7 +463,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       withFiles(conversation.messages, files?.blocks ?? new Map()),
       available
     )
-    return model.provider === 'claude' ? claudeHistory(h, model.id) : h
+    return providers[model.provider].api === 'anthropic' ? claudeHistory(h, model.id) : h
   }
 
   // Checks the next request against the model's budget (see context.ts) and
@@ -839,7 +841,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     } else delete params.context_management
     if (!params.betas.length) delete params.betas
   }
-  if (model.provider === 'claude') compact(usesCompaction(model.id))
+  if (providers[model.provider].api === 'anthropic') compact(usesCompaction(model.id))
 
   running.set(requestId, controller)
   requestConversation.set(requestId, conversation.id)
@@ -929,7 +931,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         model,
         current,
         from:
-          model.provider === 'openai'
+          providers[model.provider].api === 'responses'
             ? openaiStart(conversation, model.id).from
             : usesCompaction(model.id)
               ? claudeFilesFrom(conversation.messages)
@@ -941,9 +943,10 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       files = prepared.files
       for (const a of files.missing) a.missing = true
     }
-    if (model.provider === 'openai') {
+    if (providers[model.provider].api === 'responses') {
       const end = await runOpenAI({
         requestId,
+        provider: model.provider,
         maxSteps: MAX_STEPS,
         apiKey,
         model: model.id,

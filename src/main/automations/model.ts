@@ -1,12 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import OpenAI from 'openai'
 import type { FunctionTool } from 'openai/resources/responses/responses'
 import { getApiKey } from '../apiKey'
-import { anthropicEndpoint, openaiEndpoint } from '../endpoints'
+import { anthropicEndpoint } from '../endpoints'
+import { responsesClient } from '../providers'
 import { toBlocks, toInput } from '../openai'
 import { describeError } from '../providerError'
 import { chatModels, providerNames } from '../../shared/chat'
+import { providers, type Provider } from '../../shared/providers'
 import type { Step, StepResult } from './run'
 import { charge } from '../store'
 import { claudeParts, fromOpenAI } from '../usage'
@@ -67,10 +68,11 @@ const toFunctionTool = (t: BetaTool): FunctionTool => ({
   strict: false
 })
 
-function openaiStep(modelId: string, apiKey: string): Step {
-  const provider = providerNames.openai
+// For a Responses API provider (see shared/providers.ts).
+function openaiStep(id: Provider, modelId: string, apiKey: string): Step {
+  const provider = providerNames[id]
   return async ({ system, messages, tools, signal }) => {
-    const client = new OpenAI({ apiKey, maxRetries: 0, ...openaiEndpoint() })
+    const client = responsesClient(id, apiKey, { maxRetries: 0 })
     let response
     try {
       response = await client.responses.create(
@@ -109,5 +111,7 @@ export function stepFor(modelId: string): Step | string {
   if (!model) return `The model ${modelId} isn't one Custard offers any more. Pick another.`
   const key = getApiKey(model.provider)
   if (!key) return `There is no ${providerNames[model.provider]} API key saved. Add it in Settings.`
-  return model.provider === 'claude' ? claudeStep(model.id, key) : openaiStep(model.id, key)
+  return providers[model.provider].api === 'anthropic'
+    ? claudeStep(model.id, key)
+    : openaiStep(model.provider, model.id, key)
 }

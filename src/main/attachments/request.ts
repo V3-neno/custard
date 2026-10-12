@@ -23,16 +23,30 @@ export type FileModel = { id: string; label: string; provider: Provider }
 // What each provider documents (checked 2026-10-07; see docs/attachments.md).
 const PROVIDER_LIMITS: Record<
   Provider,
-  { images: (m: string) => number; pdfPages: (m: string) => number | null }
+  {
+    images: (m: string) => number
+    pdfPages: (m: string) => number | null
+    // Refuses animated GIFs (Claude takes the first frame).
+    stillImagesOnly: boolean
+    // How images are counted: Claude's long-edge tiers, or OpenAI's patches.
+    imageCount: 'claude' | 'patches'
+  }
 > = {
   // 600 images, or 100 on 200K-context models; 600 PDF pages, or 100 on
   // models with less than a 1M context.
   claude: {
     images: (m) => (limitsFor(m).window < 1_000_000 ? 100 : 600),
-    pdfPages: (m) => (limitsFor(m).window < 1_000_000 ? 100 : 600)
+    pdfPages: (m) => (limitsFor(m).window < 1_000_000 ? 100 : 600),
+    stillImagesOnly: false,
+    imageCount: 'claude'
   },
   // 1,500 images per request; no page limit is documented.
-  openai: { images: () => 1_500, pdfPages: () => null }
+  openai: {
+    images: () => 1_500,
+    pdfPages: () => null,
+    stillImagesOnly: true,
+    imageCount: 'patches'
+  }
 }
 
 // Claude downscales images past a long edge and caps their tokens; models
@@ -46,7 +60,7 @@ const claudeTier = (model: string): { side: number; tokens: number } =>
 const OPENAI_PATCHES = 2_500
 
 export function imageTokens(model: FileModel, width?: number, height?: number): number {
-  if (model.provider === 'openai') {
+  if (PROVIDER_LIMITS[model.provider].imageCount === 'patches') {
     if (!width || !height) return OPENAI_PATCHES
     return Math.min(OPENAI_PATCHES, Math.ceil(width / 32) * Math.ceil(height / 32))
   }
@@ -168,7 +182,11 @@ export async function prepareFiles(opts: {
         add(i, placeholder(a, "Custard's copy is missing or changed, so it is no longer included."))
         continue
       }
-      if (model.provider === 'openai' && a.kind === 'image' && (a.frames ?? 1) > 1) {
+      if (
+        PROVIDER_LIMITS[model.provider].stillImagesOnly &&
+        a.kind === 'image' &&
+        (a.frames ?? 1) > 1
+      ) {
         const why = `${provider} doesn't accept animated GIFs.`
         if (isNow)
           return refuse(

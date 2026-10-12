@@ -66,6 +66,7 @@ function turn(
     events,
     t: {
       requestId: 'r',
+      provider: 'openai',
       maxSteps: 5,
       apiKey: 'sk-test',
       model,
@@ -320,5 +321,22 @@ describe('malformed tool arguments (L14)', () => {
     })
     await runOpenAI(t)
     expect(seen).toEqual([{ __custardMalformedArguments: '{"path": "x' }])
+  })
+})
+
+describe('OpenAI request features', () => {
+  it('asks for reasoning summaries, encrypted reasoning and an exact count', async () => {
+    requests.length = 0
+    replies = [completed([message('hi')])]
+    let counted = 0
+    const { t } = turn(conv(), 'gpt-6-luna', {
+      fits: async (_estimate, count) => ((counted = await count()), true)
+    })
+    await runOpenAI(t)
+    expect(counted).toBe(123)
+    const sent = requests.find((r) => r.path.endsWith('/responses'))!.body
+    expect(sent.reasoning).toEqual({ effort: 'low', summary: 'auto' })
+    expect(sent.include).toEqual(['reasoning.encrypted_content'])
+    expect(sent.store).toBe(false)
   })
 })

@@ -4,7 +4,6 @@ import type {
   BetaTool,
   BetaToolResultBlockParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import OpenAI from 'openai'
 import type {
   FunctionTool,
   ResponseInputContent,
@@ -23,7 +22,8 @@ import {
   usesCompaction
 } from './compaction'
 import { compactTrigger, estimateTokens, openaiCounter } from './context'
-import { openaiEndpoint } from './endpoints'
+import { responsesClient } from './providers'
+import { providerNames, responsesFeatures, type Provider } from '../shared/providers'
 import type { TokenUsage } from '../shared/pricing'
 import { fromOpenAI } from './usage'
 
@@ -34,6 +34,8 @@ const searchesIn = (output: ResponseOutputItem[]): number =>
 
 type Turn = {
   requestId: string
+  // A Responses API provider (see shared/providers.ts).
+  provider: Provider
   maxSteps: number
   apiKey: string
   model: string
@@ -166,7 +168,8 @@ export function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] 
 
 export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
   const { emit, requestId, log } = turn
-  const client = new OpenAI({ apiKey: turn.apiKey, ...openaiEndpoint() })
+  const client = responsesClient(turn.provider, turn.apiKey)
+  const features = responsesFeatures(turn.provider)
   // From the newest compaction this model made, if there is one.
   const start = openaiStart(turn.conversation, turn.model)
   let input: ResponseInputItem[] = [
@@ -174,11 +177,10 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
     ...toInput(turn.history.slice(start.from))
   ]
   const tools = turn.tools.length ? { tools: turn.tools.map(toFunctionTool) } : {}
-  const count = openaiCounter(client, {
-    model: turn.model,
-    instructions: turn.instructions,
-    ...tools
-  })
+  // Without a counting endpoint the estimate decides (see context.measure).
+  const count = features.tokenCount
+    ? openaiCounter(client, { model: turn.model, instructions: turn.instructions, ...tools })
+    : () => Promise.reject(new Error('No token counting'))
 
   for (let step = 0; step < turn.maxSteps; step++) {
     const sent = input
@@ -190,11 +192,17 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
           model: turn.model,
           instructions: turn.instructions,
           input,
-          reasoning: { effort: turn.effort, summary: 'auto' },
-          // Nothing is stored at OpenAI; reasoning is passed back encrypted so
-          // the model keeps its train of thought across tool calls.
+          reasoning: {
+            effort: turn.effort,
+            ...(features.reasoningSummary ? { summary: 'auto' as const } : {})
+          },
+          // Nothing is stored at the provider; reasoning is passed back
+          // encrypted so the model keeps its train of thought across tool
+          // calls.
           store: false,
-          include: ['reasoning.encrypted_content'],
+          ...(features.encryptedReasoning
+            ? { include: ['reasoning.encrypted_content' as const] }
+            : {}),
           ...tools,
           // The server compacts once the input passes the threshold and
           // returns an encrypted compaction item; works with store: false.
@@ -247,7 +255,10 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
         incomplete = true
         turn.onUsage?.(turn.model, fromOpenAI(event.response.usage, searchesIn(output)))
       } else if (event.type === 'response.failed') {
-        throw new Error(event.response.error?.message ?? 'OpenAI could not finish the reply.')
+        throw new Error(
+          event.response.error?.message ??
+            `${providerNames[turn.provider]} could not finish the reply.`
+        )
       } else if (event.type === 'error') {
         throw new Error(event.message)
       }
@@ -255,7 +266,7 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
 
     const calls = output.filter((o) => o.type === 'function_call')
     const compaction = output.findLast((o) => o.type === 'compaction')
-    if (compaction) recordOpenAICompaction(turn.conversation, compaction, turn.model)
+    if (compaction) recordOpenAICompaction(turn.conversation, compaction, turn.model, turn.provider)
     if (incomplete && calls.length > 0) return 'cut-off-tool'
     const blocks = toBlocks(output)
     log.addAssistant(blocks)
