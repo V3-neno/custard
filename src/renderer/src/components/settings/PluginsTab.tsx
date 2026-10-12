@@ -645,9 +645,7 @@ function PluginsTab(): React.JSX.Element {
     <div className="flex min-h-[420px] gap-5">
       <div className="w-44 shrink-0 border-r border-forge-700 pr-3">
         {plugins?.length === 0 && (
-          <p className="text-sm text-ash-500">
-            No plugins yet. Create one in Code mode under Plugins.
-          </p>
+          <p className="text-sm text-ash-500">No plugins yet. Create one in Plugins mode.</p>
         )}
         {plugins?.map((x) => (
           <button

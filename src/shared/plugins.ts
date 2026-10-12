@@ -146,7 +146,8 @@ export type TestReport = {
   skipped?: number
 }
 
-// Code-mode workspaces, stored on the conversation.
+// Plugins-mode workspaces, stored on the conversation. `general` was General
+// Code, since removed: old chats that have it open to read, but can't send.
 export type Workspace =
   { kind: 'internal'; pluginId: string } | { kind: 'general'; root: string; coreAccess?: boolean }
 

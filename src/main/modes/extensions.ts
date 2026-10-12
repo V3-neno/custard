@@ -89,6 +89,6 @@ export function extensionRefusal(kind: ExtensionKind, modeLabel: string): string
   if (kind === 'skill')
     return `${modeLabel} mode can't create or change skills, so nothing was done. Skills are made in Skills mode; you can draft the skill's text here for the user to copy.`
   if (kind === 'plugin')
-    return `${modeLabel} mode can't write plugin files, so nothing was done. Plugins are built in Code mode's Plugins workspace; you can draft a development prompt here for the user to copy.`
+    return `${modeLabel} mode can't write plugin files, so nothing was done. Plugins are built in Plugins mode; you can draft a development prompt here for the user to copy.`
   return "That path is inside Custard's own files, which notes can't be written to, so nothing was done."
 }

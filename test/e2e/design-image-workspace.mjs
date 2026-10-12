@@ -176,7 +176,7 @@ try {
   await w.getByRole('tab', { name: 'Design' }).click()
   await w.selectOption('#design-image-provider', 'openai-images')
   await w.waitForSelector('#design-image-model')
-  await w.click('button:text-is("Plugins")')
+  await w.click('[role=tab]:text-is("Plugins")')
   await w.click('button:has-text("Slowmo")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })

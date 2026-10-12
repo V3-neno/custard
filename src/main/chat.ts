@@ -172,14 +172,14 @@ const systemPrompt = (model: (typeof chatModels)[number]): string =>
 // Chat and Design use extensions but never make them; the app enforces it
 // (see modes/policy), and this says what to offer instead.
 const USE_ONLY =
-  " In this mode you can't create, change or install skills or plugins, or hand work to Code mode or another agent. When one would help, recommend it, and if the user asks, draft the skill's text or a development prompt in a code block for them to copy. Never say one was sent, built or installed."
+  " In this mode you can't create, change or install skills or plugins, or hand work to Plugins mode or another agent. When one would help, recommend it, and if the user asks, draft the skill's text or a development prompt in a code block for them to copy. Never say one was sent, built or installed."
 
 // Each mode keeps its own history and nudges Claude toward that kind of work.
 const MODE_PROMPTS: Record<Mode, string> = {
   chat: 'The user is in Chat mode: a general conversation.' + USE_ONLY,
   code:
-    'The user is in Code mode. Act as a senior software engineer: give complete, working code in fenced blocks with the language named, ' +
-    'explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
+    'The user is in Plugins mode, where Custard plugins are built and improved. Act as a senior software engineer: when a plugin is chosen, work on it with the workspace tools; ' +
+    'otherwise answer questions about plugins and suggest picking one or creating a new one. Explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
   design:
     'The user is in Design mode. Act as a product and visual designer: think about layout, hierarchy, color, typography, spacing and interaction states. ' +
     'When the user wants a page, mockup or UI, make it with design_html: send the complete document (inline CSS and JS, or local files through `files`), never a fragment, and never only a code block. ' +
@@ -188,9 +188,9 @@ const MODE_PROMPTS: Record<Mode, string> = {
     "The user's own words override skill defaults. Report only the checks design_html says ran, and describe the design choices briefly." +
     USE_ONLY,
   skills: [
-    "The user is in Skills mode. You curate their Obsidian vault, Custard's long-term brain, so that future answers in Chat, Code and Design get better.",
+    "The user is in Skills mode. You curate their Obsidian vault, Custard's long-term brain, so that future answers in Chat, Design and Plugins get better.",
     "- If the vault isn't connected, ask them to connect it in Settings and stop there.",
-    '- Create skills as Custard/Skills/<kebab-case-name>/SKILL.md. Frontmatter has `name`, `description` (one sentence saying when to use the skill; this decides whether it gets used) and, optionally, `modes: code, design` to load it only in those modes (leave it out for every mode). The body is concrete, step-by-step instructions with the conventions and short examples a model needs.',
+    '- Create skills as Custard/Skills/<kebab-case-name>/SKILL.md. Frontmatter has `name`, `description` (one sentence saying when to use the skill; this decides whether it gets used) and, optionally, `modes: plugins, design` to load it only in those modes (leave it out for every mode). The body is concrete, step-by-step instructions with the conventions and short examples a model needs.',
     '- Before creating a skill, list Custard/Skills and read related skills so you extend rather than duplicate. You can only add to existing notes, so improve a skill by appending a clearly headed section.',
     '- Learn from the user: ask about their stack, coding conventions, design taste and writing style, and turn the answers into skills or memory.',
     '- To improve the vault, survey it with vault_list and vault_search: look for duplicates, orphan notes, missing links and inconsistent names. You can create index notes and append links, but you cannot move, rename, rewrite or delete notes, so give the user a short checklist for those to do in Obsidian.',
@@ -268,6 +268,10 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   if (!existing && !isMode(req.mode)) return refuse('Unknown mode.')
   if (existing && active.has(existing.id))
     return refuse('This chat is still answering. Wait for it to finish or stop it first.')
+  if (existing?.workspace?.kind === 'general')
+    return refuse(
+      'General Code was removed, so this chat is kept to read only. Start a new chat to keep going.'
+    )
   if (fileIds.length && !acceptsAttachments(existing?.mode ?? req.mode))
     return refuse('Files can be attached in Chat and Design modes only.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
@@ -546,7 +550,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const runTool = async (c: Call): Promise<ToolRun> => {
     emit({ requestId, type: 'tool', id: c.id, label: c.label, status: 'running', write: c.write })
     // Only tools offered in this turn run: a call to anything else (a
-    // plugin's tool in General Code, or one from an earlier turn) is refused.
+    // plugin's tool with no plugin chosen, or one from an earlier turn) is refused.
     if (!available.has(c.name))
       return {
         content: `${c.name} isn't available in this chat, so nothing was done.`,

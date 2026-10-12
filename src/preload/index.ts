@@ -29,13 +29,7 @@ import type {
   ProviderListing,
   SkillChange
 } from '../shared/design'
-import type {
-  PluginReview,
-  PluginStatus,
-  SecurityDefaults,
-  TestReport,
-  Workspace
-} from '../shared/plugins'
+import type { PluginReview, PluginStatus, SecurityDefaults, TestReport } from '../shared/plugins'
 
 // API exposed to the renderer as window.custard. The renderer never sees the
 // API keys; all model calls happen in the main process.
@@ -195,9 +189,6 @@ const custard = {
   security: {
     get: (): Promise<SecurityDefaults> => ipcRenderer.invoke('security:get'),
     set: (s: SecurityDefaults): Promise<void> => ipcRenderer.invoke('security:set', s)
-  },
-  workspace: {
-    pickGeneral: (): Promise<Workspace | null> => ipcRenderer.invoke('workspace:pickGeneral')
   },
   conversations: {
     list: (mode: Mode): Promise<ConversationSummary[]> =>

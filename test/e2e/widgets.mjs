@@ -178,7 +178,7 @@ const shot = async (n) => {
 }
 const activate = async (name) => {
   await w.click('button[title=Settings]')
-  await w.click('button:text-is("Plugins")')
+  await w.click('[role=tab]:text-is("Plugins")')
   await w.click(`button:has-text("${name}")`)
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
@@ -429,7 +429,7 @@ try {
   await idle()
   await slot().waitFor({ timeout: 10000 })
   await w.click('button[title=Settings]')
-  await w.click('button:text-is("Plugins")')
+  await w.click('[role=tab]:text-is("Plugins")')
   await w.click('button:has-text("Tally")')
   await w.click('button:text-is("Disable")')
   await w.waitForSelector('button:text-is("Enable")')
@@ -458,7 +458,7 @@ try {
 
   step("Spotify's own player widget, on the same host")
   await w.click('button[title=Settings]')
-  await w.click('button:text-is("Plugins")')
+  await w.click('[role=tab]:text-is("Plugins")')
   await w.click('button:has-text("Spotify")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })

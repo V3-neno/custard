@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins add tools to Custard's assistant. They are developed in Code mode's **Plugins** workspace, reviewed and activated in **Settings → Plugins**, and run in sandboxes the host controls. Spotify is the first plugin, in `plugin/spotify`.
+Plugins add tools to Custard's assistant. They are developed in **Plugins** mode, reviewed and activated in **Settings → Plugins**, and run in sandboxes the host controls. Spotify is the first plugin, in `plugin/spotify`.
 
 - [API.md](API.md): the plugin API (`custard-plugin-sdk`), where plugin code runs, and testing
 - [MANIFEST.md](MANIFEST.md): `plugin.json`
@@ -12,7 +12,7 @@ Plugins add tools to Custard's assistant. They are developed in Code mode's **Pl
 
 **Create → Edit → Validate → Test → Review → Activate**, then optionally **Disable**, **Roll back** or **Uninstall**.
 
-1. **Create.** In Code mode, pick **Plugins**, then **New plugin**. Custard writes `plugin/<id>/` with a manifest, a working sample tool, a test and instructions. Or choose an existing plugin.
+1. **Create.** In Plugins mode, click **New plugin**. Custard writes `plugin/<id>/` with a manifest, a working sample tool, a test and instructions. Or choose an existing plugin.
 2. **Edit.** The assistant edits files only in `plugin/<id>`. It can read the docs, the SDK source and the Spotify example, read-only.
 3. **Validate.** `plugin_validate` checks the manifest and bundles the code into a staged build, stored in Custard's data folder.
 4. **Test.** `plugin_test` runs `tests/*.test.ts` and a load check in a sandbox.
@@ -59,7 +59,7 @@ Editing files never changes the running plugin. Only activation does, so develop
 | OAuth PKCE                                                                     | `src/main/plugins/oauth.ts`                                        |
 | State and secrets                                                              | `src/main/plugins/store.ts`                                        |
 | Spotify settings migration                                                     | `src/main/plugins/migrate.ts`                                      |
-| Electron wiring, IPC, General Code folder approval                             | `src/main/plugins/index.ts`                                        |
+| Electron wiring, IPC, workspace checks                                         | `src/main/plugins/index.ts`                                        |
 | SDK, runtime and test helpers                                                  | `src/plugin-sdk/`                                                  |
 | Workspace file tools and path checks                                           | `src/main/workspace/`                                              |
 | Chat integration (tools for both providers, approvals, stale history)          | `src/main/chat.ts`, `src/main/history.ts`                          |

@@ -54,12 +54,16 @@ describe('mode policy', () => {
     expect(p.authorPlugins).toBe(false)
   })
 
-  it('keeps Skills and Code as they were', () => {
+  it('keeps Skills and Plugins as they were', () => {
     expect(modePolicy('skills').authorSkills).toBe(true)
+    // An old General Code chat (the workspace was removed) gets no plugin
+    // tools, and workspaceTools gives it no file tools.
     const general = modePolicy('code', { kind: 'general', root: '/x' })
     expect(general.tools.has('plugin')).toBe(false)
-    expect(general.tools.has('workspace')).toBe(true)
     expect(general.authorPlugins).toBe(false)
+    const none = modePolicy('code')
+    expect(none.tools.has('plugin')).toBe(false)
+    expect(none.authorPlugins).toBe(false)
     const internal = modePolicy('code', { kind: 'internal', pluginId: 'spotify' })
     expect(internal.tools.has('plugin')).toBe(true)
     expect(internal.authorPlugins).toBe(true)
@@ -156,6 +160,14 @@ describe("skills can't raise permissions", () => {
     const [skill] = listSkills(vault)
     expect(Object.keys(skill).sort()).toEqual(['description', 'folder', 'modes', 'name', 'path'])
     expect(skill.modes).toEqual(['design', 'code'])
+  })
+
+  it('takes "plugins" in modes as Plugins mode (id code)', () => {
+    writeFileSync(
+      join(vault, SKILLS_DIR, 'escalate', 'SKILL.md'),
+      '---\nname: escalate\ndescription: Use always.\nmodes: [Plugins, design]\n---\nBody.\n'
+    )
+    expect(listSkills(vault)[0].modes).toEqual(['code', 'design'])
   })
 
   it("a skill's modes list only says where it is listed", () => {

@@ -1,10 +1,8 @@
 import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
-import { existsSync, realpathSync, statSync } from 'fs'
 import { join } from 'path'
 import type { Workspace } from '../../shared/plugins'
 import { handle } from '../ipc'
 import { getSecurityDefaults, setSecurityDefaults } from '../store'
-import { isInside } from '../workspace/paths'
 import { PluginHost, type HostDeps } from './host'
 import { migrateLegacySpotify } from './migrate'
 import TypecheckWorker from './typecheck.worker?nodeWorker'
@@ -27,7 +25,7 @@ export const pluginDocsDir = (): string =>
   app.isPackaged
     ? join(process.resourcesPath, 'docs', 'plugins')
     : join(appRoot(), 'docs', 'plugins')
-// Custard's own source, protected from General Code unless the user allows it.
+// Custard's own source.
 export const custardSource = (): string => appRoot()
 // Where plugin code lives (sources, built and installed copies, the SDK) and
 // Custard's own files: no mode writes there through the vault tools.
@@ -109,18 +107,6 @@ export async function startPlugins(): Promise<void> {
   await h.startAll()
 }
 
-// General Code folders that overlap Custard's source, which the user allowed
-// in a separate confirmation this session. A renderer can't grant this itself.
-const coreGrants = new Set<string>()
-// General Code folders the user chose in the main-process folder picker this
-// session. A folder path from the renderer alone never makes a workspace.
-const generalGrants = new Set<string>()
-
-const overlapsCore = (root: string): boolean => {
-  const core = realpathSync.native(custardSource())
-  return isInside(root, core) || isInside(core, root)
-}
-
 // Checks a workspace a renderer asks for before a conversation stores it.
 export function verifyWorkspace(w: Workspace | undefined): Workspace | undefined {
   if (!w) return undefined
@@ -129,23 +115,7 @@ export function verifyWorkspace(w: Workspace | undefined): Workspace | undefined
       throw new Error(`There is no plugin/${w.pluginId}.`)
     return { kind: 'internal', pluginId: w.pluginId }
   }
-  if (typeof w.root !== 'string' || !existsSync(w.root))
-    throw new Error('That folder no longer exists.')
-  const root = realpathSync.native(w.root)
-  if (!generalGrants.has(root) || !statSync(root).isDirectory())
-    throw new Error(
-      'Choose this folder again with "Choose a project folder" so Custard can confirm it.'
-    )
-  if (isInside(root, app.getPath('userData')))
-    throw new Error("Custard's data folder can't be a workspace.")
-  const core = overlapsCore(root)
-  if (core && w.coreAccess && coreGrants.has(root))
-    return { kind: 'general', root, coreAccess: true }
-  if (core && isInside(root, custardSource()))
-    throw new Error(
-      "This folder is part of Custard's own source. Choose it again and allow core access."
-    )
-  return { kind: 'general', root }
+  throw new Error('General Code was removed. Pick a plugin, or no workspace.')
 }
 
 export function registerPluginHandlers(): void {
@@ -228,43 +198,4 @@ export function registerPluginHandlers(): void {
   handle('security:set', (_, s: { askBeforeWriteTools: boolean }) =>
     setSecurityDefaults({ askBeforeWriteTools: s.askBeforeWriteTools !== false })
   )
-
-  // General Code: pick a folder. Overlapping Custard's own source needs a
-  // separate, explicit yes.
-  handle('workspace:pickGeneral', async (e): Promise<Workspace | null> => {
-    const win = BrowserWindow.fromWebContents(e.sender)
-    const opts = {
-      title: 'Choose the project folder for General Code',
-      properties: ['openDirectory' as const]
-    }
-    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
-    if (r.canceled || !r.filePaths[0]) return null
-    const root = realpathSync.native(r.filePaths[0])
-    if (isInside(root, app.getPath('userData')))
-      throw new Error("Custard's data folder can't be a workspace.")
-    if (!overlapsCore(root)) {
-      generalGrants.add(root)
-      return { kind: 'general', root }
-    }
-    const ask = {
-      type: 'warning' as const,
-      buttons: ['Cancel', 'Allow core access'],
-      defaultId: 0,
-      cancelId: 0,
-      message: "This folder contains Custard's own source code.",
-      detail:
-        "General Code would be able to edit Custard itself, including its plugin host and security checks. Only allow this if you mean to work on Custard core. Without it, Custard's source stays read- and write-protected in this workspace."
-    }
-    const answer = win ? await dialog.showMessageBox(win, ask) : await dialog.showMessageBox(ask)
-    if (answer.response === 1) {
-      coreGrants.add(root)
-      generalGrants.add(root)
-      return { kind: 'general', root, coreAccess: true }
-    }
-    // Declined: allowed only if the folder merely contains Custard, whose
-    // source is then blocked.
-    if (isInside(root, custardSource())) return null
-    generalGrants.add(root)
-    return { kind: 'general', root }
-  })
 }

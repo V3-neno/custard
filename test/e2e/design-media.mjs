@@ -165,7 +165,7 @@ try {
   await w.waitForSelector('text=· connected')
 
   step('Activating the fixture asks for media:video')
-  await w.click('button:text-is("Plugins")')
+  await w.click('[role=tab]:text-is("Plugins")')
   await w.click('button:has-text("Slowmo")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
@@ -289,7 +289,7 @@ try {
 
   step('Disabling the plugin')
   await w.click('button[title=Settings]')
-  await w.click('button:text-is("Plugins")')
+  await w.click('[role=tab]:text-is("Plugins")')
   await w.click('button:has-text("Slowmo")')
   await w.click('button:text-is("Disable")')
   await w.click('button:text-is("Done")')

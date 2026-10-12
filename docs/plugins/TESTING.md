@@ -73,7 +73,7 @@ It doesn't exercise the real Spotify API, a real browser sign-in or the OS sandb
 
 Run with `npm run dev` on Windows, with an API key, a vault and a Spotify Premium account. See [../SPOTIFY.md](../SPOTIFY.md) for the Spotify app setup.
 
-1. **Open the Plugins workspace and select Spotify.** Go to Code mode, choose Workspace **Plugins**, then pick **Spotify (spotify)**. The workspace line shows `Plugins · plugin/spotify` once you send.
+1. **Open the Plugins workspace and select Spotify.** Go to Plugins mode, then pick **Spotify (spotify)**. The workspace line shows `Plugins · plugin/spotify` once you send.
 2. **Edit only its folder.**
    - Ask: "Bump the version to 1.0.1 and make the search tool's default limit 6."
    - The stages show reads and writes under `plugin/spotify` only.
@@ -114,8 +114,5 @@ Run with `npm run dev` on Windows, with an API key, a vault and a Spotify Premiu
 Also check on Windows:
 
 - **OS sandbox.** Task Manager → Details → enable the _Command line_ column. The plugin renderer processes (`--type=renderer` with a `custard-plugin-…` partition) must not have `--no-sandbox`.
-- **General Code.**
-  - Pick a project folder and ask for a change. Files outside it are refused.
-  - Pick the Custard repository itself. A warning asks for core access. Cancel, and the folder isn't used.
 - **Write approvals.** Click **Don't allow** on a queue card. The reply says nothing was queued, and Spotify shows nothing new.
 - **Uninstall.** Afterwards Spotify shows "Not activated", the Client ID is gone, and `plugin/spotify` is still there.

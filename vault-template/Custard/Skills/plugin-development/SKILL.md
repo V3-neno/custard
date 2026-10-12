@@ -1,7 +1,7 @@
 ---
 name: plugin-development
-description: Use when building, changing, testing or reviewing a Custard plugin in Code mode's Plugins workspace.
-modes: code
+description: Use when building, changing, testing or reviewing a Custard plugin in Plugins mode.
+modes: plugins
 ---
 
 # Plugin development

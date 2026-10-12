@@ -11,7 +11,7 @@ This skill is guidance, not a security mechanism. What a skill may touch is deci
 
 1. **List first.** List `Custard/Skills` and read related skills so you extend rather than duplicate. You can add to existing notes, so improve a skill by adding a clearly headed section.
 2. **One folder, one file.** A skill is `Custard/Skills/<kebab-case-name>/SKILL.md`. Use the folder name as the skill's `name:` so the two never differ.
-3. **Frontmatter.** `name`, `description` and, optionally, `modes: code, design` (leave it out to load in every mode). Keep `description` to one sentence that says *when* to use the skill: it is all the model sees until a request matches, and it decides whether the skill is read.
+3. **Frontmatter.** `name`, `description` and, optionally, `modes: plugins, design` (leave it out to load in every mode). Keep `description` to one sentence that says *when* to use the skill: it is all the model sees until a request matches, and it decides whether the skill is read.
 4. **Write the body as steps.** Concrete, numbered, with the conventions and a short example. Say what to read, what to write, where, and what to report. Don't explain what the model already knows.
 5. **Keep it short.** Only the name and description go in every prompt, and only about 60 skills are listed. A skill read in full is cut at 20,000 characters, so put what matters first.
 6. **Name real places.** Use exact folder and note names. Notes you read come back with `&`, `<` and `>` escaped; write real characters when you edit.

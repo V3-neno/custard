@@ -128,7 +128,7 @@ try {
     await w.locator('input[aria-label="Remember automatically"]').isChecked(),
     '"Remember automatically" is on by default'
   )
-  await w.click('button:text-is("Plugins")')
+  await w.click('[role=tab]:text-is("Plugins")')
   await w.click('button:has-text("Spotify")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })

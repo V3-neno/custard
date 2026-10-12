@@ -136,7 +136,7 @@ Only the chat on screen has a live view; at most one view exists at a time. A ch
 
 ## The assistant's tools
 
-When the chat may use plugins (every mode except General Code) and at least one widget is enabled and approved, the assistant gets two tools:
+When the chat may use plugins (every mode; in Plugins mode only once a plugin is chosen) and at least one widget is enabled and approved, the assistant gets two tools:
 
 - `widget_show { widget: "<plugin>/<widget>", input?: {...} }` shows a widget in this chat, replacing any other, or updates its input if it is already showing. It runs no plugin action. `widget` is an enum of the enabled widgets.
 - `widget_hide {}` takes this chat's widget away.

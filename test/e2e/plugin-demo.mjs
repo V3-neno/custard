@@ -78,7 +78,7 @@ const fail = async (e) => {
 }
 const settings = async () => {
   await w.click('button[title=Settings]')
-  await w.click('button:text-is("Plugins")')
+  await w.click('[role=tab]:text-is("Plugins")')
   await w.click('button:has-text("Spotify")')
 }
 const closeSettings = () => w.click('button:text-is("Done")')
@@ -111,7 +111,6 @@ try {
   await closeSettings()
 
   step('1-2. Plugins workspace, Spotify selected, edits only inside plugin/spotify')
-  await w.click('button:text-is("Code")')
   await w.click('button:text-is("Plugins")')
   await w.selectOption('select[aria-label=Plugin]', 'spotify')
   await shot('01-plugins-workspace')

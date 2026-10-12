@@ -68,8 +68,8 @@ function upsertTool(segments: Segment[], tool: Extract<Segment, { kind: 'tool' }
 const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState }> = {
   chat: { headline: "What's on your mind?", placeholder: 'Message {provider}…', orb: 'breathing' },
   code: {
-    headline: 'What are we building?',
-    placeholder: 'Describe the code you need…',
+    headline: 'Which plugin are we building?',
+    placeholder: 'Describe the plugin or the change you want…',
     orb: 'connecting'
   },
   design: {
@@ -162,7 +162,7 @@ function ChatView(props: Props): React.JSX.Element {
   // Both belong to the chat they were made for.
   const [handoffFor, setHandoffFor] = useState<{ id: string; state: HandoffState } | null>(null)
   const [linksFor, setLinksFor] = useState<{ id: string; links: ChatLink[] } | null>(null)
-  // Code mode: the workspace for the next new conversation.
+  // Plugins mode: the workspace for the next new conversation.
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
   // The request in flight, read by the event listener without re-subscribing.

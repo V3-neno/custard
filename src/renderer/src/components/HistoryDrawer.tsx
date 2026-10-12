@@ -44,13 +44,13 @@ function HistoryDrawer(props: Props): React.JSX.Element {
           onClick={onNew}
           className="mx-4 mb-3 flex items-center gap-2 rounded-xl border border-forge-700 px-3 py-2.5 text-sm text-ash-300 transition-colors hover:border-molten-500/50 hover:text-molten-200"
         >
-          <PlusIcon /> New {modeLabel.toLowerCase()}
+          <PlusIcon /> {modeLabel === 'Chat' ? 'New chat' : `New ${modeLabel.toLowerCase()} chat`}
         </button>
         <div className="forge-line mx-4 mb-2" />
         <div className="flex-1 overflow-y-auto px-3 pb-4">
           {conversations.length === 0 && (
             <p className="px-2 py-6 text-center text-sm text-ash-500">
-              Nothing here yet. Your {modeLabel.toLowerCase()} sessions will show up here.
+              Nothing here yet. Chats you start in {modeLabel} will show up here.
             </p>
           )}
           {conversations.map((c) => (

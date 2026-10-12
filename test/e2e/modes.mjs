@@ -7,6 +7,7 @@
 //   - a skill whose frontmatter and text claim permissions changes nothing
 //     about the tools Design is offered (Chat's, plus its own design_ tools)
 //   - Skills mode can still propose a skill (it asks first, as before)
+//   - the mode bar reads Chat, Design, Plugins (was Code), Skills
 // Usage, from the repo root after `npx electron-vite build`:
 //   node test/e2e/interrupt-mock.mjs <out> &   (with <out>/vault and <out>/plugin as for widgets.mjs)
 //   node test/e2e/modes.mjs <out> <screenshot dir>
@@ -114,6 +115,19 @@ const turn = async (t) => {
 }
 
 try {
+  step('Mode bar: Chat, Design, Plugins, Skills')
+  const bar = await w
+    .locator('button[title]')
+    .evaluateAll((bs) =>
+      bs
+        .map((b) => b.textContent.trim())
+        .filter((t) => ['Chat', 'Code', 'Design', 'Plugins', 'Skills'].includes(t))
+    )
+  check(
+    bar.join(',') === 'Chat,Design,Plugins,Skills',
+    `the mode bubbles read Chat, Design, Plugins, Skills (${bar.join(', ')})`
+  )
+
   step('Setup: key and vault')
   await w.click('button[title=Settings]')
   await w.fill('input[aria-label="Claude API key"]', 'sk-ant-test')

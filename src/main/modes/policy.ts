@@ -17,7 +17,7 @@ export type ToolKind =
   | 'plugin' // an enabled plugin's tool, <plugin>__<tool>
   | 'widget' // widget_show, widget_hide
   | 'questions' // automation_question: closes an automation's open question
-  | 'workspace' // Code mode's file tools
+  | 'workspace' // Plugins mode's file tools
   | 'design' // design_html, design_media, design_jobs: Design's outputs
   | 'unknown' // anything else: never allowed
 
@@ -28,7 +28,7 @@ export type ModePolicy = {
   tools: ReadonlySet<ToolKind>
   // May write into the skills folder (through vault_create_note).
   authorSkills: boolean
-  // May change plugin source (Code's Plugins workspace, through its file
+  // May change plugin source (Plugins mode's workspace, through its file
   // tools). No mode may write plugin files through the vault tools.
   authorPlugins: boolean
 }
@@ -60,7 +60,8 @@ export function modePolicy(mode: Mode, workspace?: Workspace): ModePolicy {
         authorPlugins: false
       }
     case 'code': {
-      // General Code gets no plugin tools: only the Plugins workspace does.
+      // Plugin tools only with a plugin chosen (and never in an old General
+      // Code chat, which can't send anyway).
       const internal = workspace?.kind === 'internal'
       const tools: ToolKind[] = ['vault-read', 'vault-write', 'web', 'workspace']
       if (internal) tools.push('plugin', 'widget')
@@ -88,7 +89,7 @@ export function toolKind(name: string, sources: ToolSources): ToolKind {
 
 const MODE_NAMES: Record<Mode, string> = {
   chat: 'Chat',
-  code: 'Code',
+  code: 'Plugins',
   design: 'Design',
   skills: 'Skills'
 }
