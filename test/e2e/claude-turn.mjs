@@ -273,7 +273,7 @@ const chats = () => {
 const ids = new Map()
 const norm = (v) =>
   JSON.parse(
-    JSON.stringify(v, (k, x) => {
+    JSON.stringify(v, function (k, x) {
       if (k === 'requestId' || k === 'id' || k === 'tool_use_id') {
         if (typeof x !== 'string') return x
         if (!ids.has(x)) ids.set(x, `#${ids.size + 1}`)
@@ -283,6 +283,9 @@ const norm = (v) =>
       // Background work (memory capture, the chat note) runs on its own
       // clock, apart from the turn.
       if (k === 'memory' || k === 'chatNote') return undefined
+      // The model and effort a chat keeps (Phase 6), on the saved chat
+      // only; the request's own model is still compared.
+      if ((k === 'model' || k === 'effort') && 'title' in this && 'mode' in this) return undefined
       if (typeof x === 'string')
         return x
           .replace(/\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?/g, '<date>')
