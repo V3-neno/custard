@@ -100,9 +100,27 @@ export const providerErrorKinds = [
   'bad_request',
   // Any other 5xx.
   'server',
+  // The provider answered, but not in the documented shape (a model list
+  // that isn't one, say).
+  'bad_response',
   // Stopped by the user.
   'aborted',
   'unknown'
 ] as const
 
 export type ProviderErrorKind = (typeof providerErrorKinds)[number]
+
+// The last key check for a provider (Settings → Save or Refresh), as
+// Settings shows it. Holds no key.
+export type ModelCheck = {
+  checkedAt: number
+  // ok: the key works and the list came back. 'auth': the provider rejected
+  // the key. Anything else: it couldn't be checked, and the saved key was
+  // left as it is.
+  result: 'ok' | ProviderErrorKind
+  // The plain-language reason when it isn't ok.
+  message?: string
+  // From a successful check: Custard's models, each usable with this key or
+  // not, then (DeepSeek) the ones Custard doesn't support yet.
+  models: { id: string; label: string; available: boolean; source: 'profile' | 'discovered' }[]
+}

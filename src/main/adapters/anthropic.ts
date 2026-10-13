@@ -22,7 +22,15 @@ import {
 } from '../context'
 import { anthropicEndpoint } from '../endpoints'
 import { claudeParts, fromClaude } from '../usage'
-import { authenticateWith, knownModels } from './common'
+import {
+  authenticateWith,
+  CHECK_OPTS,
+  knownModels,
+  listCall,
+  listingFrom,
+  parseModelList,
+  type RawModel
+} from './common'
 import { capabilitiesOf } from './capabilities'
 import type { OneShotRequest, OneShotResult, ProviderAdapter, TurnEnd, TurnRequest } from './types'
 
@@ -195,14 +203,34 @@ async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
   }
 }
 
+// GET /v1/models, every page (at most 5 of 1,000).
+const listRaw = (apiKey: string, signal?: AbortSignal): Promise<RawModel[]> =>
+  listCall('claude', apiKey, async () => {
+    const api = client(apiKey, CHECK_OPTS)
+    const out: RawModel[] = []
+    let after: string | undefined
+    for (let page = 0; page < 5; page++) {
+      const body = await api.get('/v1/models', {
+        query: { limit: 1000, ...(after ? { after_id: after } : {}) },
+        signal
+      })
+      out.push(...parseModelList(body, 'claude'))
+      const b = body as { has_more?: unknown; last_id?: unknown }
+      if (b.has_more !== true || typeof b.last_id !== 'string') break
+      after = b.last_id
+    }
+    return out
+  })
+
 export const anthropicAdapter: ProviderAdapter = {
   id: 'claude',
   api: 'anthropic',
   authenticate: (apiKey, signal) =>
-    authenticateWith('claude', () =>
-      client(apiKey, { maxRetries: 0 }).models.list({ limit: 1 }, { signal })
-    ),
-  listModels: async () => ({ models: knownModels('claude'), checkedAt: null }),
+    authenticateWith('claude', apiKey, () => listRaw(apiKey, signal)),
+  listModels: async (apiKey, signal) =>
+    apiKey
+      ? listingFrom('claude', await listRaw(apiKey, signal), false, Date.now())
+      : { models: knownModels('claude'), checkedAt: null },
   getCapabilities: capabilitiesOf,
   sendMessage,
   streamMessage,

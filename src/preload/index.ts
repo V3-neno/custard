@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { MemorySettings } from '../shared/memory'
-import type { ListedModel } from '../shared/adapter'
+import type { ListedModel, ModelCheck } from '../shared/adapter'
 import type {
   ChatLink,
   ChatEvent,
@@ -45,7 +45,11 @@ const custard = {
   },
   models: {
     // Every provider's models, from its adapter.
-    list: (): Promise<ListedModel[]> => ipcRenderer.invoke('models:list')
+    list: (): Promise<ListedModel[]> => ipcRenderer.invoke('models:list'),
+    // Asks the provider, with the saved key. Settings' Save and Refresh only.
+    check: (p: Provider): Promise<ModelCheck | null> => ipcRenderer.invoke('models:check', p),
+    lastCheck: (p: Provider): Promise<ModelCheck | null> =>
+      ipcRenderer.invoke('models:lastCheck', p)
   },
   settings: {
     get: (): Promise<ChatSettings> => ipcRenderer.invoke('settings:get'),

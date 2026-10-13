@@ -3,6 +3,7 @@ import { providerIds, providers, providerNames, type Provider } from '../../../s
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
 import type { UsageMonth } from '../../../shared/chat'
+import type { ModelCheck } from '../../../shared/adapter'
 import { formatCost } from '../../../shared/pricing'
 
 import DesignTab from './settings/DesignTab'
@@ -12,6 +13,22 @@ import { cleanError, primary, secondary } from './settings/ui'
 
 type Props = { onClose: () => void; onChanged: () => void }
 type Tab = 'general' | 'design'
+
+const checkedAt = (t: number): string =>
+  new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+
+// What the last check found, in a sentence.
+function checkLine(provider: Provider, c: ModelCheck): { text: string; ok: boolean } {
+  const name = providerNames[provider]
+  const at = checkedAt(c.checkedAt)
+  if (c.result === 'ok') return { text: `Checked ${at}: the key works.`, ok: true }
+  if (c.result === 'auth')
+    return { text: `Checked ${at}: ${name} rejected this key. Paste a new one above.`, ok: false }
+  return {
+    text: `Couldn't check at ${at}. ${c.message ?? ''} Your saved key wasn't changed.`,
+    ok: false
+  }
+}
 
 function KeySection({
   provider,
@@ -23,11 +40,28 @@ function KeySection({
   const [key, setKey] = useState('')
   const [hasKey, setHasKey] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The last check with the provider (Save or Refresh only), and whether one
+  // is running.
+  const [check, setCheck] = useState<ModelCheck | null>(null)
+  const [checking, setChecking] = useState(false)
+  const name = providerNames[provider]
 
   const refresh = useCallback(() => window.custard.apiKey.has(provider).then(setHasKey), [provider])
   useEffect(() => {
     refresh()
-  }, [refresh])
+    window.custard.models.lastCheck(provider).then(setCheck)
+  }, [refresh, provider])
+
+  const runCheck = async (): Promise<void> => {
+    setChecking(true)
+    try {
+      setCheck(await window.custard.models.check(provider))
+    } catch (e) {
+      setError(cleanError(e))
+    } finally {
+      setChecking(false)
+    }
+  }
 
   const save = async (): Promise<void> => {
     try {
@@ -38,26 +72,31 @@ function KeySection({
       onChanged()
     } catch (e) {
       setError(cleanError(e))
+      return
     }
+    await runCheck()
   }
 
   const clear = async (): Promise<void> => {
     await window.custard.apiKey.clear(provider)
+    setCheck(null)
     refresh()
     onChanged()
   }
 
+  const line = check && checkLine(provider, check)
+  const known = check?.models.filter((m) => m.source === 'profile') ?? []
+  const unsupported = check?.models.filter((m) => m.source === 'discovered') ?? []
   return (
-    <section className="mb-6">
+    <section className="mb-6" data-provider-key={provider}>
       <h3 className="mb-1 text-sm font-medium">
-        {providerNames[provider]} API key{' '}
-        {hasKey && <span className="text-molten-300">· saved</span>}
+        {name} API key {hasKey && <span className="text-molten-300">· saved</span>}
       </h3>
       <p className="mb-3 text-sm text-ash-300">Get one at {providers[provider].keyWhere}.</p>
       <div className="flex gap-2">
         <input
           type="password"
-          aria-label={`${providerNames[provider]} API key`}
+          aria-label={`${name} API key`}
           value={key}
           onChange={(e) => setKey(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && key.trim() && save()}
@@ -66,15 +105,63 @@ function KeySection({
           }
           className="flex-1 rounded-lg border border-forge-700 bg-forge-900 px-3 py-2 text-sm outline-none focus:border-molten-500/60"
         />
-        <button onClick={save} disabled={!key.trim()} className={primary}>
+        <button onClick={save} disabled={!key.trim() || checking} className={primary}>
           Save
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
       {hasKey && (
-        <button onClick={clear} className="mt-2 text-xs text-ash-500 hover:text-ember-600">
-          Remove key
-        </button>
+        <div className="mt-2 flex items-start gap-3 text-xs" aria-live="polite">
+          <p
+            className={`flex-1 ${checking ? 'text-ash-400' : line ? (line.ok ? 'text-molten-300' : 'text-ember-600') : 'text-ash-400'}`}
+            data-check-status
+          >
+            {checking
+              ? `Checking the key with ${name}…`
+              : (line?.text ??
+                `Not checked yet. Refresh asks ${name} which models this key can use.`)}
+          </p>
+          <button
+            onClick={runCheck}
+            disabled={checking}
+            className="shrink-0 whitespace-nowrap text-ash-400 hover:text-molten-200 disabled:opacity-40"
+            title={`Check the key with ${name} and see which models it can use`}
+          >
+            Refresh
+          </button>
+          <button
+            onClick={clear}
+            className="shrink-0 whitespace-nowrap text-ash-500 hover:text-ember-600"
+          >
+            Remove key
+          </button>
+        </div>
+      )}
+      {hasKey && !checking && check?.result === 'ok' && (
+        <div className="mt-2 text-xs text-ash-400" data-check-models>
+          <p>
+            {known.map((m, i) => (
+              <span key={m.id}>
+                {i > 0 && ' · '}
+                <span className={m.available ? 'text-ash-200' : 'text-ash-500 line-through'}>
+                  {m.label}
+                </span>
+                {!m.available && ' (not available to this key)'}
+              </span>
+            ))}
+          </p>
+          {unsupported.length > 0 && (
+            <div className="mt-2" data-unsupported>
+              <p className="text-ash-300">
+                Not yet supported: {unsupported.map((m) => m.label).join(', ')}
+              </p>
+              <p className="mt-0.5 text-ash-500">
+                {name} offers these, but Custard has no prices, context limits or file rules for
+                them yet, so they can&apos;t be picked. They&apos;re shown so you know they exist.
+              </p>
+            </div>
+          )}
+        </div>
       )}
     </section>
   )

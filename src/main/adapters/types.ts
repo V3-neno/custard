@@ -29,13 +29,15 @@ export type AuthResult =
   // 'timeout' and the rest mean it couldn't be checked.
   | { ok: false; kind: ProviderErrorKind; message: string }
 
-// listModels(): the models Custard offers for this provider, each marked with
-// whether the key can use it, plus any the provider lists that Custard has no
-// profile for.
+// listModels(): with no key, Custard's own models marked unchecked, and no
+// call. With a key, one call to the provider's model list: each of Custard's
+// models marked available or not for this key, plus (where the provider
+// profile says discoverModels) the ones Custard has no profile for, as
+// source 'discovered'. Throws a ProviderError, with the key hidden, when the
+// list can't be had.
 export type ModelListing = {
   models: ListedModel[]
-  // When the list came from the provider, or null when it couldn't be asked
-  // (no key, no list endpoint, offline) and only Custard's profiles are shown.
+  // When the list came from the provider, or null when it wasn't asked.
   checkedAt: number | null
 }
 

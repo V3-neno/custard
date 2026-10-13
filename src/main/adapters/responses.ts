@@ -1,11 +1,19 @@
 import type { ResponseInputItem } from 'openai/resources/responses/responses'
-import type { Provider } from '../../shared/providers'
+import { providers, type Provider } from '../../shared/providers'
 import { openaiStart } from '../compaction'
 import { runOpenAI, toBlocks, toInput } from '../openai'
 import { responsesClient } from '../providers'
 import { fromOpenAI } from '../usage'
 import { capabilitiesOf } from './capabilities'
-import { authenticateWith, knownModels } from './common'
+import {
+  authenticateWith,
+  CHECK_OPTS,
+  knownModels,
+  listCall,
+  listingFrom,
+  parseModelList,
+  type RawModel
+} from './common'
 import type { OneShotRequest, OneShotResult, ProviderAdapter, TurnEnd, TurnRequest } from './types'
 
 // A provider reached through the OpenAI Responses API: OpenAI itself, and
@@ -80,14 +88,21 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
     }
   }
 
+  // GET /models at the provider's pinned address (DeepSeek:
+  // https://api.deepseek.com/models, Bearer key; OpenAI: /v1/models).
+  const listRaw = (apiKey: string, signal?: AbortSignal): Promise<RawModel[]> =>
+    listCall(id, apiKey, async () =>
+      parseModelList(await responsesClient(id, apiKey, CHECK_OPTS).get('/models', { signal }), id)
+    )
+
   return {
     id,
     api: 'responses',
-    authenticate: (apiKey, signal) =>
-      authenticateWith(id, () =>
-        responsesClient(id, apiKey, { maxRetries: 0 }).models.list({ signal })
-      ),
-    listModels: async () => ({ models: knownModels(id), checkedAt: null }),
+    authenticate: (apiKey, signal) => authenticateWith(id, apiKey, () => listRaw(apiKey, signal)),
+    listModels: async (apiKey, signal) =>
+      apiKey
+        ? listingFrom(id, await listRaw(apiKey, signal), providers[id].discoverModels, Date.now())
+        : { models: knownModels(id), checkedAt: null },
     getCapabilities: capabilitiesOf,
     sendMessage,
     streamMessage,

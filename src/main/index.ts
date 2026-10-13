@@ -7,6 +7,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { allModels } from './adapters/registry'
+import { checkProvider, forgetCheck, lastCheck } from './adapters/checks'
+import { isProvider } from '../shared/providers'
 import { chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
 import { chatNotes, memory, registerMemoryHandlers } from './memory'
@@ -116,9 +118,15 @@ app.whenReady().then(() => {
     void memory().run()
     void chatNotes().runAll()
   })
-  handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
+  handle('apiKey:clear', (_, p: Provider) => {
+    clearApiKey(p)
+    forgetCheck(p)
+  })
   // The model picker's list, from the provider adapters.
   handle('models:list', () => allModels())
+  // Settings only: Save and Refresh check a key with its own provider.
+  handle('models:check', (_, p: Provider) => checkProvider(p))
+  handle('models:lastCheck', (_, p: Provider) => (isProvider(p) ? lastCheck(p) : null))
   handle('settings:get', () => getChatSettings())
   handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
   handle('conversations:list', (_, mode: Mode | null) =>

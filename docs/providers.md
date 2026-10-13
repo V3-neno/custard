@@ -10,6 +10,22 @@ Each provider has an adapter in `src/main/adapters/` (the interface is in `types
 
 What a model can do (`getCapabilities`, in `capabilities.ts`) is read from the same rules a request is built from, so it can't promise what a chat would refuse. Each answer is marked `docs` or `live`, and only a test recorded on a known model counts as `live`.
 
+### Key checks and model lists
+
+Settings checks a key only when you press Save or Refresh, never at startup or in the background. The check is one request: the provider's own model list, sent to its pinned address with that provider's key only (`src/main/adapters/checks.ts`).
+
+| Provider | Request (checked 2026-10-13) |
+| --- | --- |
+| Claude | `GET /v1/models` with `x-api-key`, every page (at most 5 of 1,000) |
+| OpenAI | `GET /v1/models` with `Authorization: Bearer` |
+| DeepSeek | `GET https://api.deepseek.com/models` with `Authorization: Bearer` (api-docs.deepseek.com/api/list-models) |
+
+- A rejected key (401) says so and stays saved, so you can replace it. Anything else (no connection, a timeout, a server error, a list Custard can't read) says it couldn't check, and the saved key isn't touched.
+- Each of Custard's models is marked as usable with the key or not. Claude's and OpenAI's lists stay fixed.
+- DeepSeek's profile has `discoverModels` on. A model DeepSeek lists that Custard has no profile for appears in Settings as "not yet supported". It never appears in the picker, because Custard has no prices, context limits or file rules for it.
+- The last result is kept in `model-checks.json` in Custard's data folder. It holds model ids and the outcome, never a key, and is deleted when you remove the key.
+- No key reaches an error message, a log line or the window. Text that looks like a key (`sk-…`, including a provider's masked echo) is replaced with "[key hidden]".
+
 ### Switching provider in a chat
 
 Chats are stored in one format, Anthropic's message blocks, and each adapter converts to and from it on every request. So a chat started with one provider can go on with another, and nothing about the stored chat changes when you switch.

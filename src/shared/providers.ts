@@ -34,6 +34,11 @@ export type ProviderInfo = {
   // For the key field in Settings.
   keyPlaceholder: string
   keyWhere: string
+  // Whether Settings lists the models this provider offers that Custard has
+  // no profile for (as "not yet supported", never pickable). Off for Claude
+  // and OpenAI, whose lists stay fixed: their live list only marks which of
+  // Custard's models the key can use.
+  discoverModels: boolean
   responses?: ResponsesFeatures
 }
 
@@ -44,7 +49,8 @@ export const providers = {
     maker: null,
     summaryModel: 'claude-haiku-4-5',
     keyPlaceholder: 'sk-ant-…',
-    keyWhere: 'console.anthropic.com'
+    keyWhere: 'console.anthropic.com',
+    discoverModels: false
   },
   openai: {
     name: 'OpenAI',
@@ -53,6 +59,7 @@ export const providers = {
     summaryModel: 'gpt-6-luna',
     keyPlaceholder: 'sk-…',
     keyWhere: 'platform.openai.com',
+    discoverModels: false,
     responses: {
       reasoningSummary: true,
       encryptedReasoning: true,
@@ -71,6 +78,7 @@ export const providers = {
     summaryModel: 'deepseek-flash',
     keyPlaceholder: 'sk-…',
     keyWhere: 'platform.deepseek.com',
+    discoverModels: true,
     responses: {
       reasoningSummary: false,
       encryptedReasoning: false,
