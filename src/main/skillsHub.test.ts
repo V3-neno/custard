@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { SKILLS_DIR } from './modes/extensions'
-import { MAX_SKILL_CHARS, readSkill, skillEntries } from './skillsHub'
+import { aboveRoot, SKILLS_DIR, writesInside } from './modes/extensions'
+import { createSkill, MAX_SKILL_CHARS, readSkill, skillEntries, skillExists } from './skillsHub'
+import { listSkills } from './vault'
 
 let vault: string
 const skill = (folder: string, text?: string, extra: Record<string, string> = {}): void => {
@@ -94,5 +95,50 @@ describe('Skills hub read', () => {
     symlinkSync(outside, join(vault, SKILLS_DIR, 'linked'))
     expect(() => readSkill(vault, 'linked')).toThrow()
     rmSync(outside, { recursive: true, force: true })
+  })
+})
+
+describe('a new skill and its workspace', () => {
+  it('makes a folder from the name with a draft that loads only in Skills mode', () => {
+    const folder = createSkill(vault, 'Meeting notes')
+    expect(folder).toBe('meeting-notes')
+    expect(skillExists(vault, folder)).toBe(true)
+    const text = readFileSync(join(vault, SKILLS_DIR, folder, 'SKILL.md'), 'utf8')
+    expect(text).toContain('name: "Meeting notes"')
+    expect(listSkills(vault).find((x) => x.folder === folder)?.modes).toEqual(['skills'])
+  })
+  it('numbers a name that is taken and never replaces a skill', () => {
+    skill('meeting-notes', '---\ndescription: Mine.\n---\nKeep me')
+    expect(createSkill(vault, 'Meeting notes')).toBe('meeting-notes-2')
+    expect(readFileSync(join(vault, SKILLS_DIR, 'meeting-notes', 'SKILL.md'), 'utf8')).toContain(
+      'Keep me'
+    )
+  })
+  it('only knows real skill folders', () => {
+    skill('daily', '---\ndescription: d\n---\n')
+    for (const bad of ['../x', 'daily/..', '', '.hidden', 'nope', 7])
+      expect(skillExists(vault, bad)).toBe(false)
+  })
+  it("a skill's chat writes only inside its folder, by name and by link", () => {
+    skill('daily', 'x')
+    skill('weekly', 'x')
+    const root = join(vault, SKILLS_DIR, 'daily')
+    expect(writesInside(join(root, 'SKILL.md'), root)).toBe(true)
+    expect(writesInside(join(root, 'sub', 'new.md'), root)).toBe(true)
+    expect(writesInside(join(vault, SKILLS_DIR, 'weekly', 'SKILL.md'), root)).toBe(false)
+    expect(writesInside(join(root, '..', 'weekly', 'SKILL.md'), root)).toBe(false)
+    expect(writesInside(join(vault, SKILLS_DIR, 'daily-extra', 'a.md'), root)).toBe(false)
+    // A link inside the folder that leads elsewhere.
+    symlinkSync(join(vault, SKILLS_DIR, 'weekly'), join(root, 'out'))
+    expect(writesInside(join(root, 'out', 'SKILL.md'), root)).toBe(false)
+  })
+  it('lets a note walk through the folders above the skill, and only those', () => {
+    skill('daily', 'x')
+    const root = join(vault, SKILLS_DIR, 'daily')
+    expect(aboveRoot(vault, root)).toBe(true)
+    expect(aboveRoot(join(vault, SKILLS_DIR), root)).toBe(true)
+    expect(aboveRoot(root, root)).toBe(false)
+    expect(aboveRoot(join(vault, SKILLS_DIR, 'weekly'), root)).toBe(false)
+    expect(aboveRoot(join(vault, 'Notes'), root)).toBe(false)
   })
 })

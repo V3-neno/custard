@@ -55,7 +55,10 @@ describe('mode policy', () => {
   })
 
   it('keeps Skills and Plugins as they were', () => {
-    expect(modePolicy('skills').authorSkills).toBe(true)
+    // A skill's chat may write that skill, and only in its folder.
+    const skill = modePolicy('skills', undefined, 'weekly-review')
+    expect(skill.authorSkills).toBe(true)
+    expect(skill.writeRoot).toBe('Custard/Skills/weekly-review')
     // An old General Code chat (the workspace was removed) gets no plugin
     // tools, and workspaceTools gives it no file tools.
     const general = modePolicy('code', { kind: 'general', root: '/x' })
@@ -69,16 +72,21 @@ describe('mode policy', () => {
     expect(internal.authorPlugins).toBe(true)
   })
 
-  it('the Plugins hub chat reads and offers, but changes nothing', () => {
-    for (const w of [undefined, { kind: 'general' as const, root: '/x' }]) {
-      const hub = modePolicy('code', w)
+  it('the hub chats read and offer, but change nothing', () => {
+    for (const hub of [
+      modePolicy('code'),
+      modePolicy('code', { kind: 'general', root: '/x' }),
+      modePolicy('skills')
+    ]) {
       expect([...hub.tools].sort()).toEqual(['navigate', 'vault-read', 'web'])
       expect(hub.authorSkills).toBe(false)
       expect(hub.authorPlugins).toBe(false)
     }
     expect(toolKind('workspace_propose', sources)).toBe('navigate')
-    // Only the hub offers to enter a workspace.
-    for (const m of modes) expect(modePolicy(m.id).tools.has('navigate')).toBe(m.id === 'code')
+    // Only the hubs offer to enter a workspace.
+    for (const m of modes)
+      expect(modePolicy(m.id).tools.has('navigate')).toBe(m.id === 'code' || m.id === 'skills')
+    expect(modePolicy('skills', undefined, 'weekly-review').tools.has('navigate')).toBe(false)
     expect(
       modePolicy('code', { kind: 'internal', pluginId: 'spotify' }).tools.has('navigate')
     ).toBe(false)
@@ -186,9 +194,10 @@ describe("skills can't raise permissions", () => {
   })
 
   it("a skill's modes list only says where it is listed", () => {
-    // The policy takes the chat's mode and workspace and nothing else, so no
-    // skill (or note, or plugin result) can reach it.
-    expect(modePolicy.length).toBe(2)
+    // The policy takes the chat's mode, workspace and skill folder (all fixed
+    // when the chat starts) and nothing else, so no skill (or note, or
+    // plugin result) can reach it.
+    expect(modePolicy.length).toBe(3)
     const p = modePolicy('design')
     expect(p.tools.has('workspace')).toBe(false)
     expect(p.authorSkills || p.authorPlugins).toBe(false)

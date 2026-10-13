@@ -19,7 +19,7 @@ export type ToolKind =
   | 'questions' // automation_question: closes an automation's open question
   | 'workspace' // Plugins mode's file tools
   | 'design' // design_html, design_media, design_jobs: Design's outputs
-  | 'navigate' // workspace_propose: the Plugins hub's offer to enter a workspace
+  | 'navigate' // workspace_propose: a hub chat's offer to enter a workspace
   | 'unknown' // anything else: never allowed
 
 // Extensions are plugins (code that adds capabilities) and skills
@@ -32,11 +32,17 @@ export type ModePolicy = {
   // May change plugin source (Plugins mode's workspace, through its file
   // tools). No mode may write plugin files through the vault tools.
   authorPlugins: boolean
+  // A skill's workspace: the only vault folder its notes may be written in.
+  writeRoot?: string
 }
 
 const USE: ToolKind[] = ['vault-read', 'vault-write', 'web', 'plugin', 'widget']
 
-export function modePolicy(mode: Mode, workspace?: Workspace): ModePolicy {
+// The hubs' chats (Plugins or Skills with no workspace) brainstorm and
+// navigate: they read, and offer to enter a workspace, but change nothing.
+const HUB: ToolKind[] = ['vault-read', 'web', 'navigate']
+
+export function modePolicy(mode: Mode, workspace?: Workspace, skill?: string): ModePolicy {
   switch (mode) {
     // Chat and Design use extensions; they never make or change them.
     case 'chat':
@@ -54,23 +60,21 @@ export function modePolicy(mode: Mode, workspace?: Workspace): ModePolicy {
         authorPlugins: false
       }
     case 'skills':
+      // A skill's chat writes only in that skill's folder.
+      if (!skill) return { mode, tools: new Set(HUB), authorSkills: false, authorPlugins: false }
       return {
         mode,
-        tools: new Set<ToolKind>([...USE, 'questions']),
+        tools: new Set<ToolKind>(USE),
         authorSkills: true,
-        authorPlugins: false
+        authorPlugins: false,
+        writeRoot: `Custard/Skills/${skill}`
       }
     case 'code': {
       // The hub chat (no plugin's workspace) brainstorms and navigates: it
       // reads, and offers to enter a workspace, but changes nothing. Old
       // General Code chats fall here too, and can't send anyway.
       if (workspace?.kind !== 'internal')
-        return {
-          mode,
-          tools: new Set<ToolKind>(['vault-read', 'web', 'navigate']),
-          authorSkills: false,
-          authorPlugins: false
-        }
+        return { mode, tools: new Set(HUB), authorSkills: false, authorPlugins: false }
       return {
         mode,
         tools: new Set<ToolKind>([

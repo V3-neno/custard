@@ -31,6 +31,7 @@ import ProposalCard from './ProposalCard'
 import SkillsHub from '../hubs/SkillsHub'
 import PluginsHub from '../hubs/PluginsHub'
 import PluginWorkspace from '../hubs/PluginWorkspace'
+import SkillWorkspace from '../hubs/SkillWorkspace'
 import WidgetSlot from './WidgetSlot'
 import UsageMeter from './UsageMeter'
 import { formatCost } from '../../../../shared/pricing'
@@ -89,7 +90,7 @@ const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState 
   },
   skills: {
     headline: 'What should Custard learn?',
-    placeholder: 'Teach a skill, or ask to tidy up your vault…',
+    placeholder: 'Brainstorm, or ask to open or create a skill…',
     orb: 'weaving'
   }
 }
@@ -119,6 +120,8 @@ const unsent = new Map<Mode, { text: string; draftId: string; files: DraftAttach
 const openChats = new Map<Mode, string>()
 // Plugins mode: the workspace entered (null: the hub), kept across modes.
 let openWorkspace: Workspace | null = null
+// Skills mode: the skill folder entered (null: the hub), kept across modes.
+let openSkill: string | null = null
 // History's mode filter (null: every mode), kept across modes.
 let historyFilter: Mode | null = null
 
@@ -218,6 +221,15 @@ function ChatView(props: Props): React.JSX.Element {
     const w = current.workspace
     setWorkspace(w?.kind === 'internal' ? { kind: 'internal', pluginId: w.pluginId } : null)
   }
+  // Skills mode: the skill entered, the same way.
+  const [skill, setSkill] = useState<string | null>(() => (mode === 'skills' ? openSkill : null))
+  useEffect(() => {
+    if (mode === 'skills') openSkill = skill
+  }, [mode, skill])
+  if (mode === 'skills' && current && current.id !== seenChat) {
+    setSeenChat(current.id)
+    setSkill(current.skill ?? null)
+  }
   // Plugin names, for the path bar and History.
   const [pluginNames, setPluginNames] = useState<Record<string, string>>({})
   useEffect(() => {
@@ -227,6 +239,15 @@ function ChatView(props: Props): React.JSX.Element {
       .then((l) => setPluginNames(Object.fromEntries(l.map((p) => [p.id, p.name]))))
       .catch(() => {})
   }, [mode, historyOpen, workspace])
+  // Skill names by folder, likewise.
+  const [skillNames, setSkillNames] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (mode !== 'skills' && !historyOpen) return
+    window.custard.skills
+      .list()
+      .then((l) => setSkillNames(Object.fromEntries((l ?? []).map((s) => [s.folder, s.name]))))
+      .catch(() => {})
+  }, [mode, historyOpen, skill])
   const bottom = useRef<HTMLDivElement>(null)
   // The request in flight, read by the event listener without re-subscribing.
   const pending = useRef<{
@@ -375,6 +396,7 @@ function ChatView(props: Props): React.JSX.Element {
   useEffect(() => {
     if (home === firstHome.current) return
     setWorkspace(null)
+    setSkill(null)
   }, [home])
 
   // An opened chat decides the switch; a new one keeps what was chosen.
@@ -478,6 +500,7 @@ function ChatView(props: Props): React.JSX.Element {
       text,
       settings,
       ...(mode === 'code' && !current && workspace ? { workspace } : {}),
+      ...(mode === 'skills' && !current && skill ? { skill } : {}),
       ...(!current && temporary ? { temporary: true } : {}),
       ...(refs.length ? { references: refs.map((r) => r.id) } : {})
     })
@@ -591,7 +614,8 @@ function ChatView(props: Props): React.JSX.Element {
     // A new chat in the workspace, with the request to check and send.
     setCurrent(null)
     setError(null)
-    setWorkspace({ kind: 'internal', pluginId: r.enter.pluginId })
+    if (r.enter.skill) setSkill(r.enter.skill)
+    else if (r.enter.pluginId) setWorkspace({ kind: 'internal', pluginId: r.enter.pluginId })
     fillBox(r.enter.request)
     refreshList()
   }
@@ -673,16 +697,30 @@ function ChatView(props: Props): React.JSX.Element {
     setCurrent(null)
     setError(null)
     setWorkspace(null)
+    setSkill(null)
   }
   const toWorkspace = (): void => {
     if (live) return
     const w = current?.workspace
     if (w?.kind === 'internal') setWorkspace({ kind: 'internal', pluginId: w.pluginId })
+    if (current?.skill) setSkill(current.skill)
     setCurrent(null)
     setError(null)
   }
   const chatTitle = live && !current ? live.userText : (current?.chatNote?.title ?? current?.title)
   const crumbs: Crumb[] | null = (() => {
+    if (mode === 'skills') {
+      if (empty && !skill) return null
+      const out: Crumb[] = [
+        { label: 'All skills', onClick: toHub, title: 'Back to the Skills hub' }
+      ]
+      const s = current ? current.skill : skill
+      if (s)
+        out.push({ label: skillNames[s] ?? s, title: `Custard/Skills/${s}`, onClick: toWorkspace })
+      else out.push({ label: 'Hub chat (brainstorm only)' })
+      if (chatTitle) out.push({ label: chatTitle })
+      return out
+    }
     if (mode !== 'code' || (empty && !workspace)) return null
     const out: Crumb[] = [
       { label: 'All plugins', onClick: toHub, title: 'Back to the Plugins hub' }
@@ -709,9 +747,12 @@ function ChatView(props: Props): React.JSX.Element {
         : workspace?.kind === 'internal'
           ? workspace.pluginId
           : null
+  const inSkill = mode !== 'skills' ? null : current ? (current.skill ?? null) : skill
   const placeholder = inPlugin
     ? `Describe a change to ${pluginNames[inPlugin] ?? inPlugin}…`
-    : copy[mode].placeholder.replace('{provider}', providerName)
+    : inSkill
+      ? `Describe a change to ${skillNames[inSkill] ?? inSkill}…`
+      : copy[mode].placeholder.replace('{provider}', providerName)
   const split = showPane && !narrow
   const chatHidden = showPane && narrow && side === 'outputs'
   const modeLabel = modes.find((m) => m.id === mode)?.label ?? 'Chat'
@@ -721,7 +762,7 @@ function ChatView(props: Props): React.JSX.Element {
       <div className={`min-h-0 min-w-0 flex-1 flex-col ${chatHidden ? 'hidden' : 'flex'}`}>
         {showPane && narrow && <SideSwitch side={side} onSide={setSide} count={outputs.length} />}
         <div className="flex-1 overflow-y-auto">
-          {mode === 'code' && crumbs && <PathBar crumbs={crumbs} />}
+          {crumbs && <PathBar crumbs={crumbs} />}
           {empty && mode === 'code' && workspace?.kind === 'internal' ? (
             <PluginWorkspace
               key={workspace.pluginId}
@@ -737,7 +778,22 @@ function ChatView(props: Props): React.JSX.Element {
               }}
             />
           ) : empty && mode === 'skills' ? (
-            <SkillsHub onOpenSettings={onOpenSettings} onStart={fillBox} />
+            skill ? (
+              <SkillWorkspace
+                key={skill}
+                folder={skill}
+                onOpen={(id) => void open(id)}
+                onBack={toHub}
+              />
+            ) : (
+              <SkillsHub
+                onOpenSettings={onOpenSettings}
+                onEnter={(folder) => {
+                  setSkill(folder)
+                  fillBox('')
+                }}
+              />
+            )
           ) : empty ? (
             <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
               <Orb size={128} state={copy[mode].orb} />
@@ -785,7 +841,7 @@ function ChatView(props: Props): React.JSX.Element {
                     <ProposalCard
                       key={p.id}
                       p={p}
-                      names={pluginNames}
+                      names={p.target === 'skill' ? skillNames : pluginNames}
                       busy={!!live}
                       error={proposalError?.id === p.id ? proposalError.error : undefined}
                       onAnswer={(yes) => void answerProposal(p.id, yes)}
@@ -936,6 +992,7 @@ function ChatView(props: Props): React.JSX.Element {
           modeLabel={modeLabel}
           conversations={list}
           pluginNames={pluginNames}
+          skillNames={skillNames}
           filter={filter}
           onFilter={(f) => {
             historyFilter = f

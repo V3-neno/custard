@@ -1,8 +1,8 @@
 import type { WorkspaceProposal } from '../../../../shared/chat'
 import { pluginIdFrom } from '../../../../shared/plugins'
 
-// A Plugins hub chat's offer to enter a plugin's workspace, or to create a
-// plugin and enter it. Only Yes here does it; then a new chat starts in the
+// A hub chat's offer to enter a plugin's or skill's workspace, or to create
+// one and enter it. Only Yes here does it; then a new chat starts in the
 // workspace with the request in its message box, not sent.
 
 type Props = {
@@ -14,10 +14,18 @@ type Props = {
 }
 
 function ProposalCard({ p, names, busy, error, onAnswer }: Props): React.JSX.Element {
-  const name = p.kind === 'open' ? (names[p.pluginId ?? ''] ?? p.pluginId) : p.name
-  const folder = p.kind === 'open' ? p.pluginId : (p.pluginId ?? pluginIdFrom(p.name ?? ''))
+  const isSkill = p.target === 'skill'
+  const id = isSkill ? p.skill : p.pluginId
+  const name = p.kind === 'open' ? (names[id ?? ''] ?? id) : p.name
+  // Where it lives; a new one's folder comes from its name.
+  const path = `${isSkill ? 'Custard/Skills' : 'plugin'}/${id ?? pluginIdFrom(p.name ?? '')}`
+  const one = isSkill ? 'skill' : 'plugin'
   const question =
-    p.kind === 'open' ? `Open the ${name} workspace?` : `Create a new plugin called ${name}?`
+    p.kind === 'open'
+      ? isSkill
+        ? `Open the ${name} skill workspace?`
+        : `Open the ${name} workspace?`
+      : `Create a new ${one} called ${name}?`
   return (
     <div
       role="group"
@@ -26,13 +34,17 @@ function ProposalCard({ p, names, busy, error, onAnswer }: Props): React.JSX.Ele
       className="rounded-2xl border border-molten-500/30 bg-forge-850/70 px-4 py-3"
     >
       <div className="text-xs tracking-[0.2em] text-ash-500 uppercase">
-        {p.kind === 'open' ? 'Enter workspace' : 'New plugin'}
+        {p.kind === 'open' ? 'Enter workspace' : `New ${one}`}
       </div>
       <div className="mt-1 font-medium text-ash-100">{question}</div>
       <div className="mt-1 text-xs text-ash-400">
         {p.kind === 'open'
-          ? `A new chat starts in plugin/${folder}, where changes to its files are possible (each one asks first).`
-          : `Custard makes plugin/${folder} with a working sample, then starts a new chat in it.`}{' '}
+          ? isSkill
+            ? `A new chat starts in ${path}, where it can change only that skill's files.`
+            : `A new chat starts in ${path}, where changes to its files are possible (each one asks first).`
+          : isSkill
+            ? `Custard makes ${path} with a draft SKILL.md, then starts a new chat in it.`
+            : `Custard makes ${path} with a working sample, then starts a new chat in it.`}{' '}
         This message goes in its box for you to check and send:
       </div>
       <blockquote className="mt-2 border-l-2 border-forge-700 pl-3 text-sm whitespace-pre-wrap text-ash-300">
@@ -61,7 +73,7 @@ function ProposalCard({ p, names, busy, error, onAnswer }: Props): React.JSX.Ele
           {p.status === 'accepted'
             ? p.kind === 'open'
               ? 'You opened it.'
-              : `You created it (plugin/${p.pluginId}).`
+              : `You created it (${path}).`
             : 'You said not now.'}
         </p>
       )}

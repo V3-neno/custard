@@ -185,18 +185,26 @@ try {
     `Design is offered Chat's tools plus its own design_ tools (${toolsBy.Design.filter((n) => n.startsWith('design_')).join(', ')})`
   )
 
-  step('Skills mode can still propose a skill, asking first')
+  step('Skills mode writes a skill only from inside that skill (see skills-hub.mjs)')
   await w.click('button:text-is("Skills")')
-  const asked = await turn('mode skill test (Skills)')
-  check(asked, 'Skills mode asks before creating a skill')
-  if (asked) {
-    const text = await card().first().innerText()
-    check(text.includes('Custard/Skills/forged/SKILL.md'), 'the card names the skill file')
-    await shot('modes-skills-card')
-    await card().first().getByRole('button', { name: "Don't allow", exact: true }).click()
-    await idle()
-  }
-  check(!fs.existsSync(`${SKILLS}/forged`), 'declined, so nothing was written')
+  const hubAsked = await turn('mode skill test (Skills)')
+  check(!hubAsked, 'the Skills hub chat asks nothing')
+  check(
+    /isn't available in this chat/.test(lastResult()),
+    `the Skills hub chat has no write tool (${lastResult().slice(0, 60)})`
+  )
+  await w.click('button[title="Skills history"]')
+  await w.click('button:has-text("New skills chat")')
+  await w.click('button[aria-label="Open escalate"]')
+  await w.waitForSelector('text=Workspace · Custard/Skills/escalate')
+  const otherAsked = await turn('mode skill test (Skills)')
+  check(!otherAsked, "a skill's workspace asks nothing for another skill")
+  check(
+    lastResult().includes('can only write inside Custard/Skills/escalate/'),
+    `and refuses it (${lastResult().slice(0, 70)})`
+  )
+  await shot('modes-skills-workspace')
+  check(!fs.existsSync(`${SKILLS}/forged`), 'nothing was written')
 } catch (err) {
   console.log('✕ error:', err)
   process.exitCode = 1

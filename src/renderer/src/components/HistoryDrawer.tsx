@@ -8,6 +8,7 @@ type Props = {
   conversations: ConversationSummary[]
   // Plugins chats show their plugin's name.
   pluginNames: Record<string, string>
+  skillNames: Record<string, string>
   filter: Mode | null
   onFilter: (f: Mode | null) => void
   currentId: string | null
@@ -27,7 +28,7 @@ function when(ts: number): string {
 
 function HistoryDrawer(props: Props): React.JSX.Element {
   const { modeLabel, conversations, filter, onFilter, currentId, onOpen, onNew, onDelete } = props
-  const { onForget, onClose, pluginNames } = props
+  const { onForget, onClose, pluginNames, skillNames } = props
   const [find, setFind] = useState('')
   const q = find.trim().toLowerCase()
   // Finds by either title, and by what its note says (goal, where it
@@ -143,6 +144,11 @@ function HistoryDrawer(props: Props): React.JSX.Element {
                   {c.pluginId && (
                     <span className="truncate" title={`plugin/${c.pluginId}`} data-chat-plugin>
                       · {pluginNames[c.pluginId] ?? c.pluginId}
+                    </span>
+                  )}
+                  {c.skill && (
+                    <span className="truncate" title={`Custard/Skills/${c.skill}`} data-chat-skill>
+                      · {skillNames[c.skill] ?? c.skill}
                     </span>
                   )}
                   {c.temporary && (

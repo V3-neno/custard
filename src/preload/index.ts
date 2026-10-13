@@ -81,7 +81,9 @@ const custard = {
   skills: {
     // null when no vault is connected.
     list: (): Promise<SkillEntry[] | null> => ipcRenderer.invoke('skills:list'),
-    read: (folder: string): Promise<SkillText> => ipcRenderer.invoke('skills:read', folder)
+    read: (folder: string): Promise<SkillText> => ipcRenderer.invoke('skills:read', folder),
+    // A new skill's folder with a draft SKILL.md; returns the folder.
+    create: (name: string): Promise<string> => ipcRenderer.invoke('skills:create', name)
   },
   plugins: {
     list: (): Promise<PluginStatus[]> => ipcRenderer.invoke('plugins:list'),

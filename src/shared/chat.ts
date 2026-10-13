@@ -95,6 +95,8 @@ export type ConversationSummary = {
   temporary?: boolean
   // Plugins mode: the plugin whose workspace the chat works in.
   pluginId?: string
+  // Skills mode: the skill (its folder in Custard/Skills) the chat works on.
+  skill?: string
 }
 
 // What became of one tool call. Saved as it changes, so a chat reloaded after
@@ -242,6 +244,10 @@ export type Conversation = ConversationSummary & {
   // Plugins mode only: which plugin's folder the file tools may touch. Fixed
   // when the conversation starts.
   workspace?: Workspace
+  // Skills mode only: the skill whose folder (Custard/Skills/<skill>) is the
+  // only place the chat may write. None: the Skills hub chat, which writes
+  // nothing. Fixed when the conversation starts.
+  skill?: string
   // Exactly what is sent to the API, so assistant turns keep their thinking
   // blocks unchanged between requests.
   messages: BetaMessageParam[]
@@ -333,17 +339,21 @@ export type ContextUse = {
   model: string
 }
 
-// The hub chat's offer to enter a plugin's workspace, or to create a plugin
-// and enter it. `request` is put in the new chat's message box, unsent, so
+// A hub chat's offer to enter a plugin's or skill's workspace, or to create
+// one and enter it. `request` is put in the new chat's message box, unsent, so
 // the user reads it before anything acts on it.
 export type WorkspaceProposal = {
   id: string
   // The turn it was made in (index of that turn's first message).
   turn: number
   kind: 'open' | 'create'
+  // A skill's workspace (Skills hub); otherwise a plugin's.
+  target?: 'skill'
   // open: the plugin; create: set once it is made.
   pluginId?: string
-  // create: the name for the new plugin.
+  // Skills: open: the skill's folder; create: set once it is made.
+  skill?: string
+  // create: the name for the new plugin or skill.
   name?: string
   request: string
   status: 'pending' | 'accepted' | 'declined'
@@ -351,7 +361,11 @@ export type WorkspaceProposal = {
 
 export type ProposalResult =
   // enter: the workspace to open and the new chat's message (null: Not now).
-  | { ok: true; enter: { pluginId: string; request: string } | null; conversation: Conversation }
+  | {
+      ok: true
+      enter: { pluginId?: string; skill?: string; request: string } | null
+      conversation: Conversation
+    }
   | { ok: false; error: string }
 
 export type ChatEvent =
@@ -404,6 +418,8 @@ export type SendChatRequest = {
   settings: ChatSettings
   // For a new Code-mode conversation.
   workspace?: Workspace
+  // For a new Skills-mode conversation: the skill's workspace.
+  skill?: string
   // Start the new conversation as a temporary chat, never remembered.
   temporary?: boolean
   // Chat mode: the files picked for this message, from its draft, in order.
