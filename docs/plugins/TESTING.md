@@ -73,7 +73,7 @@ It doesn't exercise the real Spotify API, a real browser sign-in or the OS sandb
 
 Run with `npm run dev` on Windows, with an API key, a vault and a Spotify Premium account. See [../SPOTIFY.md](../SPOTIFY.md) for the Spotify app setup.
 
-1. **Open the Plugins workspace and select Spotify.** Go to Plugins mode, then pick **Spotify (spotify)**. The workspace line shows `Plugins · plugin/spotify` once you send.
+1. **Open the Plugins workspace and select Spotify.** Go to Plugins mode, then press the **Spotify** card. The path bar shows `All plugins › Spotify`.
 2. **Edit only its folder.**
    - Ask: "Bump the version to 1.0.1 and make the search tool's default limit 6."
    - The stages show reads and writes under `plugin/spotify` only.

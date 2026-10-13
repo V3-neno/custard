@@ -19,6 +19,7 @@ export type ToolKind =
   | 'questions' // automation_question: closes an automation's open question
   | 'workspace' // Plugins mode's file tools
   | 'design' // design_html, design_media, design_jobs: Design's outputs
+  | 'navigate' // workspace_propose: the Plugins hub's offer to enter a workspace
   | 'unknown' // anything else: never allowed
 
 // Extensions are plugins (code that adds capabilities) and skills
@@ -60,12 +61,29 @@ export function modePolicy(mode: Mode, workspace?: Workspace): ModePolicy {
         authorPlugins: false
       }
     case 'code': {
-      // Plugin tools only with a plugin chosen (and never in an old General
-      // Code chat, which can't send anyway).
-      const internal = workspace?.kind === 'internal'
-      const tools: ToolKind[] = ['vault-read', 'vault-write', 'web', 'workspace']
-      if (internal) tools.push('plugin', 'widget')
-      return { mode, tools: new Set(tools), authorSkills: true, authorPlugins: internal }
+      // The hub chat (no plugin's workspace) brainstorms and navigates: it
+      // reads, and offers to enter a workspace, but changes nothing. Old
+      // General Code chats fall here too, and can't send anyway.
+      if (workspace?.kind !== 'internal')
+        return {
+          mode,
+          tools: new Set<ToolKind>(['vault-read', 'web', 'navigate']),
+          authorSkills: false,
+          authorPlugins: false
+        }
+      return {
+        mode,
+        tools: new Set<ToolKind>([
+          'vault-read',
+          'vault-write',
+          'web',
+          'workspace',
+          'plugin',
+          'widget'
+        ]),
+        authorSkills: true,
+        authorPlugins: true
+      }
     }
   }
 }
@@ -83,6 +101,7 @@ export function toolKind(name: string, sources: ToolSources): ToolKind {
   if (sources.isWeb(name)) return 'web'
   if (name === 'widget_show' || name === 'widget_hide') return 'widget'
   if (name === 'automation_question') return 'questions'
+  if (name === 'workspace_propose') return 'navigate'
   if ((DESIGN_TOOLS as readonly string[]).includes(name)) return 'design'
   if (/^[a-z][a-z0-9-]{1,30}__[a-z][a-z0-9_]{0,40}$/.test(name)) return 'plugin'
   return 'unknown'

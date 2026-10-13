@@ -254,6 +254,9 @@ export type Conversation = ConversationSummary & {
   // results, which show in `actions`: it read notes it can't vouch for, or
   // was shown captures made from chats that held outside text.
   outside?: ('notes' | 'memory' | 'chats')[]
+  // Plugins hub chats: workspaces the assistant offered to open or create.
+  // Nothing happens until the user presses Yes on the card.
+  proposals?: WorkspaceProposal[]
   // Where a provider's compaction summarized everything before message
   // `after`. The messages themselves are kept and shown in full.
   compactions?: Compaction[]
@@ -321,6 +324,27 @@ export type ContextUse = {
   warn: boolean
   model: string
 }
+
+// The hub chat's offer to enter a plugin's workspace, or to create a plugin
+// and enter it. `request` is put in the new chat's message box, unsent, so
+// the user reads it before anything acts on it.
+export type WorkspaceProposal = {
+  id: string
+  // The turn it was made in (index of that turn's first message).
+  turn: number
+  kind: 'open' | 'create'
+  // open: the plugin; create: set once it is made.
+  pluginId?: string
+  // create: the name for the new plugin.
+  name?: string
+  request: string
+  status: 'pending' | 'accepted' | 'declined'
+}
+
+export type ProposalResult =
+  // enter: the workspace to open and the new chat's message (null: Not now).
+  | { ok: true; enter: { pluginId: string; request: string } | null; conversation: Conversation }
+  | { ok: false; error: string }
 
 export type ChatEvent =
   | { requestId: string; type: 'thinking'; text: string }

@@ -27,6 +27,7 @@ import {
 } from '../../../../shared/attachments'
 import Working, { type Approval, type Segment } from './Working'
 import PathBar, { type Crumb } from './PathBar'
+import ProposalCard from './ProposalCard'
 import SkillsHub from '../hubs/SkillsHub'
 import PluginsHub from '../hubs/PluginsHub'
 import PluginWorkspace from '../hubs/PluginWorkspace'
@@ -78,7 +79,7 @@ const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState 
   chat: { headline: "What's on your mind?", placeholder: 'Message {provider}…', orb: 'breathing' },
   code: {
     headline: 'Which plugin are we building?',
-    placeholder: 'Ask about plugins, or open one above to work on it…',
+    placeholder: 'Brainstorm, or ask to open or create a plugin…',
     orb: 'connecting'
   },
   design: {
@@ -563,6 +564,38 @@ function ChatView(props: Props): React.JSX.Element {
     return out
   }, [current])
 
+  // Hub chat offers to enter a workspace, shown where their turn ends.
+  const turnProposals = useMemo(() => {
+    const out = new Map<number, NonNullable<Conversation['proposals']>>()
+    const msgs = current?.messages ?? []
+    const all = current?.proposals ?? []
+    if (!all.length) return out
+    let start = -1
+    msgs.forEach((m, i) => {
+      if (m.role === 'user' && !isToolResults(m)) start = i
+      const next = msgs[i + 1]
+      const ends = !next || (next.role === 'user' && !isToolResults(next))
+      if (!ends || start < 0) return
+      const here = all.filter((p) => p.turn === start)
+      if (here.length) out.set(i, here)
+    })
+    return out
+  }, [current])
+  const [proposalError, setProposalError] = useState<{ id: string; error: string } | null>(null)
+  const answerProposal = async (id: string, yes: boolean): Promise<void> => {
+    if (!current || live) return
+    setProposalError(null)
+    const r = await window.custard.chat.proposal(current.id, id, yes)
+    if (!r.ok) return setProposalError({ id, error: r.error })
+    if (!r.enter) return setCurrent(r.conversation)
+    // A new chat in the workspace, with the request to check and send.
+    setCurrent(null)
+    setError(null)
+    setWorkspace({ kind: 'internal', pluginId: r.enter.pluginId })
+    fillBox(r.enter.request)
+    refreshList()
+  }
+
   const notices = current?.notices ?? []
   const lastNotice = notices[notices.length - 1]
   const atEnd = lastNotice?.after === current?.messages.length
@@ -662,7 +695,7 @@ function ChatView(props: Props): React.JSX.Element {
         onClick: toWorkspace
       })
     else if (w) out.push({ label: `General Code (removed) · ${folderName(w.root)} · read only` })
-    else out.push({ label: 'Hub chat (no workspace)' })
+    else out.push({ label: 'Hub chat (brainstorm only)' })
     if (chatTitle) out.push({ label: chatTitle })
     return out
   })()
@@ -748,6 +781,16 @@ function ChatView(props: Props): React.JSX.Element {
                       />
                     </div>
                   )}
+                  {turnProposals.get(i)?.map((p) => (
+                    <ProposalCard
+                      key={p.id}
+                      p={p}
+                      names={pluginNames}
+                      busy={!!live}
+                      error={proposalError?.id === p.id ? proposalError.error : undefined}
+                      onAnswer={(yes) => void answerProposal(p.id, yes)}
+                    />
+                  ))}
                   {turnSources.has(i) && (
                     <SourcesList
                       sources={turnSources.get(i)!.sources}

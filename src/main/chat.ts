@@ -86,9 +86,16 @@ import { attachments } from './attachments'
 import { claudeFilesFrom, prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
 import { acceptsAttachments, type Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
-import { pluginHost, protectedRoots, verifyWorkspace } from './plugins'
+import { createPluginNamed, pluginHost, protectedRoots, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
 import { workspaceTools, type WorkspaceTools } from './workspace'
+import {
+  answerProposal,
+  PROPOSE_PROMPT,
+  PROPOSE_TOOL,
+  proposeTool,
+  runProposeTool
+} from './workspace/propose'
 import { isWebTool, runWebTool, webTools } from './web'
 import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
@@ -100,6 +107,7 @@ import {
   type ApprovalDecision,
   providerNames,
   type ChatEvent,
+  type ProposalResult,
   type ChatReference,
   type ContinueResult,
   type Conversation,
@@ -191,8 +199,8 @@ const USE_ONLY =
 const MODE_PROMPTS: Record<Mode, string> = {
   chat: 'The user is in Chat mode: a general conversation.' + USE_ONLY,
   code:
-    'The user is in Plugins mode, where Custard plugins are built and improved. Act as a senior software engineer: when a plugin is chosen, work on it with the workspace tools; ' +
-    'otherwise answer questions about plugins and suggest picking one or creating a new one. Explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
+    'The user is in Plugins mode, where Custard plugins are built and improved. Act as a senior software engineer: in a plugin workspace, work on it with the workspace tools; ' +
+    'on the hub, brainstorm and offer to open or create one. Explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
   design:
     'The user is in Design mode. Act as a product and visual designer: think about layout, hierarchy, color, typography, spacing and interaction states. ' +
     'When the user wants a page, mockup or UI, make it with design_html: send the complete document (inline CSS and JS, or local files through `files`), never a fragment, and never only a code block. ' +
@@ -358,6 +366,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
   ]
   if (workspace) system.push({ type: 'text', text: workspace.prompt })
+  if (policy.tools.has('navigate')) system.push({ type: 'text', text: PROPOSE_PROMPT })
   let vaultPrompt: string | null = null
   if (vaultReady)
     try {
@@ -494,7 +503,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ...web.tools,
     ...plugins.tools,
     ...(widgetCatalog.length ? widgetTools(widgets().keys(conversation.id)) : []),
-    ...(policy.tools.has('design') ? designTools() : [])
+    ...(policy.tools.has('design') ? designTools() : []),
+    ...(policy.tools.has('navigate') ? [proposeTool] : [])
   ].filter((t) => policy.tools.has(kindOf(t.name)))
   const available = new Set(tools.map((t) => t.name))
   // Attached files, read once the turn starts (see attachments/request).
@@ -688,6 +698,15 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
             warning
           )
       })
+    if (c.name === PROPOSE_TOOL)
+      return runProposeTool(
+        conversation,
+        c.input,
+        log.startLength,
+        pluginHost()
+          .list()
+          .map((p) => ({ id: p.id, name: p.name }))
+      )
     if (c.name === QUESTION_TOOL)
       return runQuestionTool(automationQuestionsFile(), shownQuestions, c.input)
     if (isChatTool(c.name)) {
@@ -1193,6 +1212,27 @@ export function registerChatHandlers(): void {
     })
   )
   on('chat:stop', (_, requestId: string) => running.get(requestId)?.abort())
+  // Yes or Not now on a hub chat's offer to enter (or create) a plugin's
+  // workspace. Only this, the user's click, makes the plugin.
+  handle('chat:proposal', (_, chatId: string, proposalId: string, yes: boolean): ProposalResult => {
+    try {
+      if (active.has(String(chatId)))
+        return { ok: false, error: 'Wait for this chat to finish answering first.' }
+      const c = openConversation(String(chatId))
+      if (!c) return { ok: false, error: 'That chat is gone.' }
+      const r = answerProposal(c, String(proposalId), yes === true, {
+        pluginExists: (id) =>
+          pluginHost()
+            .list()
+            .some((p) => p.id === id),
+        create: (name) => createPluginNamed(name).id
+      })
+      saveConversation(c)
+      return { ok: true, enter: r, conversation: c }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
   handle('chat:approve', (_, id: string, decision: ApprovalDecision) => {
     const a = approvals.get(id)
     if (a) a.resolve(decision === 'once' || decision === 'chat' ? decision : 'deny')

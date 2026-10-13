@@ -8,6 +8,8 @@
 //   - a chat started in the workspace belongs to it; the path bar goes back
 //     to the workspace's chats and to the hub; History names the plugin
 //   - Add asks only for a name, makes plugin/<id> from it and enters it
+//   - the hub chat is offered no tool that changes anything; its offer to
+//     open or create a workspace is a card, and only Yes acts on it
 //   - clicking the shown mode again returns to its start page, and leaving
 //     a mode and coming back reopens its chat
 // Usage, from the repo root after `npx electron-vite build`:
@@ -29,6 +31,7 @@ const CFG = OUT + '/cfg-plugins-hub'
 const VAULT = OUT + '/vault'
 fs.rmSync(CFG, { recursive: true, force: true })
 fs.rmSync(`${OUT}/plugin/hub-made`, { recursive: true, force: true })
+fs.rmSync(`${OUT}/plugin/weather-now`, { recursive: true, force: true })
 const app = await electron.launch({
   executablePath: createRequire(import.meta.url)('electron'),
   args: [...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), '--password-store=basic', '.'],
@@ -227,6 +230,86 @@ try {
   await bubble('Plugins').click()
   await card('Spotify').waitFor()
   check(true, 'clicking Plugins in a workspace goes back to the hub')
+
+  step('The hub chat brainstorms only: it can read, never change anything')
+  const lastReq = () => JSON.parse(fs.readFileSync(OUT + '/anthropic.json', 'utf8')).at(-1)
+  await w.fill('textarea', 'hub write test')
+  await w.keyboard.press('Enter')
+  await w.waitForSelector('button[title=Send]', { timeout: 30000 })
+  const hubTools = lastReq().tools ?? []
+  check(
+    hubTools.includes('workspace_propose') &&
+      hubTools.includes('vault_read') &&
+      hubTools.includes('web_search'),
+    'it can read notes, earlier chats and the web, and offer a workspace'
+  )
+  check(
+    !hubTools.some((t) => /^(vault_create_note|vault_append|vault_edit|fs_|plugin_)|__/.test(t)),
+    `it is offered no tool that changes things (${hubTools})`
+  )
+  check(!fs.existsSync(`${VAULT}/hub-made.md`), 'a note it tries to create anyway is not written')
+  check(
+    (await path()).replace(/\s+/g, ' ').startsWith('All plugins › Hub chat (brainstorm only)'),
+    'the path bar says it is the hub chat'
+  )
+
+  step('Offering a workspace shows a card; Not now does nothing')
+  await w.fill('textarea', 'hub open test')
+  await w.keyboard.press('Enter')
+  await w.waitForSelector('button[title=Send]', { timeout: 30000 })
+  const offer = w.locator('[role=group][aria-label="Open the Spotify workspace?"]').last()
+  await offer.waitFor()
+  check(
+    (await offer.innerText()).includes('Add a shuffle tool to Spotify.'),
+    'the card shows the message the new chat would start with'
+  )
+  await w.screenshot({ path: SHOTS + '/hub-01-offer.png' })
+  const beforeNo = requests()
+  await offer.getByRole('button', { name: 'Not now' }).click()
+  await w.waitForSelector('text=You said not now.')
+  check(requests() === beforeNo, 'Not now sends nothing')
+  check(
+    (await w.locator('text=Workspace · plugin/spotify').count()) === 0,
+    'Not now stays in the hub chat'
+  )
+
+  step('Yes enters the workspace with the message in the box, unsent')
+  await w.fill('textarea', 'hub open test again')
+  await w.keyboard.press('Enter')
+  await w.waitForSelector('button[title=Send]', { timeout: 30000 })
+  const beforeYes = requests()
+  await w
+    .locator('[role=group][aria-label="Open the Spotify workspace?"][data-proposal=pending]')
+    .getByRole('button', { name: 'Yes, open it' })
+    .click()
+  await w.waitForSelector('text=Workspace · plugin/spotify')
+  check((await box()) === 'Add a shuffle tool to Spotify.', 'the message is in the box')
+  check(requests() === beforeYes, 'nothing was sent')
+
+  step('Yes on a create offer makes the plugin and enters it')
+  await w
+    .locator('nav[aria-label="Where you are"]')
+    .getByRole('button', { name: 'All plugins' })
+    .click()
+  await card('Spotify').waitFor()
+  await w.fill('textarea', 'hub create test')
+  await w.keyboard.press('Enter')
+  await w.waitForSelector('button[title=Send]', { timeout: 30000 })
+  const create = w.locator('[role=group][aria-label="Create a new plugin called Weather Now?"]')
+  await create.waitFor()
+  check(
+    (await create.innerText()).includes('plugin/weather-now'),
+    'the card names the folder it would make'
+  )
+  check(!fs.existsSync(`${OUT}/plugin/weather-now`), 'nothing is made before Yes')
+  await w.screenshot({ path: SHOTS + '/hub-02-create-offer.png' })
+  await create.getByRole('button', { name: 'Yes, create it' }).click()
+  await w.waitForSelector('text=Workspace · plugin/weather-now')
+  check(fs.existsSync(`${OUT}/plugin/weather-now/plugin.json`), 'Yes made plugin/weather-now')
+  check((await box()) === 'Build a weather plugin that shows today.', 'its message is in the box')
+  await w.screenshot({ path: SHOTS + '/hub-03-created.png' })
+  await bubble('Plugins').click()
+  await card('Spotify').waitFor()
 
   step('Clicking the shown mode returns to its start page')
   await w.fill('textarea', 'plain question')

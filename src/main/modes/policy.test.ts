@@ -69,6 +69,21 @@ describe('mode policy', () => {
     expect(internal.authorPlugins).toBe(true)
   })
 
+  it('the Plugins hub chat reads and offers, but changes nothing', () => {
+    for (const w of [undefined, { kind: 'general' as const, root: '/x' }]) {
+      const hub = modePolicy('code', w)
+      expect([...hub.tools].sort()).toEqual(['navigate', 'vault-read', 'web'])
+      expect(hub.authorSkills).toBe(false)
+      expect(hub.authorPlugins).toBe(false)
+    }
+    expect(toolKind('workspace_propose', sources)).toBe('navigate')
+    // Only the hub offers to enter a workspace.
+    for (const m of modes) expect(modePolicy(m.id).tools.has('navigate')).toBe(m.id === 'code')
+    expect(
+      modePolicy('code', { kind: 'internal', pluginId: 'spotify' }).tools.has('navigate')
+    ).toBe(false)
+  })
+
   it('no mode allows an unknown tool; only Design has design tools', () => {
     for (const m of modes) {
       expect(modePolicy(m.id).tools.has('unknown')).toBe(false)

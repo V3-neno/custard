@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
 import { join } from 'path'
 import { existsSync, readdirSync } from 'fs'
-import { pluginIdFrom, type Workspace } from '../../shared/plugins'
+import { pluginIdFrom, type PluginStatus, type Workspace } from '../../shared/plugins'
 import { handle } from '../ipc'
 import { getSecurityDefaults, setSecurityDefaults } from '../store'
 import { PluginHost, type HostDeps } from './host'
@@ -119,6 +119,25 @@ export function verifyWorkspace(w: Workspace | undefined): Workspace | undefined
   throw new Error('General Code was removed. Pick a plugin, or no workspace.')
 }
 
+// A new plugin from the name the user gave (the Add form, or Yes on a hub
+// chat's offer); the id is made from it (see pluginIdFrom).
+export function createPluginNamed(name: string): PluginStatus {
+  const root = pluginsRoot()
+  const taken = new Set([
+    ...pluginHost()
+      .list()
+      .map((p) => p.id),
+    ...(existsSync(root) ? readdirSync(root) : [])
+  ])
+  const id = pluginIdFrom(name, taken)
+  if (!id)
+    throw new Error(
+      'Use at least one letter from a to z in the name; Custard makes the folder name from it.'
+    )
+  scaffoldPlugin(root, id, name)
+  return pluginHost().status(id)
+}
+
 export function registerPluginHandlers(): void {
   const h = pluginHost
   handle('plugins:list', () => h().list())
@@ -181,23 +200,7 @@ export function registerPluginHandlers(): void {
     if (r.response !== 1) return h().status(id)
     return h().resetSecrets(id)
   })
-  // Only a name is asked for; the id is made from it (see pluginIdFrom).
-  handle('plugins:create', (_, name: string) => {
-    const root = pluginsRoot()
-    const taken = new Set([
-      ...h()
-        .list()
-        .map((p) => p.id),
-      ...(existsSync(root) ? readdirSync(root) : [])
-    ])
-    const id = pluginIdFrom(String(name), taken)
-    if (!id)
-      throw new Error(
-        'Use at least one letter from a to z in the name; Custard makes the folder name from it.'
-      )
-    scaffoldPlugin(root, id, String(name))
-    return h().status(id)
-  })
+  handle('plugins:create', (_, name: string) => createPluginNamed(String(name)))
   handle('plugins:labels', () => {
     const labels: Record<string, string> = {}
     for (const p of h().list())

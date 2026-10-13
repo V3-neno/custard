@@ -6,6 +6,7 @@ import type {
   ChatMemory,
   ChatSettings,
   ContinueResult,
+  ProposalResult,
   Conversation,
   ConversationSummary,
   Mode,
@@ -231,6 +232,9 @@ const custard = {
     stop: (requestId: string): void => ipcRenderer.send('chat:stop', requestId),
     approve: (id: string, decision: ApprovalDecision): Promise<void> =>
       ipcRenderer.invoke('chat:approve', id, decision),
+    // Yes or Not now on a Plugins hub chat's offer to enter a workspace.
+    proposal: (chatId: string, proposalId: string, yes: boolean): Promise<ProposalResult> =>
+      ipcRenderer.invoke('chat:proposal', chatId, proposalId, yes),
     // Continue a chat that grew too long in a new one; the original is kept.
     continue: (id: string, withoutSummary?: boolean): Promise<ContinueResult> =>
       ipcRenderer.invoke('chat:continue', id, withoutSummary),
