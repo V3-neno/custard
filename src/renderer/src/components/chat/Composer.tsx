@@ -49,6 +49,17 @@ function Composer(props: Props): React.JSX.Element {
   const canSend = !busy && !files?.adding && (!!draft.trim() || hasFiles)
   const input = useRef<HTMLTextAreaElement>(null)
   const model = chatModels.find((m) => m.id === settings.model)
+  // The picker's models come from the provider adapters; Custard's own list
+  // stands in until they answer, so the picker never starts empty.
+  const [listed, setListed] = useState<{ id: string; label: string; provider: string }[]>(() => [
+    ...chatModels
+  ])
+  useEffect(() => {
+    window.custard.models
+      .list()
+      .then((l) => setListed(l.filter((m) => m.source === 'profile')))
+      .catch(() => {})
+  }, [])
   const submit = (): void => {
     if (canSend) onSend(draft)
   }
@@ -149,7 +160,7 @@ function Composer(props: Props): React.JSX.Element {
         >
           {providerIds.map((p) => (
             <optgroup key={p} label={providerNames[p]}>
-              {chatModels
+              {listed
                 .filter((m) => m.provider === p)
                 .map((m) => (
                   <option key={m.id} value={m.id}>

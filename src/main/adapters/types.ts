@@ -1,9 +1,10 @@
 import type {
   BetaMessageParam,
+  BetaTextBlockParam,
   BetaTool,
   BetaToolResultBlockParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import type { ModelCapabilities, ModelInfo, ProviderErrorKind } from '../../shared/adapter'
+import type { ListedModel, ModelCapabilities, ProviderErrorKind } from '../../shared/adapter'
 import type { ChatEvent, Conversation, Effort } from '../../shared/chat'
 import type { TokenUsage } from '../../shared/pricing'
 import type { Provider, ProviderApi } from '../../shared/providers'
@@ -32,23 +33,25 @@ export type AuthResult =
 // whether the key can use it, plus any the provider lists that Custard has no
 // profile for.
 export type ModelListing = {
-  models: (ModelInfo & { available: boolean | 'unchecked' })[]
+  models: ListedModel[]
   // When the list came from the provider, or null when it couldn't be asked
   // (no key, no list endpoint, offline) and only Custard's profiles are shown.
   checkedAt: number | null
 }
 
 // sendMessage(): one call, not streamed to the user. Background summaries
-// (captures, chat notes, Continue), chat titles and automation steps.
+// (captures, chat notes and their titles, Continue). Automation steps keep
+// their own call for now (see the Phase 2 review).
 export type OneShotRequest = {
   model: string
   apiKey: string
   system: string
-  messages: BetaMessageParam[]
-  tools?: BetaTool[]
+  // A bare string is one user message.
+  messages: BetaMessageParam[] | string
   // Ask for JSON matching this schema (structured output).
   schema?: { name: string; schema: Record<string, unknown> }
   maxTokens: number
+  // Responses providers only; Claude's one-shot model (Haiku 4.5) takes none.
   effort?: Effort
   timeoutMs?: number
   retries?: number
@@ -72,8 +75,11 @@ export type TurnRequest = {
   model: string
   apiKey: string
   effort: Effort
-  instructions: string
-  history: BetaMessageParam[]
+  system: BetaTextBlockParam[]
+  // The chat as it stands, in the stored format, read again before each
+  // model call (tool rounds add to it). The adapter drops what its provider
+  // can't take.
+  history: () => BetaMessageParam[]
   conversation: Conversation
   tools: BetaTool[]
   maxSteps: number
@@ -88,17 +94,24 @@ export type TurnRequest = {
   ) => Promise<BetaToolResultBlockParam[]>
 }
 
-// How a turn ended. Custard turns each into the notice the user sees.
+// How a turn ended. Custard turns each into the notice the user sees; the
+// ones marked "taken back" end it the way a failure does.
 export type TurnEnd =
   | 'done'
+  // The output limit cut the answer.
   | 'cut-off'
-  // Cut off while calling a tool, so nothing was run.
+  // Cut off while calling a tool, so nothing was run (taken back).
   | 'cut-off-tool'
   | 'step-limit'
-  // Too long to send, found before sending.
+  // Too long to send, found before sending (taken back).
   | 'too-long'
   // The reply filled the model's context window.
   | 'full-window'
+  // The reply filled the window while calling a tool (taken back).
+  | 'full-window-tool'
+  // The user stopped it (taken back).
+  | 'stopped'
+  // The model declined; the sentence for the user (taken back).
   | { refused: string }
 
 export interface ProviderAdapter {
@@ -110,4 +123,8 @@ export interface ProviderAdapter {
   getCapabilities(modelId: string): ModelCapabilities
   sendMessage(req: OneShotRequest): Promise<OneShotResult>
   streamMessage(turn: TurnRequest): Promise<TurnEnd>
+  // Where the history this provider sees for a chat starts: after the
+  // newest compaction it can read, or 0. Attached files before it aren't
+  // sent again.
+  historyStart(conversation: Conversation, modelId: string): number
 }

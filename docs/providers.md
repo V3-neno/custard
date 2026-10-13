@@ -4,6 +4,25 @@ Custard talks to each provider through one of two APIs: Anthropic's Messages API
 
 A packaged build always sends a provider's requests to its official address. A development build leaves Claude and OpenAI to `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`. DeepSeek uses its own `DEEPSEEK_BASE_URL` or its official address, never OpenAI's.
 
+## Adapters
+
+Each provider has an adapter in `src/main/adapters/` (the interface is in `types.ts`, the registry in `registry.ts`). Claude uses `anthropic.ts`. OpenAI and DeepSeek share `responses.ts`, which reads each provider's flags from `src/shared/providers.ts`. Chat turns (`streamMessage`) and background summaries (`sendMessage`: captures, chat notes, Continue in a new chat) go through the adapter. Vault tools, plugins, approvals and the chat guard sit above it and never ask which provider is answering. Automation steps and web search still build their own clients.
+
+What a model can do (`getCapabilities`, in `capabilities.ts`) is read from the same rules a request is built from, so it can't promise what a chat would refuse. Each answer is marked `docs` or `live`, and only a test recorded on a known model counts as `live`.
+
+### Switching provider in a chat
+
+Chats are stored in one format, Anthropic's message blocks, and each adapter converts to and from it on every request. So a chat started with one provider can go on with another, and nothing about the stored chat changes when you switch.
+
+When the history goes to a provider other than the one that wrote it:
+
+- Blocks only the original provider can read are dropped: Claude's thinking (and redacted thinking), Claude's fallback markers, and compaction blocks of either provider. Reasoning from a Responses provider is never stored, so it never reaches another provider.
+- Everything else is kept. Text stays text, and tool calls and their results become the other API's function calls and outputs.
+- A tool call to a tool this chat isn't offered now is sent as plain text (`history.ts`).
+- Attached files are sent again in the new provider's form, or refused with a note when it can't take them (a PDF to DeepSeek, say).
+
+A provider-neutral stored format is a possible later cleanup, if the round-trip test (Claude, then DeepSeek, then OpenAI, then Claude, with tool calls) shows problems. It isn't built.
+
 ## DeepSeek
 
 Checked against api-docs.deepseek.com on 2026-10-12 (the overview, Models & Pricing, Create Response, the Responses API guide, Thinking Mode and Tool Calls pages).

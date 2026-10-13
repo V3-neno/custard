@@ -1,9 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk'
 import { providerIds, providers, type Provider } from '../../shared/providers'
-import { anthropicEndpoint } from '../endpoints'
-import { responsesClient } from '../providers'
+import { adapterFor } from '../adapters/registry'
 import type { OnUsage } from '../../shared/pricing'
-import { fromClaude, fromOpenAI } from '../usage'
 
 // The one model call a capture makes: the evidence in, a structured summary
 // out. It has no tools of any kind, so it can't act, read anything else or
@@ -152,44 +149,23 @@ export type Summarizer = (evidence: string, signal?: AbortSignal) => Promise<Sum
 
 // `onUsage` is told what each call used (see usage.ts).
 export function summarizer(provider: Provider, apiKey: string, onUsage?: OnUsage): Summarizer {
-  const opts = { timeout: SUMMARY_LIMITS.timeoutMs, maxRetries: SUMMARY_LIMITS.retries }
-  if (providers[provider].api === 'responses') {
-    const client = responsesClient(provider, apiKey, opts)
-    return async (evidence, signal) => {
-      const r = await client.responses.create(
-        {
-          model: SUMMARY_MODELS[provider],
-          instructions: SUMMARY_SYSTEM,
-          input: evidence,
-          max_output_tokens: SUMMARY_LIMITS.maxTokens,
-          reasoning: { effort: 'low' },
-          store: false,
-          text: {
-            format: { type: 'json_schema', name: 'memory', strict: true, schema: SUMMARY_SCHEMA }
-          }
-        },
-        { signal }
-      )
-      onUsage?.(SUMMARY_MODELS[provider], fromOpenAI(r.usage))
-      if (r.status === 'incomplete') throw new Error('The summary was cut off.')
-      return parseSummary(r.output_text)
-    }
-  }
-  const client = new Anthropic({ apiKey, ...opts, ...anthropicEndpoint() })
+  const adapter = adapterFor(provider)
   return async (evidence, signal) => {
-    const m = await client.messages.create(
-      {
-        model: SUMMARY_MODELS[provider],
-        max_tokens: SUMMARY_LIMITS.maxTokens,
-        system: SUMMARY_SYSTEM,
-        messages: [{ role: 'user', content: evidence }],
-        output_config: { format: { type: 'json_schema', schema: SUMMARY_SCHEMA } }
-      },
-      { signal }
-    )
-    onUsage?.(m.model || SUMMARY_MODELS[provider], fromClaude(m.usage))
-    if (m.stop_reason === 'refusal') throw new Error('The summary was declined.')
-    if (m.stop_reason === 'max_tokens') throw new Error('The summary was cut off.')
-    return parseSummary(m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))
+    const r = await adapter.sendMessage({
+      model: SUMMARY_MODELS[provider],
+      apiKey,
+      system: SUMMARY_SYSTEM,
+      messages: evidence,
+      schema: { name: 'memory', schema: SUMMARY_SCHEMA },
+      maxTokens: SUMMARY_LIMITS.maxTokens,
+      effort: 'low',
+      timeoutMs: SUMMARY_LIMITS.timeoutMs,
+      retries: SUMMARY_LIMITS.retries,
+      signal
+    })
+    for (const u of r.usage) onUsage?.(u.model, u.usage)
+    if (r.stop === 'refused') throw new Error('The summary was declined.')
+    if (r.stop === 'cut-off') throw new Error('The summary was cut off.')
+    return parseSummary(r.text)
   }
 }

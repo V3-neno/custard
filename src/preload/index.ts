@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { MemorySettings } from '../shared/memory'
+import type { ListedModel } from '../shared/adapter'
 import type {
   ChatLink,
   ChatEvent,
@@ -41,6 +42,10 @@ const custard = {
     has: (p: Provider): Promise<boolean> => ipcRenderer.invoke('apiKey:has', p),
     set: (p: Provider, key: string): Promise<void> => ipcRenderer.invoke('apiKey:set', p, key),
     clear: (p: Provider): Promise<void> => ipcRenderer.invoke('apiKey:clear', p)
+  },
+  models: {
+    // Every provider's models, from its adapter.
+    list: (): Promise<ListedModel[]> => ipcRenderer.invoke('models:list')
   },
   settings: {
     get: (): Promise<ChatSettings> => ipcRenderer.invoke('settings:get'),

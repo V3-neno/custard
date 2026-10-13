@@ -73,6 +73,10 @@ export type ModelInfo = {
   source: 'profile' | 'discovered'
 }
 
+// A model as the picker gets it from an adapter: whether the key can use
+// it, or 'unchecked' when nobody asked the provider.
+export type ListedModel = ModelInfo & { available: boolean | 'unchecked' }
+
 // Why a provider call failed, whatever the SDK. The message for the user is
 // built from the kind (see main/providerError).
 export const providerErrorKinds = [

@@ -6,6 +6,7 @@ import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
+import { allModels } from './adapters/registry'
 import { chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
 import { chatNotes, memory, registerMemoryHandlers } from './memory'
@@ -116,6 +117,8 @@ app.whenReady().then(() => {
     void chatNotes().runAll()
   })
   handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
+  // The model picker's list, from the provider adapters.
+  handle('models:list', () => allModels())
   handle('settings:get', () => getChatSettings())
   handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
   handle('conversations:list', (_, mode: Mode | null) =>
