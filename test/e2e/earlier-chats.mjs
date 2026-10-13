@@ -242,6 +242,43 @@ try {
     'and is never listed to reference'
   )
   await w.keyboard.press('Escape')
+
+  step("A chat note links that chat's captures")
+  await newChat()
+  await send('links test: remember that I like warm jazz')
+  const linked = () => chat('links test')
+  const captured = () => {
+    try {
+      return fs
+        .readdirSync(VAULT + '/Custard/Captures', { withFileTypes: true })
+        .filter(
+          (d) =>
+            d.isFile() &&
+            fs
+              .readFileSync(`${VAULT}/Custard/Captures/${d.name}`, 'utf8')
+              .includes(linked()?.id ?? '-')
+        )
+        .map((d) => d.name.replace(/\.md$/, ''))
+    } catch {
+      return []
+    }
+  }
+  check(
+    await until(() => captured().length > 0, 20000),
+    `the chat was captured (${captured().join(' | ')})`
+  )
+  // The note is written after a turn; one more turn makes sure the capture
+  // exists by then.
+  await send('links test: thanks')
+  check(
+    await until(() => {
+      const n = linked()?.chatNote
+      if (n?.status !== 'saved' || n.upTo !== linked().messages.length) return false
+      const text = fs.readFileSync(`${VAULT}/${n.path}`, 'utf8')
+      return captured().every((c) => text.includes(`[[Custard/Captures/${c}]]`))
+    }, 20000),
+    'its note links each capture'
+  )
 } catch (e) {
   console.log('error:', e)
   process.exitCode = 1

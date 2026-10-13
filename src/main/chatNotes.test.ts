@@ -135,6 +135,32 @@ describe('chat notes', () => {
     expect(chatCaptures(vault, c.id)).toEqual([saved.path])
   })
 
+  it("links the chat's captures, and only paths Custard named that make a working link", async () => {
+    const n = make()
+    const c = newChat()
+    talk(c, 'Help me plan a playlist')
+    const capture = (rel: string, chat: string): void => {
+      mkdirSync(join(vault, rel, '..'), { recursive: true })
+      writeFileSync(
+        join(vault, rel),
+        `---\ncustard-capture: "job"\nchat: "${chat}"\n---\nCaptured.`
+      )
+    }
+    capture('Custard/Captures/2026-10-12 0930 Evening music 1a2b3c4d.md', c.id)
+    capture('Custard/Plugins/Spotify/Activity/2026-10-12 0931 Evening music 5e6f7a8b.md', c.id)
+    capture('Custard/Captures/2026-10-12 0932 Other chat 99999999.md', 'someone-else')
+    capture('Custard/Captures/odd [name].md', c.id)
+    await after(n, c)
+    const text = noteOf(c)
+    expect(text).toContain(
+      '## Captures from this chat\n\n- [[Custard/Captures/2026-10-12 0930 Evening music 1a2b3c4d]]\n- [[Custard/Plugins/Spotify/Activity/2026-10-12 0931 Evening music 5e6f7a8b]]'
+    )
+    expect(text).not.toContain('Other chat')
+    expect(text).not.toContain('odd [name]')
+    // Its own note is never linked.
+    expect(text).not.toContain('[[Custard/Chats/')
+  })
+
   it('updates the same note as the chat goes on, and skips a chat with nothing new', async () => {
     const n = make()
     const c = newChat()

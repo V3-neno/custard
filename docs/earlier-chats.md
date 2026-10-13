@@ -42,8 +42,17 @@ from the user's first message. Without this, one chat with web text would
 make every chat after it hold outside text, and their notes would pass that
 on.
 
+## Links in Obsidian
+
+Each chat note ends with "Captures from this chat": links to that chat's
+capture notes in `Custard/Captures` and `Custard/Plugins/<plugin>/Activity`
+(at most 30), so Obsidian's graph groups them around the chat. Custard writes
+these links from the notes' own paths, never from model text, and leaves out a
+path that would break a link. A capture made after the note was last written
+is linked the next time the note is rewritten, after the chat's next turn.
+
 ## Tests
 
 `src/main/earlierChats.test.ts` covers the rules above.
-`test/e2e/earlier-chats.mjs` (31 checks, with `test/e2e/mocks/e-earlier.mjs`)
+`test/e2e/earlier-chats.mjs` (33 checks, with `test/e2e/mocks/e-earlier.mjs`)
 covers the built app.

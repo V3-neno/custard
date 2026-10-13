@@ -10,7 +10,7 @@ import {
 } from './handoff'
 import { resolveInVault, safeName } from './memory/paths'
 import { plain } from './memory/render'
-import { createNote, frontmatter, replaceNote } from './memory/write'
+import { chatCaptures, createNote, frontmatter, replaceNote } from './memory/write'
 import { FsafeExistsError } from './fsafe'
 
 // Every chat's compacted summary, as one note per chat in Custard/Chats: what
@@ -90,7 +90,10 @@ export function chatNoteText(
   ledger: string,
   now: number,
   // How many actions the record covers (none: the section is left out).
-  actionCount = 1
+  actionCount = 1,
+  // Vault paths of this chat's capture notes, linked so Obsidian's graph
+  // groups them around the chat.
+  captures: string[] = []
 ): string {
   const label = modes.find((m) => m.id === c.mode)?.label ?? c.mode
   const fm: Record<string, string> = {
@@ -132,8 +135,30 @@ export function chatNoteText(
               : [])
           ].join('\n')
         ]
-      : [])
+      : []),
+    ...captureLinks(captures)
   ].join('\n\n')
+}
+
+const MAX_CAPTURE_LINKS = 30
+
+// Links written by Custard to notes it named itself (see memory/write), never
+// text from a model. A path holding a character that would break or change a
+// link is left out.
+function captureLinks(paths: string[]): string[] {
+  const links = paths
+    .filter((p) => p.endsWith('.md') && !/[[\]|#^\n]/.test(p))
+    .map((p) => `- [[${p.slice(0, -'.md'.length)}]]`)
+  if (!links.length) return []
+  return [
+    '## Captures from this chat',
+    [
+      ...links.slice(0, MAX_CAPTURE_LINKS),
+      ...(links.length > MAX_CAPTURE_LINKS
+        ? [`[${links.length - MAX_CAPTURE_LINKS} more left out]`]
+        : [])
+    ].join('\n')
+  ]
 }
 
 // Short, without the provider's raw error body.
@@ -319,7 +344,8 @@ export class ChatNotes {
       summary,
       ledger.text,
       this.now(),
-      Object.values(ledger.counts).reduce((a, b) => a + b, 0)
+      Object.values(ledger.counts).reduce((a, b) => a + b, 0),
+      this.captures(vault, id)
     )
     let path = now.chatNote?.path
     try {
@@ -346,6 +372,16 @@ export class ChatNotes {
     // Another turn may have come in while this was written; its own timer
     // writes it, so this one is done.
     if (!this.timers.has(id)) this.dequeue(id)
+  }
+
+  // The chat's capture notes, wherever they are under Custard/ (its own note
+  // in Custard/Chats left out). Never stops the note from being written.
+  private captures(vault: string, id: string): string[] {
+    try {
+      return chatCaptures(vault, id).filter((p) => !p.startsWith(`${CHATS}/`))
+    } catch {
+      return []
+    }
   }
 
   // Whether the note is still exactly what Custard last wrote. If not, it is
