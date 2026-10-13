@@ -95,7 +95,7 @@ const fail = async (e) => {
 }
 const settings = async () => {
   await openPlugins()
-  await w.click('button:has-text("Spotify")')
+  await w.click('article[aria-label="Plugin Spotify"] button:text-is("Manage")')
 }
 const closeSettings = () => w.click('button:text-is("Done")')
 const send = async (t) => {
@@ -128,7 +128,8 @@ try {
 
   step('1-2. Plugins workspace, Spotify selected, edits only inside plugin/spotify')
   await w.click('button:text-is("Plugins")')
-  await w.selectOption('select[aria-label=Plugin]', 'spotify')
+  await w.click('button[aria-label="Open Spotify"]')
+  await w.waitForSelector('text=Workspace · plugin/spotify')
   await shot('01-plugins-workspace')
   await send(
     'Bump the version to 1.0.1, check you cannot touch core files, then validate and test.'

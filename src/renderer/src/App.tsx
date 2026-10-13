@@ -24,6 +24,7 @@ function App(): React.JSX.Element {
   // it in a chat that has started opens a new chat of the other kind.
   const [temporary, setTemporary] = useState(false)
   const [newChat, setNewChat] = useState(0)
+  const [home, setHome] = useState(0)
   const [busy, setBusy] = useState(false)
   const [outsideText, setOutsideText] = useState(false)
   const provider = providerOf(settings.model)
@@ -75,7 +76,10 @@ function App(): React.JSX.Element {
             onModeChange={(m) => {
               // The mode already shown: back to its start page (a new chat).
               if (m === mode) {
-                if (!busy) setNewChat((n) => n + 1)
+                if (!busy) {
+                  setNewChat((n) => n + 1)
+                  setHome((n) => n + 1)
+                }
               } else setMode(m)
             }}
             hasKey={hasKey}
@@ -87,6 +91,7 @@ function App(): React.JSX.Element {
             temporary={temporary}
             onTemporary={setTemporary}
             newChat={newChat}
+            home={home}
             onBusy={setBusy}
             onOutsideText={setOutsideText}
           />

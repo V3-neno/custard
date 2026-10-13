@@ -153,7 +153,7 @@ try {
     '"Remember automatically" is on by default'
   )
   await openPlugins()
-  await w.click('button:has-text("Spotify")')
+  await w.click('article[aria-label="Plugin Spotify"] button:text-is("Manage")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
   const boxes = w.locator('section:has-text("New permissions to approve") input[type=checkbox]')
@@ -409,7 +409,7 @@ try {
 
   step('Per-plugin switch, then turning the plugin off')
   await openPlugins()
-  await w.click('button:has-text("Spotify")')
+  await w.click('article[aria-label="Plugin Spotify"] button:text-is("Manage")')
   await w.uncheck('input[aria-label="Remember activity for Spotify"]')
   check(
     (await w.locator('text=its actions are left out of what Custard remembers').count()) === 1,
@@ -424,7 +424,7 @@ try {
   check(summaries().length === 3, "Spotify's actions are no longer remembered")
   const overviewBefore = note('Custard/Plugins/Spotify/Overview.md')
   await openPlugins()
-  await w.click('button:has-text("Spotify")')
+  await w.click('article[aria-label="Plugin Spotify"] button:text-is("Manage")')
   await w.click('button:text-is("Disable")')
   await closePlugins()
   await newChat()

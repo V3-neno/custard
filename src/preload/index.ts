@@ -104,8 +104,7 @@ const custard = {
     disconnect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disconnect', id),
     resetSecrets: (id: string): Promise<PluginStatus> =>
       ipcRenderer.invoke('plugins:resetSecrets', id),
-    create: (id: string, name: string): Promise<PluginStatus> =>
-      ipcRenderer.invoke('plugins:create', id, name),
+    create: (name: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:create', name),
     labels: (): Promise<Record<string, string>> => ipcRenderer.invoke('plugins:labels'),
     sourceRoot: (): Promise<string> => ipcRenderer.invoke('plugins:sourceRoot')
   },

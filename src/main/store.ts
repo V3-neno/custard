@@ -54,6 +54,7 @@ export function listConversations(mode: Mode | null): ConversationSummary[] {
                 title: c.title,
                 updatedAt: c.updatedAt,
                 ...(c.memory?.temporary ? { temporary: true } : {}),
+                ...(c.workspace?.kind === 'internal' ? { pluginId: c.workspace.pluginId } : {}),
                 // Where the chat stands, from its note in Custard/Chats.
                 ...(c.chatNote?.state &&
                 (c.chatNote.status === 'saved' || c.chatNote.status === 'edited')

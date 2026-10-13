@@ -172,6 +172,16 @@ input[type='radio'] {
 .drawer-in {
   animation: drawer-in 180ms ease-out;
 }
+/* The floating Manage panel, sliding in from the right. */
+@keyframes panel-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+.panel-in {
+  animation: panel-in 200ms ease-out;
+}
 
 /* ---------- Message Markdown ---------- */
 

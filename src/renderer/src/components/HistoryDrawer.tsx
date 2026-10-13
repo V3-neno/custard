@@ -6,6 +6,8 @@ type Props = {
   modeLabel: string
   // Every mode's chats, or one mode's (filter).
   conversations: ConversationSummary[]
+  // Plugins chats show their plugin's name.
+  pluginNames: Record<string, string>
   filter: Mode | null
   onFilter: (f: Mode | null) => void
   currentId: string | null
@@ -25,7 +27,7 @@ function when(ts: number): string {
 
 function HistoryDrawer(props: Props): React.JSX.Element {
   const { modeLabel, conversations, filter, onFilter, currentId, onOpen, onNew, onDelete } = props
-  const { onForget, onClose } = props
+  const { onForget, onClose, pluginNames } = props
   const [find, setFind] = useState('')
   const q = find.trim().toLowerCase()
   // Finds by title, and by where the chat stands (from its note).
@@ -121,6 +123,11 @@ function HistoryDrawer(props: Props): React.JSX.Element {
                 <div className="flex items-center gap-1.5 text-xs text-ash-500">
                   {when(c.updatedAt)}
                   {!filter && <span>· {label(c.mode)}</span>}
+                  {c.pluginId && (
+                    <span className="truncate" title={`plugin/${c.pluginId}`} data-chat-plugin>
+                      · {pluginNames[c.pluginId] ?? c.pluginId}
+                    </span>
+                  )}
                   {c.temporary && (
                     <span className="flex items-center gap-1 text-ash-500">
                       · <TemporaryIcon /> Temporary

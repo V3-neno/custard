@@ -473,7 +473,7 @@ try {
 
   step("Spotify's own player widget, on the same host")
   await openPlugins()
-  await w.click('button:has-text("Spotify")')
+  await w.click('article[aria-label="Plugin Spotify"] button:text-is("Manage")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
   check(

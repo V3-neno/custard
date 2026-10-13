@@ -88,6 +88,8 @@ export type ConversationSummary = {
   summary?: string
   // A temporary chat: never remembered.
   temporary?: boolean
+  // Plugins mode: the plugin whose workspace the chat works in.
+  pluginId?: string
 }
 
 // What became of one tool call. Saved as it changes, so a chat reloaded after
