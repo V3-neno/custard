@@ -6,7 +6,8 @@ import {
   ATTACHMENT_LIMITS,
   formatBytes,
   kindLabel,
-  type Attachment
+  type Attachment,
+  type AttachmentKind
 } from '../../shared/attachments'
 import { providerNames, type Conversation, type Provider } from '../../shared/chat'
 import { limitsFor, registerFileData } from '../context'
@@ -75,6 +76,13 @@ const PROVIDER_LIMITS: Record<
           : null,
     imageCount: 'patches'
   }
+}
+
+// Why a model takes no file of this kind at all, or null when it does
+// (a still image, a plain PDF). For the capability list.
+export function kindRefusal(model: FileModel, kind: AttachmentKind): string | null {
+  const probe = { kind, name: 'file', frames: 1 } as Attachment
+  return PROVIDER_LIMITS[model.provider].refuses(model.id, model.label, probe)?.why ?? null
 }
 
 // Claude downscales images past a long edge and caps their tokens; models
