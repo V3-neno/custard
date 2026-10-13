@@ -14,10 +14,10 @@ What a model can do (`getCapabilities`, in `capabilities.ts`) is read from the s
 
 Settings checks a key only when you press Save or Refresh, never at startup or in the background. The check is one request: the provider's own model list, sent to its pinned address with that provider's key only (`src/main/adapters/checks.ts`).
 
-| Provider | Request (checked 2026-10-13) |
-| --- | --- |
-| Claude | `GET /v1/models` with `x-api-key`, every page (at most 5 of 1,000) |
-| OpenAI | `GET /v1/models` with `Authorization: Bearer` |
+| Provider | Request (checked 2026-10-13)                                                                               |
+| -------- | ---------------------------------------------------------------------------------------------------------- |
+| Claude   | `GET /v1/models` with `x-api-key`, every page (at most 5 of 1,000)                                         |
+| OpenAI   | `GET /v1/models` with `Authorization: Bearer`                                                              |
 | DeepSeek | `GET https://api.deepseek.com/models` with `Authorization: Bearer` (api-docs.deepseek.com/api/list-models) |
 
 - A rejected key (401) says so and stays saved, so you can replace it. Anything else (no connection, a timeout, a server error, a list Custard can't read) says it couldn't check, and the saved key isn't touched.
