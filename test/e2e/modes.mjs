@@ -1,6 +1,6 @@
 // Mode boundaries in the built app, against test/e2e/interrupt-mock.mjs:
-//   - Chat and Design can't create a skill, by its path, by a case or
-//     trailing-dot variant, or through a folder link inside the vault; the
+//   - Chat and Design can't create a skill, by its path, by a case
+//     variant, by a trailing-dot variant, or through a folder link inside the vault; the
 //     call is refused before any approval card, and nothing is written
 //   - Chat and Design aren't offered Code's file tools, and a call to one
 //     does nothing
@@ -40,7 +40,9 @@ const forged = () =>
     `${SKILLS}/forged`,
     `${SKILLS}/forged-case`,
     `${SKILLS}/forged-link`,
-    `${VAULT}/custard/SKILLS.`,
+    `${SKILLS}/forged-dot`,
+    `${VAULT}/custard/SKILLS`,
+    `${VAULT}/Custard/Skills.`,
     `${OUT}/plugin/forged`
   ].filter((p) => fs.existsSync(p))
 
@@ -140,16 +142,20 @@ try {
   for (const mode of ['Chat', 'Design']) {
     step(`${mode}: extensions can't be written`)
     await w.click(`button:text-is("${mode}")`)
+    const boundary = `${mode} mode can't create or change skills`
+    // A trailing dot is refused before the mode boundary is even reached:
+    // Windows would read "Skills." as "Skills", so no vault path may end in one.
     const cases = [
-      ['mode skill test', 'by its path'],
-      ['mode case test', 'by a case and trailing-dot variant'],
-      ['mode link test', 'through a folder link inside the vault']
+      ['mode skill test', 'by its path', boundary],
+      ['mode case test', 'by a case variant', boundary],
+      ['mode dot test', 'by a trailing-dot variant', "Names can't end in a dot or a space."],
+      ['mode link test', 'through a folder link inside the vault', boundary]
     ]
-    for (const [ask, how] of cases) {
+    for (const [ask, how, refusal] of cases) {
       const asked = await turn(`${ask} (${mode})`)
       check(!asked, `${mode}: no approval card for a skill ${how}`)
       check(
-        lastResult().includes(`${mode} mode can't create or change skills`),
+        lastResult().includes(refusal),
         `${mode}: a skill ${how} is refused (${lastResult().slice(0, 70)})`
       )
     }
