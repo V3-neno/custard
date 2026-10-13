@@ -134,15 +134,108 @@ What the tools receive and return, and how Design approves and tracks jobs, is i
 
 ## Fills
 
-`fills` (optional) says which capability gaps one of the plugin's tools can fill for a model that lacks them. Settings → Capabilities then recommends the plugin for those gaps; it never turns the plugin on. Manifests without it are unchanged.
+`fills` (optional) says which capability gaps one of the plugin's tools fills for a model that lacks them. Settings → Capabilities then recommends the plugin for those gaps. Manifests without it are unchanged.
+
+> `fills` is a declaration that your plugin's tool actually fills this capability gap. Don't guess.
+> For example, if your plugin has a `search` tool that calls Serper, declare `fills: [{ capability: "web_search", tool: "search" }]`.
+> If your plugin can't fill a capability, don't declare it. Custard trusts this claim and shows it to users.
 
 ```json
 "fills": [{ "capability": "web_search", "tool": "search" }]
 ```
 
-- `capability` is one of `web_search`, `pdf` (a tool that turns a PDF into text) or `vision` (a tool that describes an image). Other capabilities are part of the model and no plugin can fill them.
+- `capability` is one of `web_search`, `pdf` or `vision`. Other capabilities are part of the model, and a manifest that names one is refused.
 - `tool` must name one of the plugin's own tools, and not a media tool (chats never get those).
-- It asks for no permission and changes nothing a chat can do. Custard doesn't guess a gap from a tool's name: a tool called `search` that doesn't declare `fills` is never recommended.
+- The same capability and tool may be listed once. At most 6 entries.
+- It asks for no permission and changes nothing a chat can do. It only changes what Settings → Capabilities says.
+
+### How Custard recommends a plugin
+
+Settings → Capabilities works out each provider's capabilities from Custard's own rules (see [providers.md](../providers.md#capabilities-in-settings)). For each capability that some of a provider's models lack, it writes one recommendation:
+
+| The gap                                                                  | What Settings says                                                                                                                      |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| An installed plugin declares `fills` for it, and is on                   | "DeepSeek lacks web search. The Serper plugin can fill this gap with its search tool. It is on."                                        |
+| An installed plugin declares `fills` for it, and is off or not activated | "DeepSeek lacks web search. The Serper plugin can fill this gap with its search tool. Turn it on in Plugins to use it."                 |
+| No installed plugin declares it                                          | "DeepSeek lacks web search. No plugin available yet. One could be built with a web search tool (a Serper or Brave Search plugin, say)." |
+| A capability no plugin can fill                                          | "OpenAI lacks fallback on decline. No plugin can add this: it is part of the model."                                                    |
+
+When only some of a provider's models lack it, the sentence names them: "DeepSeek V4 Pro lacks image input (DeepSeek Flash has it)."
+
+What "One could be built with…" says for each fillable capability:
+
+| `capability` | Gap                            | A plugin that fills it                                   |
+| ------------ | ------------------------------ | -------------------------------------------------------- |
+| `web_search` | The model can't search the web | a web search tool (a Serper or Brave Search plugin, say) |
+| `pdf`        | The model can't read PDFs      | a tool that turns a PDF into text                        |
+| `vision`     | The model can't see images     | a tool that describes an image                           |
+
+Rules the recommendation follows:
+
+- **Only declarations count.** Custard has no built-in list of plugins for a gap. The candidates are the installed plugins whose manifest declares `fills`. Custard never guesses from a tool's name: Spotify has a tool called `search`, and it is never recommended for web search.
+- **Installed, on or off.** A plugin is recommended whether or not it is on; turning it on or off changes only the last sentence.
+- **One plugin per gap.** If several installed plugins declare the same gap, the first by plugin id is named.
+- **Never acts.** Recommending doesn't install, activate, turn on or configure a plugin, and doesn't grant a permission. The user turns it on in Plugins mode as usual, with the usual permission review.
+- **Local only.** The scan reads the manifests on this computer. It calls no provider, no model and no plugin tool.
+
+### Declaring `fills`: examples
+
+A web search plugin whose `search` tool calls Serper:
+
+```json
+{
+  "id": "serper",
+  "name": "Serper",
+  "permissions": { "network": ["google.serper.dev"], "openExternal": [], "storage": false },
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search the web. Returns titles, links and snippets.",
+      "effect": "read",
+      "label": "Searched the web for \"{query}\"",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "query": { "type": "string", "maxLength": 200 } },
+        "required": ["query"]
+      }
+    }
+  ],
+  "fills": [{ "capability": "web_search", "tool": "search" }]
+}
+```
+
+An image description plugin, whose `describe_image` tool sends an image to a vision service and returns text:
+
+```json
+"fills": [{ "capability": "vision", "tool": "describe_image" }]
+```
+
+A PDF parser, whose `pdf_text` tool returns the text of a PDF:
+
+```json
+"fills": [{ "capability": "pdf", "tool": "pdf_text" }]
+```
+
+One plugin can fill more than one gap, each with its own tool:
+
+```json
+"fills": [
+  { "capability": "pdf", "tool": "pdf_text" },
+  { "capability": "vision", "tool": "describe_image" }
+]
+```
+
+(The other manifest fields are left out of the last three examples.)
+
+Before you declare a gap, check that your tool really covers it for a model that lacks the capability:
+
+- **`web_search`:** the tool takes a query and returns current results from the web, not from one site's catalogue. A music or shop search doesn't count.
+- **`pdf`:** the tool takes a PDF the user has and returns its text.
+- **`vision`:** the tool takes an image and returns a description the model can read.
+
+If your tool does only part of this, don't declare it. Users see the claim in Settings and will turn your plugin on because of it.
+
+All capabilities are listed in `src/shared/adapter.ts` (`capabilities`, with their names in `capabilityLabels`). Only the three above can go in `fills`.
 
 ## Permissions as the user sees them
 

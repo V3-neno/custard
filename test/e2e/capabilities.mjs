@@ -387,6 +387,42 @@ try {
   await w.click('[data-capabilities] button:text-is("Refresh")')
   await w.waitForSelector('[data-capabilities] button:text-is("Refresh"):not([disabled])')
 
+  step('Without the plugin that declares it, every fillable gap says no plugin yet')
+  fs.rmSync(PLUGINS + '/web-finder', { recursive: true, force: true })
+  const scanned = await w.locator('[data-scanned]').innerText()
+  await new Promise((r) => setTimeout(r, 1100))
+  await w.click('[data-capabilities] button:text-is("Refresh")')
+  await w.waitForFunction(
+    (b) => document.querySelector('[data-scanned]')?.textContent !== b,
+    scanned,
+    { timeout: 10000 }
+  )
+  const gaps = await w
+    .locator('[data-recommendation]')
+    .evaluateAll((li) => li.map((l) => [l.dataset.recommendation, l.innerText.split('\n')[0]]))
+  const fillable = gaps.filter(([id]) => /:(web_search|pdf|vision)$/.test(id))
+  check(
+    fillable.length === 3 &&
+      fillable.every(([, t]) => /No plugin available yet\. One could be built with /.test(t)),
+    `web search, PDFs and images each say no plugin available yet (${fillable.map(([id]) => id).join(', ')})`
+  )
+  check(
+    /DeepSeek lacks web search\. No plugin available yet\. One could be built with a web search tool \(a Serper or Brave Search plugin, say\)\./.test(
+      await rec('deepseek:web_search')
+    ),
+    'DeepSeek web search no longer names Web Finder'
+  )
+  check(
+    gaps
+      .filter(([id]) => !/:(web_search|pdf|vision)$/.test(id))
+      .every(([, t]) => /No plugin can add this: it is part of the model\.$/.test(t)),
+    'every other gap says no plugin can add it'
+  )
+  check(
+    !(await w.locator('[data-item^="plugin:web-finder"]').count()),
+    'Web Finder is gone from the inventory'
+  )
+
   step('No provider or model was asked')
   await new Promise((r) => setTimeout(r, 1000))
   check(seen.length === 0, `no request while the tab was open or on Refresh (${seen.join(', ')})`)

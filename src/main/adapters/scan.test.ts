@@ -252,3 +252,71 @@ describe('no provider calls', () => {
     f.mockRestore()
   })
 })
+
+// Phase 5: the recommendation rules as docs/plugins/MANIFEST.md states them.
+describe('recommendations, as documented for plugin authors', () => {
+  const rec = (s: CapabilityScan, id: string): Recommendation | undefined =>
+    s.recommendations.find((r) => `${r.provider}:${r.capability}` === id)
+  const fillable = (s: CapabilityScan): Recommendation[] =>
+    s.recommendations.filter((r) => ['web_search', 'pdf', 'vision'].includes(r.capability))
+
+  it('with no plugins installed, every fillable gap says no plugin available yet', () => {
+    const s = scan({ plugins: () => [] })
+    expect(fillable(s).map((r) => r.text)).toEqual([
+      'DeepSeek V4 Pro lacks image input (DeepSeek Flash has it). No plugin available yet. One could be built with a tool that describes an image.',
+      'DeepSeek lacks PDF input. No plugin available yet. One could be built with a tool that turns a PDF into text.',
+      'DeepSeek lacks web search. No plugin available yet. One could be built with a web search tool (a Serper or Brave Search plugin, say).'
+    ])
+    expect(s.recommendations.every((r) => r.plugin === undefined)).toBe(true)
+    for (const r of s.recommendations.filter((r) => !fillable(s).includes(r)))
+      expect(r.text).toMatch(/ No plugin can add this: it is part of the model\.$/)
+  })
+
+  it('turning the plugin on or off changes only the last sentence', () => {
+    const on = plugin('serper', 'Serper', ['search'], 'enabled', [
+      { capability: 'web_search', tool: 'search' }
+    ])
+    const off = { ...on, state: 'disabled' as const }
+    const fresh = { ...on, state: 'not-activated' as const }
+    const text = (p: PluginStatus): string =>
+      rec(scan({ plugins: () => [p] }), 'deepseek:web_search')!.text
+    const head =
+      'DeepSeek lacks web search. The Serper plugin can fill this gap with its search tool.'
+    expect(text(on)).toBe(`${head} It is on.`)
+    expect(text(off)).toBe(`${head} Turn it on in Plugins to use it.`)
+    expect(text(fresh)).toBe(`${head} Turn it on in Plugins to use it.`)
+    expect(rec(scan({ plugins: () => [on] }), 'deepseek:web_search')!.plugin!.enabled).toBe(true)
+  })
+
+  it('one plugin can fill several gaps; only its declared ones', () => {
+    const both = plugin('reader', 'Reader', ['pdf_text', 'describe_image'], 'enabled', [
+      { capability: 'pdf', tool: 'pdf_text' },
+      { capability: 'vision', tool: 'describe_image' }
+    ])
+    const s = scan({ plugins: () => [both] })
+    expect(rec(s, 'deepseek:pdf')!.plugin?.tool).toBe('pdf_text')
+    expect(rec(s, 'deepseek:vision')!.plugin?.tool).toBe('describe_image')
+    expect(rec(s, 'deepseek:web_search')!.plugin).toBeUndefined()
+  })
+
+  it('several plugins for one gap: the first in the list (Plugins lists by id) is named', () => {
+    const a = plugin('alpha-search', 'Alpha', ['find'], 'disabled', [
+      { capability: 'web_search', tool: 'find' }
+    ])
+    const b = plugin('beta-search', 'Beta', ['find'], 'enabled', [
+      { capability: 'web_search', tool: 'find' }
+    ])
+    expect(rec(scan({ plugins: () => [a, b] }), 'deepseek:web_search')!.plugin?.id).toBe(
+      'alpha-search'
+    )
+  })
+
+  it('never recommends a plugin for a gap no plugin can fill, even if its status claims one', () => {
+    const odd = plugin('odd', 'Odd', ['think'], 'enabled', [
+      { capability: 'reasoning' as 'pdf', tool: 'think' }
+    ])
+    const s = scan({ plugins: () => [odd] })
+    expect(rec(s, 'deepseek:reasoning_summary')!.plugin).toBeUndefined()
+    expect(s.recommendations.some((r) => r.plugin)).toBe(false)
+  })
+})

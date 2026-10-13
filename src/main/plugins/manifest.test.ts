@@ -325,3 +325,50 @@ describe('fills', () => {
     ).toMatch(/repeats pdf/)
   })
 })
+
+describe('fills, as documented for plugin authors', () => {
+  it('refuses every capability that is part of the model', () => {
+    for (const c of [
+      'reasoning',
+      'thinking',
+      'reasoning_summary',
+      'effort',
+      'fallbacks',
+      'compaction',
+      'prompt_caching',
+      'token_counting',
+      'text',
+      'tool_use'
+    ])
+      expect(
+        parseManifest({ ...goodManifest(), fills: [{ capability: c, tool: 'search' }] }).ok,
+        c
+      ).toBe(false)
+  })
+
+  it('accepts the documented examples', () => {
+    const tool = (name: string): Record<string, unknown> => ({
+      name,
+      description: 'A tool.',
+      effect: 'read',
+      label: 'Ran',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+    })
+    const r = parseManifest({
+      ...goodManifest(),
+      tools: [tool('search'), tool('pdf_text'), tool('describe_image')],
+      fills: [
+        { capability: 'web_search', tool: 'search' },
+        { capability: 'pdf', tool: 'pdf_text' },
+        { capability: 'vision', tool: 'describe_image' }
+      ]
+    })
+    expect(r.errors).toEqual([])
+    expect(r.manifest?.fills).toHaveLength(3)
+  })
+
+  it('takes at most 6 entries', () => {
+    const fills = Array.from({ length: 7 }, (_, i) => ({ capability: 'pdf', tool: `t${i}` }))
+    expect(parseManifest({ ...goodManifest(), fills }).errors[0]).toMatch(/1 to 6 entries/)
+  })
+})
