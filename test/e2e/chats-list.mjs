@@ -83,6 +83,10 @@ try {
 
   step('Filter and find narrow it')
   await w.click('aside [role=group] button:text-is("Plugins")')
+  // The list is read again from the main process.
+  await w
+    .waitForFunction(() => document.querySelectorAll('aside .group').length === 1)
+    .catch(() => {})
   const plugins = await titles()
   check(
     plugins.length === 1 && plugins[0].includes('beta'),

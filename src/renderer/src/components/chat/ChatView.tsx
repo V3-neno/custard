@@ -681,7 +681,7 @@ function ChatView(props: Props): React.JSX.Element {
     setCurrent(null)
     setError(null)
   }
-  const chatTitle = live && !current ? live.userText : current?.title
+  const chatTitle = live && !current ? live.userText : (current?.chatNote?.title ?? current?.title)
   const crumbs: Crumb[] | null = (() => {
     if (mode !== 'code' || (empty && !workspace)) return null
     const out: Crumb[] = [

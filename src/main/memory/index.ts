@@ -22,7 +22,7 @@ import { continuationsOf } from '../continue'
 import { ensurePluginFolder, type PluginInfo } from './plugins'
 import { summarizer } from './summarize'
 import { CHAT_NOTE_DELAY_MS, CHAT_NOTE_SYSTEM, ChatNotes } from '../chatNotes'
-import { handoffSummarizer } from '../handoff'
+import { CHAT_NOTE_SCHEMA, handoffSummarizer } from '../handoff'
 
 let instance: Capture | null = null
 
@@ -107,7 +107,13 @@ export function chatNotes(): ChatNotes {
     summarizer: (provider, chatId) => {
       const key = getApiKey(provider)
       return key
-        ? handoffSummarizer(provider, key, CHAT_NOTE_SYSTEM, (m, u) => charge(chatId, m, u))
+        ? handoffSummarizer(
+            provider,
+            key,
+            CHAT_NOTE_SYSTEM,
+            (m, u) => charge(chatId, m, u),
+            CHAT_NOTE_SCHEMA
+          )
         : null
     },
     queueFile: join(app.getPath('userData'), 'chat-note-queue.json'),

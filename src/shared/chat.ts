@@ -84,8 +84,13 @@ export type ConversationSummary = {
   mode: Mode
   title: string
   updatedAt: number
-  // Where the chat stands, from its summary note (History shows it).
+  // Where the chat stands, from its summary note (found by History's search).
   summary?: string
+  // From its summary note: a title for the whole chat, what it was for, and
+  // what it worked on. History and the workspace cards show these.
+  noteTitle?: string
+  goal?: string
+  tags?: string[]
   // A temporary chat: never remembered.
   temporary?: boolean
   // Plugins mode: the plugin whose workspace the chat works in.
@@ -200,6 +205,9 @@ export type ChatNote = {
   reason?: string
   goal?: string
   state?: string
+  // The summary's own title for the chat, and what it worked on.
+  title?: string
+  tags?: string[]
   provider?: Provider
 }
 
