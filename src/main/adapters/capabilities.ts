@@ -18,13 +18,12 @@ import { webTools } from '../web'
 // list can't say yes to something a chat would then refuse.
 
 // Seen working in a live test, rather than only documented. Only what was
-// recorded as tested is here (DeepSeek, by Neno on 2026-10-13: a chat with
-// three vault tool calls and a third message, a chat note written by
-// DeepSeek Flash, an image read by DeepSeek Flash). Which DeepSeek model ran
-// the tool-call chat wasn't recorded, so those are listed for both.
+// recorded as tested on a known model is here (DeepSeek, by Neno on
+// 2026-10-13): an image read by DeepSeek Flash, and a chat note written by
+// DeepSeek Flash (the summary model for every DeepSeek chat). Which model ran
+// the tool-call chat wasn't recorded, so text and tools stay 'docs'.
 const LIVE: Partial<Record<string, Capability[]>> = {
-  'deepseek-v4-pro': ['text', 'streaming', 'tool_use'],
-  'deepseek-flash': ['text', 'streaming', 'tool_use', 'json_schema', 'vision']
+  'deepseek-flash': ['vision', 'json_schema']
 }
 
 type Known = (typeof chatModels)[number]

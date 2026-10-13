@@ -46,7 +46,12 @@ describe('model capabilities', () => {
 
   it('marks only recorded live tests as live', () => {
     expect(capabilitiesOf('deepseek-flash').vision.evidence).toBe('live')
+    expect(capabilitiesOf('deepseek-flash').json_schema.evidence).toBe('live')
     expect(capabilitiesOf('deepseek-v4-pro').vision.evidence).toBe('docs')
+    // The tool-call chat's model wasn't recorded.
+    for (const d of ['deepseek-flash', 'deepseek-v4-pro'])
+      for (const c of ['text', 'streaming', 'tool_use'] as const)
+        expect(capabilitiesOf(d)[c].evidence).toBe('docs')
     expect(capabilitiesOf('claude-opus-5-5').text.evidence).toBe('docs')
   })
 
