@@ -195,7 +195,7 @@ const shot = async (n) => {
 }
 const activate = async (name) => {
   await openPlugins()
-  await w.click(`button:has-text("${name}")`)
+  await w.click(`article[aria-label="Plugin ${name}"] button:text-is("Manage")`)
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
   const boxes = w.locator('section:has-text("New permissions to approve") input[type=checkbox]')
@@ -445,7 +445,7 @@ try {
   await idle()
   await slot().waitFor({ timeout: 10000 })
   await openPlugins()
-  await w.click('button:has-text("Tally")')
+  await w.click('article[aria-label="Plugin Tally"] button:text-is("Manage")')
   await w.click('button:text-is("Disable")')
   await w.waitForSelector('button:text-is("Enable")')
   await closePlugins()
