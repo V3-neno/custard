@@ -33,7 +33,7 @@ import { isMode, type ChatSettings, type Mode, type Provider } from '../shared/c
 import { listSkills } from './vault'
 import { pinProviderEndpoints } from './endpoints'
 import { addMissingStarterSkills, createStarterVault, starterSkillFolders } from './vaultTemplate'
-import { readSkill, skillEntries } from './skillsHub'
+import { createSkill, readSkill, skillEntries } from './skillsHub'
 
 function vaultInfo(): VaultInfo {
   const path = getVaultPath()
@@ -198,6 +198,12 @@ app.whenReady().then(() => {
   handle('skills:list', () => {
     const path = getVaultPath()
     return path && existsSync(path) ? skillEntries(path, starterSkillFolders()) : null
+  })
+  // Add a skill: its folder and a draft SKILL.md (see createSkill).
+  handle('skills:create', (_, name: string) => {
+    const path = getVaultPath()
+    if (!path || !existsSync(path)) throw new Error('Connect a vault first.')
+    return createSkill(path, String(name))
   })
   handle('skills:read', (_, folder: string) => {
     const path = getVaultPath()

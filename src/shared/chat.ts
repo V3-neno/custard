@@ -84,10 +84,19 @@ export type ConversationSummary = {
   mode: Mode
   title: string
   updatedAt: number
-  // Where the chat stands, from its summary note (History shows it).
+  // Where the chat stands, from its summary note (found by History's search).
   summary?: string
+  // From its summary note: a title for the whole chat, what it was for, and
+  // what it worked on. History and the workspace cards show these.
+  noteTitle?: string
+  goal?: string
+  tags?: string[]
   // A temporary chat: never remembered.
   temporary?: boolean
+  // Plugins mode: the plugin whose workspace the chat works in.
+  pluginId?: string
+  // Skills mode: the skill (its folder in Custard/Skills) the chat works on.
+  skill?: string
 }
 
 // What became of one tool call. Saved as it changes, so a chat reloaded after
@@ -198,6 +207,9 @@ export type ChatNote = {
   reason?: string
   goal?: string
   state?: string
+  // The summary's own title for the chat, and what it worked on.
+  title?: string
+  tags?: string[]
   provider?: Provider
 }
 
@@ -232,6 +244,10 @@ export type Conversation = ConversationSummary & {
   // Plugins mode only: which plugin's folder the file tools may touch. Fixed
   // when the conversation starts.
   workspace?: Workspace
+  // Skills mode only: the skill whose folder (Custard/Skills/<skill>) is the
+  // only place the chat may write. None: the Skills hub chat, which writes
+  // nothing. Fixed when the conversation starts.
+  skill?: string
   // Exactly what is sent to the API, so assistant turns keep their thinking
   // blocks unchanged between requests.
   messages: BetaMessageParam[]
@@ -252,6 +268,9 @@ export type Conversation = ConversationSummary & {
   // results, which show in `actions`: it read notes it can't vouch for, or
   // was shown captures made from chats that held outside text.
   outside?: ('notes' | 'memory' | 'chats')[]
+  // Plugins hub chats: workspaces the assistant offered to open or create.
+  // Nothing happens until the user presses Yes on the card.
+  proposals?: WorkspaceProposal[]
   // Where a provider's compaction summarized everything before message
   // `after`. The messages themselves are kept and shown in full.
   compactions?: Compaction[]
@@ -320,6 +339,35 @@ export type ContextUse = {
   model: string
 }
 
+// A hub chat's offer to enter a plugin's or skill's workspace, or to create
+// one and enter it. `request` is put in the new chat's message box, unsent, so
+// the user reads it before anything acts on it.
+export type WorkspaceProposal = {
+  id: string
+  // The turn it was made in (index of that turn's first message).
+  turn: number
+  kind: 'open' | 'create'
+  // A skill's workspace (Skills hub); otherwise a plugin's.
+  target?: 'skill'
+  // open: the plugin; create: set once it is made.
+  pluginId?: string
+  // Skills: open: the skill's folder; create: set once it is made.
+  skill?: string
+  // create: the name for the new plugin or skill.
+  name?: string
+  request: string
+  status: 'pending' | 'accepted' | 'declined'
+}
+
+export type ProposalResult =
+  // enter: the workspace to open and the new chat's message (null: Not now).
+  | {
+      ok: true
+      enter: { pluginId?: string; skill?: string; request: string } | null
+      conversation: Conversation
+    }
+  | { ok: false; error: string }
+
 export type ChatEvent =
   | { requestId: string; type: 'thinking'; text: string }
   | { requestId: string; type: 'text'; text: string }
@@ -370,6 +418,8 @@ export type SendChatRequest = {
   settings: ChatSettings
   // For a new Code-mode conversation.
   workspace?: Workspace
+  // For a new Skills-mode conversation: the skill's workspace.
+  skill?: string
   // Start the new conversation as a temporary chat, never remembered.
   temporary?: boolean
   // Chat mode: the files picked for this message, from its draft, in order.

@@ -6,6 +6,9 @@ type Props = {
   modeLabel: string
   // Every mode's chats, or one mode's (filter).
   conversations: ConversationSummary[]
+  // Plugins chats show their plugin's name.
+  pluginNames: Record<string, string>
+  skillNames: Record<string, string>
   filter: Mode | null
   onFilter: (f: Mode | null) => void
   currentId: string | null
@@ -25,13 +28,16 @@ function when(ts: number): string {
 
 function HistoryDrawer(props: Props): React.JSX.Element {
   const { modeLabel, conversations, filter, onFilter, currentId, onOpen, onNew, onDelete } = props
-  const { onForget, onClose } = props
+  const { onForget, onClose, pluginNames, skillNames } = props
   const [find, setFind] = useState('')
   const q = find.trim().toLowerCase()
-  // Finds by title, and by where the chat stands (from its note).
+  // Finds by either title, and by what its note says (goal, where it
+  // stands, tags).
   const shown = q
-    ? conversations.filter(
-        (c) => c.title.toLowerCase().includes(q) || !!c.summary?.toLowerCase().includes(q)
+    ? conversations.filter((c) =>
+        [c.title, c.noteTitle, c.goal, c.summary, ...(c.tags ?? [])].some((x) =>
+          x?.toLowerCase().includes(q)
+        )
       )
     : conversations
   const label = (m: Mode): string => modes.find((x) => x.id === m)?.label ?? m
@@ -96,7 +102,7 @@ function HistoryDrawer(props: Props): React.JSX.Element {
           {shown.length === 0 && (
             <p className="px-2 py-6 text-center text-sm text-ash-500">
               {q
-                ? 'No chat title matches that.'
+                ? 'No chat matches that.'
                 : filter
                   ? `Nothing here yet. Chats you start in ${label(filter)} will show up here.`
                   : 'Nothing here yet. Your chats will show up here.'}
@@ -112,15 +118,39 @@ function HistoryDrawer(props: Props): React.JSX.Element {
               }`}
             >
               <button onClick={() => onOpen(c.id)} className="min-w-0 flex-1 px-3 py-2.5 text-left">
-                <div className="truncate text-sm">{c.title}</div>
-                {c.summary && (
+                <div className="truncate text-sm" title={c.noteTitle ? c.title : undefined}>
+                  {c.noteTitle ?? c.title}
+                </div>
+                {(c.goal ?? c.summary) && (
                   <div className="line-clamp-2 text-xs text-ash-400" data-chat-summary>
-                    {c.summary}
+                    {c.goal ?? c.summary}
                   </div>
                 )}
+                {c.tags?.length ? (
+                  <div className="mt-1 flex flex-wrap gap-1" data-chat-tags>
+                    {c.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="rounded-full border border-forge-700 px-1.5 text-[10px] text-ash-400"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="flex items-center gap-1.5 text-xs text-ash-500">
                   {when(c.updatedAt)}
                   {!filter && <span>· {label(c.mode)}</span>}
+                  {c.pluginId && (
+                    <span className="truncate" title={`plugin/${c.pluginId}`} data-chat-plugin>
+                      · {pluginNames[c.pluginId] ?? c.pluginId}
+                    </span>
+                  )}
+                  {c.skill && (
+                    <span className="truncate" title={`Custard/Skills/${c.skill}`} data-chat-skill>
+                      · {skillNames[c.skill] ?? c.skill}
+                    </span>
+                  )}
                   {c.temporary && (
                     <span className="flex items-center gap-1 text-ash-500">
                       · <TemporaryIcon /> Temporary

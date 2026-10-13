@@ -12,7 +12,9 @@ Plugins add tools to Custard's assistant. They are developed in **Plugins** mode
 
 **Create → Edit → Validate → Test → Review → Activate**, then optionally **Disable**, **Roll back** or **Uninstall**.
 
-1. **Create.** In Plugins mode, click **New plugin**. Custard writes `plugin/<id>/` with a manifest, a working sample tool, a test and instructions. Or choose an existing plugin.
+1. **Create.** In Plugins mode, click **Add a plugin** and give it a name. Custard makes the folder id from the name (`SEO Check` → `plugin/seo-check`; the id is the folder, the tool prefix and the storage key, so it never changes, while the name can) and writes a manifest, a working sample tool, a test and instructions. Or press an existing plugin's card. Either way you land in the plugin's **workspace**: its chats as cards, newest first, and the message box for a new chat that can edit only that plugin. The path bar at the top (All plugins › name › chat) goes back.
+
+   The chat box on the hub itself (no workspace) is for brainstorming: it can read your notes, earlier chats and the web, but it is offered no tool that changes anything. When you want to work on a plugin it offers to open its workspace, or to create a new one, on a card. Only **Yes** on the card does it; the new chat then starts with the suggested message in its box for you to check and send.
 2. **Edit.** The assistant edits files only in `plugin/<id>`. It can read the docs, the SDK source and the Spotify example, read-only.
 3. **Validate.** `plugin_validate` checks the manifest and bundles the code into a staged build, stored in Custard's data folder.
 4. **Test.** `plugin_test` runs `tests/*.test.ts` and a load check in a sandbox.

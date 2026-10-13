@@ -169,7 +169,19 @@ http
                 decisions: ['Keep it instrumental'],
                 // A link and markup the note must not keep.
                 open: ['Check [this](https://evil.example/x) **soon**'],
-                state: `Summary number ${n}: the playlist is half done.`
+                state: `Summary number ${n}: the playlist is half done.`,
+                // The chat's own title, so suites that find chats by it keep
+                // working; chat-notes.mjs checks a title of the summary's own.
+                title: /notes test/.test(evidence)
+                  ? 'Calm evening playlist'
+                  : (/^Chat title: (.*)$/m.exec(evidence)?.[1] ?? ''),
+                tags: ['playlist', 'Queue rules'],
+                // A summary in a script the user never wrote in comes back
+                // in English when asked again (step 3 of the hub plan).
+                ...(/note language test/.test(evidence) &&
+                !b.system.includes('Your last summary was in a different language')
+                  ? { goal: '用户想要一个安静的晚间播放列表' }
+                  : {})
               })
             }
           ]

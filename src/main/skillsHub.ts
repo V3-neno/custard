@@ -4,9 +4,12 @@ import type { SkillEntry, SkillText } from '../shared/vault'
 import { resolveInVault } from './memory/paths'
 import { SKILLS_DIR } from './modes/extensions'
 import { listSkills } from './vault'
+import { pluginIdFrom } from '../shared/plugins'
+import { createNote } from './memory/write'
 
-// The Skills hub's view of Custard/Skills. It only reads: skills are added and
-// improved in a Skills chat, which asks before writing as it always has.
+// The Skills hub's view of Custard/Skills. It reads, and makes a new skill's
+// folder with a draft SKILL.md when the user asks (Add a skill, or Yes on a
+// hub chat's offer); the skill itself is written in its workspace chat.
 
 const MAX_FOLDERS = 500
 const MAX_FILES = 20
@@ -101,4 +104,50 @@ export function readSkill(vault: string, folder: unknown): SkillText {
     text: text.length > MAX_SKILL_CHARS ? text.slice(0, MAX_SKILL_CHARS) : text,
     truncated: text.length > MAX_SKILL_CHARS
   }
+}
+
+// Whether `folder` is a skill folder in Custard/Skills (with or without its
+// SKILL.md yet).
+export function skillExists(vault: string, folder: unknown): boolean {
+  if (typeof folder !== 'string' || !FOLDER.test(folder) || folder.startsWith('.')) return false
+  try {
+    return statSync(resolveInVault(vault, `${SKILLS_DIR}/${folder}`, false)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// A new skill: its folder, named from `name` like a plugin's id, and a draft
+// SKILL.md that loads only in Skills mode until it is written. Never
+// replaces anything that is there. Returns the folder.
+export function createSkill(vault: string, name: string): string {
+  const clean = name
+    .replace(/[\r\n]+/g, ' ')
+    .trim()
+    .slice(0, 60)
+  const dir = join(vault, SKILLS_DIR)
+  let taken: string[] = []
+  try {
+    taken = readdirSync(dir).map((f) => f.toLowerCase())
+  } catch {
+    // No skills folder yet.
+  }
+  const folder = pluginIdFrom(clean, new Set(taken))
+  if (!folder)
+    throw new Error(
+      'Use at least one letter from a to z in the name; Custard makes the folder name from it.'
+    )
+  const text = [
+    '---',
+    `name: ${JSON.stringify(clean)}`,
+    'description: "Draft. Say in one sentence when to use this skill."',
+    'modes: skills',
+    '---',
+    '',
+    `# ${clean}`,
+    '',
+    'A draft. Write this skill with Custard in its workspace in Skills mode, then set the description and the modes it is for (leave `modes` out for every mode).'
+  ].join('\n')
+  createNote(vault, resolveInVault(vault, `${SKILLS_DIR}/${folder}/SKILL.md`), text)
+  return folder
 }

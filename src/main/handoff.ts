@@ -211,6 +211,10 @@ export type HandoffSummary = {
   decisions: string[]
   open: string[]
   state: string
+  // Chat notes only (CHAT_NOTE_SCHEMA): a short title for the chat and what
+  // it worked on.
+  title?: string
+  tags?: string[]
 }
 
 const str = { type: 'string' }
@@ -231,6 +235,18 @@ export const HANDOFF_SYSTEM = [
   'Never include passwords, keys, tokens or raw data. Write short plain sentences in the language the user used.'
 ].join('\n')
 
+// Chat notes add a title and tags to the handoff fields.
+export const CHAT_NOTE_SCHEMA = {
+  ...HANDOFF_SCHEMA,
+  properties: { ...HANDOFF_SCHEMA.properties, title: str, tags: strings },
+  required: [...HANDOFF_SCHEMA.required, 'title', 'tags']
+}
+
+// Added to the instructions for a second try when a summary came back in a
+// language the user never wrote in (see language.ts).
+export const STRICT_LANGUAGE =
+  'Your last summary was in a different language from the user\'s. Write every field only in the language of the user\'s own messages (the lines starting with "User:"), even if the assistant answered in another language.'
+
 const clean = (s: unknown, n = 400): string => (typeof s === 'string' ? oneLine(s).slice(0, n) : '')
 
 export function parseHandoff(raw: string): HandoffSummary {
@@ -245,16 +261,31 @@ export function parseHandoff(raw: string): HandoffSummary {
       .map((y) => clean(y, 300))
       .filter(Boolean)
       .slice(0, 12)
+  // A few short tags, each a word or two, without duplicates.
+  const tags = [
+    ...new Set(
+      (Array.isArray(v.tags) ? v.tags : [])
+        .map((t) => clean(t, 40).replace(/^#/, '').trim().toLowerCase())
+        .filter((t) => t && t.length <= 32)
+    )
+  ].slice(0, 5)
   return {
     goal: clean(v.goal, 600),
     constraints: list(v.constraints),
     decisions: list(v.decisions),
     open: list(v.open),
-    state: clean(v.state, 800)
+    state: clean(v.state, 800),
+    ...(typeof v.title === 'string' && clean(v.title, 80) ? { title: clean(v.title, 80) } : {}),
+    ...(Array.isArray(v.tags) ? { tags } : {})
   }
 }
 
-export type HandoffSummarizer = (evidence: string, signal?: AbortSignal) => Promise<HandoffSummary>
+// `strict`: a second try after a summary in the wrong language.
+export type HandoffSummarizer = (
+  evidence: string,
+  signal?: AbortSignal,
+  strict?: boolean
+) => Promise<HandoffSummary>
 
 // `system` swaps the instructions (chat notes use their own); the schema and
 // limits stay the same.
@@ -263,22 +294,25 @@ export function handoffSummarizer(
   apiKey: string,
   system = HANDOFF_SYSTEM,
   // Told what each call used (see usage.ts).
-  onUsage?: OnUsage
+  onUsage?: OnUsage,
+  schema: typeof HANDOFF_SCHEMA = HANDOFF_SCHEMA
 ): HandoffSummarizer {
+  const instructions = (strict?: boolean): string =>
+    strict ? `${system}\n${STRICT_LANGUAGE}` : system
   const opts = { timeout: HANDOFF_LIMITS.timeoutMs, maxRetries: HANDOFF_LIMITS.retries }
   if (providers[provider].api === 'responses') {
     const client = responsesClient(provider, apiKey, opts)
-    return async (evidence, signal) => {
+    return async (evidence, signal, strict) => {
       const r = await client.responses.create(
         {
           model: HANDOFF_MODELS[provider],
-          instructions: system,
+          instructions: instructions(strict),
           input: evidence,
           max_output_tokens: HANDOFF_LIMITS.maxTokens,
           reasoning: { effort: 'low' },
           store: false,
           text: {
-            format: { type: 'json_schema', name: 'handoff', strict: true, schema: HANDOFF_SCHEMA }
+            format: { type: 'json_schema', name: 'handoff', strict: true, schema }
           }
         },
         { signal }
@@ -289,14 +323,14 @@ export function handoffSummarizer(
     }
   }
   const client = new Anthropic({ apiKey, ...opts, ...anthropicEndpoint() })
-  return async (evidence, signal) => {
+  return async (evidence, signal, strict) => {
     const m = await client.messages.create(
       {
         model: HANDOFF_MODELS[provider],
         max_tokens: HANDOFF_LIMITS.maxTokens,
-        system,
+        system: instructions(strict),
         messages: [{ role: 'user', content: evidence }],
-        output_config: { format: { type: 'json_schema', schema: HANDOFF_SCHEMA } }
+        output_config: { format: { type: 'json_schema', schema } }
       },
       { signal }
     )

@@ -167,7 +167,7 @@ try {
   await w.click('button:has-text("Use an existing vault")')
   await w.waitForSelector('text=· connected')
   await openPlugins()
-  await w.click('button:has-text("Spotify")')
+  await w.click('article[aria-label="Plugin Spotify"] button:text-is("Manage")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
   const boxes = w.locator('section:has-text("New permissions to approve") input[type=checkbox]')
@@ -186,13 +186,12 @@ try {
     (await w.locator('button:text-is("General Code")').count()) === 0,
     'there is no General Code workspace to pick'
   )
-  await w.click('button:text-is("New plugin")')
-  await w.fill('input[aria-label="Plugin id"]', 'ws-hard')
-  await w.fill('input[aria-label="Plugin name"]', 'WS Hard')
-  await w.click('button:text-is("Create")')
+  await w.click('button:has-text("Add a plugin")')
+  await w.fill('input[aria-label="New plugin name"]', 'WS Hard')
+  await w.click('button:text-is("Create and open")')
   check(
-    await until(async () => (await w.inputValue('select[aria-label=Plugin]')) === 'ws-hard'),
-    'the new plugin is chosen'
+    await until(async () => (await w.locator('text=Workspace · plugin/ws-hard').count()) === 1),
+    'the new plugin is made and its workspace entered'
   )
   fs.writeFileSync(`${WS}/keep.txt`, 'line one\nline two\n')
   fs.writeFileSync(`${WS}/gone.txt`, 'delete me\n')
@@ -250,9 +249,8 @@ try {
   check(fs.existsSync(`${WS}/moved/new.txt`), 'the approved rename happened')
 
   step('M2: no plugin tools in a Plugins chat with no plugin chosen')
-  await w.click('button[title="Plugins history"]')
-  await w.click('button:has-text("New plugins chat")')
-  await w.selectOption('select[aria-label=Plugin]', '')
+  await w.click('button:text-is("All plugins")')
+  await w.waitForSelector('button:has-text("Add a plugin")')
   await send('plain question')
   await idle()
   const tools = read('/anthropic.json', []).at(-1)?.tools ?? []

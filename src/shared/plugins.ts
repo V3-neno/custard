@@ -183,3 +183,24 @@ export function describePermission(p: string): string {
       return p
   }
 }
+
+// A new plugin's id (its folder, tool prefix and storage key, which never
+// change) made from the name the user typed: "SEO Check" → "seo-check".
+// `taken` ids get a number: "seo-check-2". Null when the name has no letters
+// or digits to make one from.
+export function pluginIdFrom(name: string, taken: ReadonlySet<string> = new Set()): string | null {
+  let base = name
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^[^a-z]+/, '')
+    .replace(/-+$/, '')
+    .slice(0, 28)
+    .replace(/-+$/, '')
+  if (!base) return null
+  if (base.length < 2) base = `${base}-plugin`
+  if (!taken.has(base)) return base
+  for (let n = 2; n < 100; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`
+  return null
+}

@@ -6,6 +6,7 @@ import type {
   ChatMemory,
   ChatSettings,
   ContinueResult,
+  ProposalResult,
   Conversation,
   ConversationSummary,
   Mode,
@@ -80,7 +81,9 @@ const custard = {
   skills: {
     // null when no vault is connected.
     list: (): Promise<SkillEntry[] | null> => ipcRenderer.invoke('skills:list'),
-    read: (folder: string): Promise<SkillText> => ipcRenderer.invoke('skills:read', folder)
+    read: (folder: string): Promise<SkillText> => ipcRenderer.invoke('skills:read', folder),
+    // A new skill's folder with a draft SKILL.md; returns the folder.
+    create: (name: string): Promise<string> => ipcRenderer.invoke('skills:create', name)
   },
   plugins: {
     list: (): Promise<PluginStatus[]> => ipcRenderer.invoke('plugins:list'),
@@ -104,8 +107,7 @@ const custard = {
     disconnect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disconnect', id),
     resetSecrets: (id: string): Promise<PluginStatus> =>
       ipcRenderer.invoke('plugins:resetSecrets', id),
-    create: (id: string, name: string): Promise<PluginStatus> =>
-      ipcRenderer.invoke('plugins:create', id, name),
+    create: (name: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:create', name),
     labels: (): Promise<Record<string, string>> => ipcRenderer.invoke('plugins:labels'),
     sourceRoot: (): Promise<string> => ipcRenderer.invoke('plugins:sourceRoot')
   },
@@ -232,6 +234,9 @@ const custard = {
     stop: (requestId: string): void => ipcRenderer.send('chat:stop', requestId),
     approve: (id: string, decision: ApprovalDecision): Promise<void> =>
       ipcRenderer.invoke('chat:approve', id, decision),
+    // Yes or Not now on a Plugins hub chat's offer to enter a workspace.
+    proposal: (chatId: string, proposalId: string, yes: boolean): Promise<ProposalResult> =>
+      ipcRenderer.invoke('chat:proposal', chatId, proposalId, yes),
     // Continue a chat that grew too long in a new one; the original is kept.
     continue: (id: string, withoutSummary?: boolean): Promise<ContinueResult> =>
       ipcRenderer.invoke('chat:continue', id, withoutSummary),

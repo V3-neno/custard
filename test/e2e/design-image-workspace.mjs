@@ -194,7 +194,7 @@ try {
   await w.selectOption('#design-image-provider', 'openai-images')
   await w.waitForSelector('#design-image-model')
   await openPlugins()
-  await w.click('button:has-text("Slowmo")')
+  await w.click('article[aria-label^="Plugin Slowmo"] button:text-is("Manage")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
   const boxes = w.locator('section:has-text("New permissions to approve") input[type=checkbox]')

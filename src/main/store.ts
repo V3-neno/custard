@@ -54,10 +54,16 @@ export function listConversations(mode: Mode | null): ConversationSummary[] {
                 title: c.title,
                 updatedAt: c.updatedAt,
                 ...(c.memory?.temporary ? { temporary: true } : {}),
+                ...(c.workspace?.kind === 'internal' ? { pluginId: c.workspace.pluginId } : {}),
+                ...(c.skill ? { skill: c.skill } : {}),
                 // Where the chat stands, from its note in Custard/Chats.
-                ...(c.chatNote?.state &&
-                (c.chatNote.status === 'saved' || c.chatNote.status === 'edited')
-                  ? { summary: c.chatNote.state }
+                ...(c.chatNote && (c.chatNote.status === 'saved' || c.chatNote.status === 'edited')
+                  ? {
+                      ...(c.chatNote.state ? { summary: c.chatNote.state } : {}),
+                      ...(c.chatNote.title ? { noteTitle: c.chatNote.title } : {}),
+                      ...(c.chatNote.goal ? { goal: c.chatNote.goal } : {}),
+                      ...(c.chatNote.tags?.length ? { tags: c.chatNote.tags } : {})
+                    }
                   : {})
               }
             ]

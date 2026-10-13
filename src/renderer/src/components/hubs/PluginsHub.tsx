@@ -1,25 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { PluginStatus } from '../../../../shared/plugins'
-import { CloseIcon, PlusIcon } from '../icons'
+import { pluginIdFrom, type PluginStatus } from '../../../../shared/plugins'
+import { PlusIcon } from '../icons'
 import { cleanError } from '../settings/ui'
-import { Badge, Detail } from './PluginDetail'
+import ManagePanel from './ManagePanel'
+import { Badge } from './PluginDetail'
 
 // Plugins mode's start page: every plugin in plugin/, what each does and its
-// state. Manage opens everything Settings → Plugins used to hold (review and
-// activate, permissions, configuration, account, Chat/Design/Skills use,
-// roll back, uninstall). Improve and Add pick the plugin for the next chat
-// and put a request in the message box.
+// state. Pressing a card enters that plugin's workspace (its chats, and new
+// chats that can edit it). Manage opens everything Settings → Plugins used to
+// hold (review and activate, permissions, configuration, account,
+// Chat/Design/Skills use, roll back, uninstall). Add asks for a name, makes
+// the plugin and enters its workspace.
 
 type Props = {
-  // Picks the plugin for the next chat and puts a request in the box (not sent).
-  onStart: (pluginId: string, text: string) => void
+  onEnter: (pluginId: string) => void
 }
 
 const chip = 'rounded-full border border-forge-700 px-2.5 py-0.5 text-[11px] text-ash-400'
 const pill =
   'rounded-full border border-forge-700 bg-forge-850/80 px-3 py-1 text-xs text-ash-300 transition-colors hover:border-molten-500/50 hover:text-molten-200'
 const field =
-  'w-40 rounded-full border border-forge-700 bg-forge-900 px-3 py-1 text-xs outline-none focus:border-molten-500/60'
+  'w-48 rounded-full border border-forge-700 bg-forge-900 px-3 py-1 text-xs outline-none focus:border-molten-500/60'
 
 function chips(p: PluginStatus): string[] {
   const out: string[] = []
@@ -69,12 +70,11 @@ function SecurityToggle(): React.JSX.Element {
   )
 }
 
-function PluginsHub({ onStart }: Props): React.JSX.Element {
+function PluginsHub({ onEnter }: Props): React.JSX.Element {
   const [plugins, setPlugins] = useState<PluginStatus[] | null>(null)
   const [filter, setFilter] = useState('')
   const [open, setOpen] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const [newId, setNewId] = useState('')
   const [newName, setNewName] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -101,22 +101,25 @@ function PluginsHub({ onStart }: Props): React.JSX.Element {
   const replace = (s: PluginStatus): void =>
     setPlugins((list) => (list ?? []).map((x) => (x.id === s.id ? s : x)))
 
+  // The folder Custard will make, shown while typing (the main process makes
+  // the same id, numbered if a folder appeared meanwhile).
+  const newId = pluginIdFrom(newName, new Set((plugins ?? []).map((p) => p.id)))
+
   const create = async (): Promise<void> => {
     try {
       setError(null)
-      const s = await window.custard.plugins.create(newId.trim(), newName.trim())
+      const s = await window.custard.plugins.create(newName.trim())
       setAdding(false)
-      setNewId('')
       setNewName('')
-      onStart(s.id, `Build the new ${s.name} plugin: `)
+      onEnter(s.id)
     } catch (e) {
       setError(cleanError(e))
     }
   }
 
-  const improve = (p: PluginStatus): void => {
+  const close = (): void => {
     setOpen(null)
-    onStart(p.id, `Improve the ${p.name} plugin (plugin/${p.id}). `)
+    void load()
   }
   const current = plugins?.find((p) => p.id === open)
 
@@ -146,28 +149,32 @@ function PluginsHub({ onStart }: Props): React.JSX.Element {
         </div>
       </div>
       {adding && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-forge-700 bg-forge-850/60 p-3">
-          <input
-            aria-label="New plugin id"
-            value={newId}
-            onChange={(e) => setNewId(e.target.value.toLowerCase())}
-            placeholder="id, e.g. seo-check"
-            className={field}
-          />
+        <form
+          className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-forge-700 bg-forge-850/60 p-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (newId) void create()
+          }}
+        >
           <input
             aria-label="New plugin name"
+            autoFocus
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder="Name"
+            placeholder="Name, e.g. SEO Check"
             className={field}
           />
-          <button className={pill} disabled={!newId.trim()} onClick={create}>
-            Create and start
+          <button type="submit" className={pill} disabled={!newId}>
+            Create and open
           </button>
-          <span className="text-xs text-ash-500">
-            Custard writes plugin/{newId.trim() || '<id>'} with a working sample to build on.
+          <span className="text-xs text-ash-500" data-new-plugin-folder>
+            {newId
+              ? `Custard makes plugin/${newId} with a working sample to build on. The folder name stays; the name can change later.`
+              : newName.trim()
+                ? 'Use at least one letter from a to z: Custard makes the folder name from it.'
+                : 'Custard makes a folder for it from the name, with a working sample to build on.'}
           </span>
-        </div>
+        </form>
       )}
       <div className="mb-5">
         <SecurityToggle />
@@ -183,104 +190,66 @@ function PluginsHub({ onStart }: Props): React.JSX.Element {
             <article
               key={p.id}
               aria-label={`Plugin ${p.name}`}
-              className="flex flex-col rounded-2xl border border-forge-700 bg-forge-850/60 p-4 transition-colors hover:border-molten-500/40"
+              className="group relative flex flex-col rounded-2xl border border-forge-700 bg-forge-850/60 p-4 transition-colors hover:border-molten-500/40"
             >
-              <div className="flex items-baseline gap-2">
-                <button
-                  onClick={() => setOpen(p.id)}
-                  className="truncate text-left font-medium text-ash-100 hover:text-molten-200"
-                >
+              {/* The whole card enters the workspace; Manage sits above it. */}
+              <button
+                onClick={() => onEnter(p.id)}
+                aria-label={`Open ${p.name}`}
+                className="absolute inset-0 rounded-2xl focus:outline-none focus-visible:ring-1 focus-visible:ring-molten-500/60"
+              />
+              <div className="pointer-events-none flex items-baseline gap-2">
+                <span className="truncate font-medium text-ash-100 group-hover:text-molten-200">
                   {p.name}
-                </button>
+                </span>
                 {p.active && <span className="text-xs text-ash-500">v{p.active.version}</span>}
                 <span className="ml-auto shrink-0">
                   <Badge p={p} />
                 </span>
               </div>
-              <p className="mt-1 line-clamp-3 text-sm text-ash-400">{p.description}</p>
+              <p className="pointer-events-none mt-1 line-clamp-3 text-sm text-ash-400">
+                {p.description}
+              </p>
               {p.sourceErrors.length > 0 && (
-                <p className="mt-1 text-xs text-ember-600">
+                <p className="pointer-events-none mt-1 text-xs text-ember-600">
                   {p.sourceErrors.length === 1
                     ? '1 problem in the source'
                     : `${p.sourceErrors.length} problems in the source`}
                 </p>
               )}
-              <div className="mt-3 flex flex-wrap gap-1.5">
+              <div className="pointer-events-none mt-3 flex flex-wrap gap-1.5">
                 {chips(p).map((c) => (
                   <span key={c} className={chip}>
                     {c}
                   </span>
                 ))}
               </div>
-              <div className="mt-auto flex gap-2 pt-4">
-                <button className={pill} onClick={() => setOpen(p.id)}>
+              <div className="pointer-events-none mt-auto flex items-center gap-2 pt-4">
+                <button
+                  className={`${pill} pointer-events-auto relative`}
+                  onClick={() => setOpen(p.id)}
+                >
                   Manage
                 </button>
-                <button className={pill} onClick={() => improve(p)}>
-                  Improve
-                </button>
+                <span className="ml-auto text-xs text-ash-500 group-hover:text-molten-300">
+                  Open workspace ›
+                </span>
               </div>
             </article>
           ))}
         </div>
       )}
       {current && (
-        <div
-          className="fixed inset-0 z-20 flex justify-end"
-          onClick={() => {
+        <ManagePanel
+          plugin={current}
+          onChange={replace}
+          onRefresh={() => void load()}
+          onClose={close}
+          onEnter={() => {
             setOpen(null)
-            void load()
+            onEnter(current.id)
           }}
-        >
-          <div className="absolute inset-0 bg-black/50" />
-          <aside
-            role="dialog"
-            aria-label={`Manage ${current.name}`}
-            className="relative flex h-full w-full max-w-2xl flex-col border-l border-forge-700 bg-forge-900/95 backdrop-blur"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center px-6 pt-5 pb-3">
-              <div className="text-xs tracking-[0.2em] text-ash-500 uppercase">Plugin</div>
-              <button
-                onClick={() => {
-                  setOpen(null)
-                  void load()
-                }}
-                aria-label="Close"
-                className="ml-auto rounded-full p-2 text-ash-400 hover:bg-forge-800 hover:text-molten-300"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-6 pb-6">
-              <Detail key={current.id} p={current} onChange={replace} />
-            </div>
-            <div className="flex gap-2 border-t border-forge-700 px-6 py-3">
-              <button
-                onClick={() => improve(current)}
-                className="molten-fill rounded-full px-4 py-1.5 text-xs font-medium text-forge-950"
-              >
-                Improve this plugin
-              </button>
-              <button
-                onClick={() => void load()}
-                className={pill}
-                title="Read plugin/ again, for changes made outside this window"
-              >
-                Refresh
-              </button>
-              <button
-                onClick={() => {
-                  setOpen(null)
-                  void load()
-                }}
-                className={`${pill} ml-auto`}
-              >
-                Done
-              </button>
-            </div>
-          </aside>
-        </div>
+        />
       )}
     </div>
   )

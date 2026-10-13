@@ -119,7 +119,7 @@ try {
   await w.click('button:has-text("Use an existing vault")')
   await w.waitForSelector('text=· connected')
   await openPlugins()
-  await w.click('button:has-text("Spotify")')
+  await w.click('article[aria-label="Plugin Spotify"] button:text-is("Manage")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
   const boxes = w.locator('section:has-text("New permissions to approve") input[type=checkbox]')

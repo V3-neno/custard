@@ -183,7 +183,7 @@ try {
 
   step('Activating the fixture asks for media:video')
   await openPlugins()
-  await w.click('button:has-text("Slowmo")')
+  await w.click('article[aria-label^="Plugin Slowmo"] button:text-is("Manage")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
   const perms = await w.locator('section:has-text("New permissions to approve")').innerText()
@@ -306,7 +306,7 @@ try {
 
   step('Disabling the plugin')
   await openPlugins()
-  await w.click('button:has-text("Slowmo")')
+  await w.click('article[aria-label^="Plugin Slowmo"] button:text-is("Manage")')
   await w.click('button:text-is("Disable")')
   await closePlugins()
   const after = (await design(() => window.custard.design.capabilities()))['video.text-to-video']

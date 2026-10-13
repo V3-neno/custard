@@ -139,15 +139,51 @@ try {
   check(notes().length === 1, 'still one note')
   await w.click('button[title="Chat history"]')
   await w.waitForSelector('aside [data-chat-summary]')
+  const histRow = w.locator('aside .group').first()
   check(
-    (await w.locator('aside [data-chat-summary]').first().innerText()).includes('Summary number 2'),
-    'History shows where the chat stands'
+    (await histRow.innerText()).includes('Calm evening playlist'),
+    "History's title is the summary's, not the first message"
+  )
+  check(
+    (await histRow.locator('[data-chat-summary]').innerText()).includes(
+      'Plan a calm evening playlist'
+    ),
+    'with the goal underneath'
+  )
+  check(
+    (await histRow.locator('[data-chat-tags]').innerText()).replace(/\s+/g, ' ') ===
+      'playlist queue-rules',
+    'and its tags'
+  )
+  check(
+    fs.readFileSync(`${CHATS}/${name}`, 'utf8').includes('tags: ["playlist","queue-rules"]'),
+    'the note carries the tags for Obsidian'
   )
   await w.fill('input[aria-label="Find a chat"]', 'half done')
   check((await w.locator('aside .group').count()) === 1, 'and finds the chat by it')
   await w.screenshot({ path: SHOTS + '/chatnotes-01-history.png' })
   await w.fill('input[aria-label="Find a chat"]', '')
   await w.keyboard.press('Escape')
+
+  step('A summary in a script the user never used is written again')
+  await newChat()
+  const beforeLang = calls().length
+  await send('note language test: a quiet evening playlist please')
+  check(
+    await until(() => chat('note language test')?.chatNote?.status === 'saved'),
+    'the note is saved'
+  )
+  check(calls().length === beforeLang + 2, 'after a second summary call')
+  const langNote = notes().find((f) => f.includes('note language test'))
+  const langText = langNote ? fs.readFileSync(`${CHATS}/${langNote}`, 'utf8') : ''
+  check(
+    langText.includes('**Goal:** Plan a calm evening playlist') &&
+      !/[\u4e00-\u9fff]/.test(langText),
+    'in the language of the chat'
+  )
+  await w.click('button[title="Chat history"]')
+  await w.fill('input[aria-label="Find a chat"]', 'notes test')
+  await w.locator('aside div.group button').first().click()
 
   step('A note changed outside Custard is left alone')
   fs.appendFileSync(`${CHATS}/${name}`, '\nMy own line.\n')
@@ -169,16 +205,18 @@ try {
   await w.click('[aria-label="Temporary chat"]')
   await send('temp notes test: secret plans')
   await new Promise((r) => setTimeout(r, 2500))
-  check(notes().length === 1, 'no note for a temporary chat')
+  check(notes().length === 2, 'no note for a temporary chat')
   check(!calls().some((c) => c.evidence.includes('secret plans')), 'and no summary call')
 
   step('Forget deletes the note')
   await newChat()
   await send('forget notes test: something')
-  check(await until(() => notes().length === 2), 'a second chat gets its note')
-  const second = notes().find((n) => n !== name)
+  check(await until(() => notes().length === 3), 'another chat gets its note')
+  const second = notes().find((n) => n !== name && n !== langNote)
   await w.click('button[title="Chat history"]')
-  const row = w.locator('div.group:has-text("forget notes test")')
+  // Its row shows the summary's title; the search finds it by its first words.
+  await w.fill('input[aria-label="Find a chat"]', 'forget notes test')
+  const row = w.locator('aside div.group').first()
   await row.hover()
   await row.locator('button:text-is("Forget")').click()
   check(

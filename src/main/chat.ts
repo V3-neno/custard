@@ -10,6 +10,7 @@ import type {
 import { type WebContents } from 'electron'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
+import { join } from 'path'
 import { getApiKey } from './apiKey'
 import { describeError } from './providerError'
 import {
@@ -86,9 +87,17 @@ import { attachments } from './attachments'
 import { claudeFilesFrom, prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
 import { acceptsAttachments, type Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
-import { pluginHost, protectedRoots, verifyWorkspace } from './plugins'
+import { createPluginNamed, pluginHost, protectedRoots, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
 import { workspaceTools, type WorkspaceTools } from './workspace'
+import {
+  answerProposal,
+  PROPOSE_TOOL,
+  proposePrompt,
+  proposeTool,
+  runProposeTool
+} from './workspace/propose'
+import { createSkill, skillEntries, skillExists } from './skillsHub'
 import { isWebTool, runWebTool, webTools } from './web'
 import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
@@ -100,6 +109,7 @@ import {
   type ApprovalDecision,
   providerNames,
   type ChatEvent,
+  type ProposalResult,
   type ChatReference,
   type ContinueResult,
   type Conversation,
@@ -111,7 +121,7 @@ import { providers } from '../shared/providers'
 import { setRequestLookup, widgets } from './widgets'
 import { anthropicEndpoint } from './endpoints'
 import { modeName, modePolicy, refuseKind, toolKind } from './modes/policy'
-import { extensionRefusal, extensionTarget } from './modes/extensions'
+import { extensionRefusal, extensionTarget, aboveRoot, writesInside } from './modes/extensions'
 import { resolveInVault } from './memory/paths'
 import { design } from './design'
 import { designTools, runDesignTool } from './design/tools'
@@ -191,8 +201,8 @@ const USE_ONLY =
 const MODE_PROMPTS: Record<Mode, string> = {
   chat: 'The user is in Chat mode: a general conversation.' + USE_ONLY,
   code:
-    'The user is in Plugins mode, where Custard plugins are built and improved. Act as a senior software engineer: when a plugin is chosen, work on it with the workspace tools; ' +
-    'otherwise answer questions about plugins and suggest picking one or creating a new one. Explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
+    'The user is in Plugins mode, where Custard plugins are built and improved. Act as a senior software engineer: in a plugin workspace, work on it with the workspace tools; ' +
+    'on the hub, brainstorm and offer to open or create one. Explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
   design:
     'The user is in Design mode. Act as a product and visual designer: think about layout, hierarchy, color, typography, spacing and interaction states. ' +
     'When the user wants a page, mockup or UI, make it with design_html: send the complete document (inline CSS and JS, or local files through `files`), never a fragment, and never only a code block. ' +
@@ -309,6 +319,13 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     } catch (err) {
       return refuse(err instanceof Error ? err.message : String(err))
     }
+  // A skill's workspace: a skill folder that is there now.
+  if (!existing && req.mode === 'skills' && req.skill !== undefined) {
+    const v = getVaultPath()
+    if (!v || !existsSync(v) || !skillExists(v, req.skill))
+      return refuse("That skill isn't in Custard/Skills, so the chat wasn't started.")
+    conversation.skill = req.skill
+  }
   // Created before the user's message goes in, so it can be taken back out
   // if nothing at all happens.
   const log = new TurnLog(conversation, saveConversation)
@@ -344,7 +361,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const workspace = conversation.mode === 'code' ? workspaceTools(conversation.workspace) : null
   // What this mode may do (see modes/policy): which kinds of tool it's
   // offered and runs, and whether it may write skills or plugin files.
-  const policy = modePolicy(conversation.mode, conversation.workspace)
+  const policy = modePolicy(conversation.mode, conversation.workspace, conversation.skill)
+  const hubTarget = conversation.mode === 'skills' ? 'skill' : 'plugin'
   const kindOf = (name: string): ReturnType<typeof toolKind> =>
     toolKind(name, { isWorkspace: (n) => !!workspace?.has(n), isWeb: isWebTool })
   // Enabled plugins' tools, and which build each came from. Every call is
@@ -358,6 +376,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
   ]
   if (workspace) system.push({ type: 'text', text: workspace.prompt })
+  if (policy.tools.has('navigate')) system.push({ type: 'text', text: proposePrompt(hubTarget) })
+  if (policy.writeRoot)
+    system.push({
+      type: 'text',
+      text: `This chat is the workspace of one skill, "${conversation.skill}", in ${policy.writeRoot}/. You can write notes only inside that folder: its SKILL.md and files next to it. Read anything else in the vault you need, but never offer to change notes elsewhere; for that the user goes to Chat mode.`
+    })
   let vaultPrompt: string | null = null
   if (vaultReady)
     try {
@@ -494,7 +518,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ...web.tools,
     ...plugins.tools,
     ...(widgetCatalog.length ? widgetTools(widgets().keys(conversation.id)) : []),
-    ...(policy.tools.has('design') ? designTools() : [])
+    ...(policy.tools.has('design') ? designTools() : []),
+    ...(policy.tools.has('navigate') ? [proposeTool(hubTarget)] : [])
   ].filter((t) => policy.tools.has(kindOf(t.name)))
   const available = new Set(tools.map((t) => t.name))
   // Attached files, read once the turn starts (see attachments/request).
@@ -571,6 +596,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     }
   }
 
+  const outsideSkill = (): string =>
+    `This chat can only write inside ${policy.writeRoot}/, the folder of the skill it works on, so nothing was done.`
+
   // Why the mode refuses a call, checked before anything runs or asks: its
   // kind of tool, and for a new note, whether it would land among skills,
   // plugin files or Custard's own files (by any path, links included).
@@ -585,6 +613,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       // A path the vault refuses anyway; the tool says why.
       return null
     }
+    if (policy.writeRoot && !writesInside(full, join(vault, policy.writeRoot)))
+      return outsideSkill()
     const target = extensionTarget(full, vault, protectedRoots())
     if (!target || (target === 'skill' && policy.authorSkills)) return null
     return extensionRefusal(target, modeName(policy.mode))
@@ -688,6 +718,20 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
             warning
           )
       })
+    if (c.name === PROPOSE_TOOL)
+      return runProposeTool(
+        conversation,
+        c.input,
+        log.startLength,
+        hubTarget,
+        hubTarget === 'skill'
+          ? vaultReady
+            ? skillEntries(vault, new Set()).map((x) => ({ id: x.folder, name: x.name }))
+            : []
+          : pluginHost()
+              .list()
+              .map((p) => ({ id: p.id, name: p.name }))
+      )
     if (c.name === QUESTION_TOOL)
       return runQuestionTool(automationQuestionsFile(), shownQuestions, c.input)
     if (isChatTool(c.name)) {
@@ -767,6 +811,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         c.name,
         c.input,
         (real) => {
+          const root = policy.writeRoot && join(vault, policy.writeRoot)
+          if (root && !writesInside(real, root) && !aboveRoot(real, root)) return outsideSkill()
           const t = extensionTarget(real, vault, protectedRoots())
           return t && !(t === 'skill' && policy.authorSkills)
             ? extensionRefusal(t, modeName(policy.mode))
@@ -1193,6 +1239,34 @@ export function registerChatHandlers(): void {
     })
   )
   on('chat:stop', (_, requestId: string) => running.get(requestId)?.abort())
+  // Yes or Not now on a hub chat's offer to enter (or create) a plugin's or
+  // skill's workspace. Only this, the user's click, makes the plugin or skill.
+  handle('chat:proposal', (_, chatId: string, proposalId: string, yes: boolean): ProposalResult => {
+    try {
+      if (active.has(String(chatId)))
+        return { ok: false, error: 'Wait for this chat to finish answering first.' }
+      const c = openConversation(String(chatId))
+      if (!c) return { ok: false, error: 'That chat is gone.' }
+      const vault = getVaultPath()
+      const needVault = (): string => {
+        if (!vault || !existsSync(vault)) throw new Error('Connect a vault first.')
+        return vault
+      }
+      const r = answerProposal(c, String(proposalId), yes === true, {
+        pluginExists: (id) =>
+          pluginHost()
+            .list()
+            .some((p) => p.id === id),
+        create: (name) => createPluginNamed(name).id,
+        skillExists: (folder) => skillExists(needVault(), folder),
+        createSkill: (name) => createSkill(needVault(), name)
+      })
+      saveConversation(c)
+      return { ok: true, enter: r, conversation: c }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
   handle('chat:approve', (_, id: string, decision: ApprovalDecision) => {
     const a = approvals.get(id)
     if (a) a.resolve(decision === 'once' || decision === 'chat' ? decision : 'deny')

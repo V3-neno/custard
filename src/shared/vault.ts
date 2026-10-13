@@ -62,6 +62,12 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
         : 'Listed earlier chats'
     case 'chats_read':
       return "Read an earlier chat's summary"
+    case 'workspace_propose':
+      return i.action === 'create'
+        ? `Offered to create ${str(i.name)}`
+        : i.skill
+          ? `Offered to open the ${str(i.skill)} skill workspace`
+          : `Offered to open the ${str(i.plugin)} workspace`
     case 'automation_question':
       return i.action === 'dismiss'
         ? 'Dropped a question from an automation'

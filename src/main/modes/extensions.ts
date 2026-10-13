@@ -34,6 +34,20 @@ const inside = (child: string, parent: string): boolean => {
   return c === p || c.startsWith(p.endsWith(sep) ? p : p + sep)
 }
 
+// Whether a write to `full` lands inside `root`, by the path as written and
+// by where it really lands (links resolved).
+export function writesInside(full: string, root: string): boolean {
+  return inside(full, root) && inside(realTarget(full), realTarget(root))
+}
+
+// Whether the real path is one of root's parent folders: creating a note
+// walks through them (vault makeDirs checks each one), and they are only
+// passed through, never written.
+export function aboveRoot(real: string, root: string): boolean {
+  const r = realTarget(root)
+  return inside(r, real) && norm(r) !== norm(real)
+}
+
 // The real location a path would have: the deepest part that exists, with
 // its links resolved, plus the parts that don't exist yet.
 export function realTarget(p: string): string {
