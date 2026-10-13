@@ -132,6 +132,18 @@ Unknown fields are errors, so a typo can't silently drop a restriction.
 
 What the tools receive and return, and how Design approves and tracks jobs, is in [docs/design/MEDIA-PLUGINS.md](../design/MEDIA-PLUGINS.md).
 
+## Fills
+
+`fills` (optional) says which capability gaps one of the plugin's tools can fill for a model that lacks them. Settings → Capabilities then recommends the plugin for those gaps; it never turns the plugin on. Manifests without it are unchanged.
+
+```json
+"fills": [{ "capability": "web_search", "tool": "search" }]
+```
+
+- `capability` is one of `web_search`, `pdf` (a tool that turns a PDF into text) or `vision` (a tool that describes an image). Other capabilities are part of the model and no plugin can fill them.
+- `tool` must name one of the plugin's own tools, and not a media tool (chats never get those).
+- It asks for no permission and changes nothing a chat can do. Custard doesn't guess a gap from a tool's name: a tool called `search` that doesn't declare `fills` is never recommended.
+
 ## Permissions as the user sees them
 
 Activation shows each requested permission in plain words, and the user ticks every new one:

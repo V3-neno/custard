@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { MemorySettings } from '../shared/memory'
 import type { ListedModel, ModelCheck } from '../shared/adapter'
+import type { CapabilityScan } from '../shared/capabilityScan'
 import type {
   ChatLink,
   ChatEvent,
@@ -50,6 +51,11 @@ const custard = {
     check: (p: Provider): Promise<ModelCheck | null> => ipcRenderer.invoke('models:check', p),
     lastCheck: (p: Provider): Promise<ModelCheck | null> =>
       ipcRenderer.invoke('models:lastCheck', p)
+  },
+  // Settings → Capabilities. Read from Custard's own rules and files; asks no
+  // provider.
+  capabilities: {
+    scan: (): Promise<CapabilityScan> => ipcRenderer.invoke('capabilities:scan')
   },
   settings: {
     get: (): Promise<ChatSettings> => ipcRenderer.invoke('settings:get'),

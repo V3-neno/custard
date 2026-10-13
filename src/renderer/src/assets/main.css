@@ -20,6 +20,10 @@
   --color-molten-500: #e08a1e;
   --color-ember-600: #b4531a;
   --color-ember-700: #6e2f0e;
+  /* Settings → Capabilities: supported, in an oxidised-copper green that sits
+     with the forge rather than a signal green. */
+  --color-patina-300: #a9c98f;
+  --color-patina-800: #233019;
 
   --font-sans: 'Space Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', Consolas, monospace;

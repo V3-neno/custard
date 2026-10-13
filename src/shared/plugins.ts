@@ -3,6 +3,7 @@
 
 import type { PluginMediaSpec } from './design'
 import type { WidgetSpec } from './widgets'
+import type { FillableCapability } from './capabilityScan'
 
 export const PLUGIN_API_VERSION = 1
 export const SUPPORTED_API_VERSIONS = [1]
@@ -83,7 +84,13 @@ export type PluginManifest = {
   // Image or video generation the plugin offers to Design (see
   // shared/design PluginMediaSpec). Optional; older manifests are unchanged.
   media?: PluginMediaSpec[]
+  // Capabilities one of its tools adds to a model that lacks them (web
+  // search, reading PDFs, describing images). Settings → Capabilities
+  // recommends the plugin for those gaps; it never turns it on. Optional.
+  fills?: PluginFill[]
 }
+
+export type PluginFill = { capability: FillableCapability; tool: string }
 
 export type BuildInfo = { buildId: string; version: string; builtAt: number }
 
@@ -118,6 +125,7 @@ export type PluginStatus = {
   // it was on, but this version asks for more than it covered.
   chatDesign: 'on' | 'off' | 'changed'
   widgets?: { id: string; title: string }[]
+  fills?: PluginFill[]
   errors: { at: number; message: string }[]
   log: string[]
 }

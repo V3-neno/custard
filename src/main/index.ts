@@ -8,6 +8,7 @@ import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { allModels } from './adapters/registry'
 import { checkProvider, forgetCheck, lastCheck } from './adapters/checks'
+import { scanCapabilities } from './adapters/scan'
 import { isProvider } from '../shared/providers'
 import { chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
@@ -127,6 +128,15 @@ app.whenReady().then(() => {
   // Settings only: Save and Refresh check a key with its own provider.
   handle('models:check', (_, p: Provider) => checkProvider(p))
   handle('models:lastCheck', (_, p: Provider) => (isProvider(p) ? lastCheck(p) : null))
+  // Settings → Capabilities, and its Refresh: local files and rules only, so
+  // it asks no provider and no model (see adapters/scan).
+  handle('capabilities:scan', () =>
+    scanCapabilities({
+      vault: getVaultPath(),
+      plugins: () => pluginHost().list(),
+      checks: lastCheck
+    })
+  )
   handle('settings:get', () => getChatSettings())
   handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
   handle('conversations:list', (_, mode: Mode | null) =>

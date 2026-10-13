@@ -292,3 +292,36 @@ describe('manifest widgets', () => {
     for (const errors of all) expect(errors.length).toBeGreaterThan(0)
   })
 })
+
+describe('fills', () => {
+  it('is optional, and kept when it names a capability and one of its tools', () => {
+    expect(parseManifest(goodManifest()).manifest?.fills).toBeUndefined()
+    const r = parseManifest({
+      ...goodManifest(),
+      fills: [{ capability: 'web_search', tool: 'search' }]
+    })
+    expect(r.errors).toEqual([])
+    expect(r.manifest?.fills).toEqual([{ capability: 'web_search', tool: 'search' }])
+  })
+
+  it('refuses a capability no plugin can fill, a missing tool and extra fields', () => {
+    const errs = (fills: unknown): string[] => parseManifest({ ...goodManifest(), fills }).errors
+    expect(errs([{ capability: 'compaction', tool: 'search' }])[0]).toMatch(
+      /capability must be one of web_search, pdf, vision/
+    )
+    expect(errs([{ capability: 'pdf', tool: 'nope' }])[0]).toMatch(
+      /must name one of this plugin's tools/
+    )
+    expect(errs([{ capability: 'pdf', tool: 'search', auto: true }])[0]).toMatch(
+      /auto is not a field/
+    )
+    expect(errs([])[0]).toMatch(/fills must be a list/)
+    expect(errs('web_search')[0]).toMatch(/fills must be a list/)
+    expect(
+      errs([
+        { capability: 'pdf', tool: 'search' },
+        { capability: 'pdf', tool: 'search' }
+      ])[0]
+    ).toMatch(/repeats pdf/)
+  })
+})
