@@ -15,6 +15,9 @@
 //   refusal    Claude declines
 //   full       the reply fills the context window
 //   error      the key is rejected (401)
+//   fulltool   the reply fills the context window while calling a tool
+//   fallback   a fallback model takes over mid-answer
+//   compact    Claude compacts the chat, then answers
 // Usage, from the repo root after `npx electron-vite build`:
 //   node test/e2e/claude-turn.mjs <out> <screenshot dir> [--update]
 // with <out>/vault a copy of vault-template/. --update rewrites the golden
@@ -76,6 +79,8 @@ function stream(res, blocks, stop, { hang = false, details } = {}) {
         index,
         delta: { type: 'signature_delta', signature: 'sig' }
       })
+    } else if (b.type === 'raw') {
+      send({ type: 'content_block_start', index, content_block: b.block })
     } else {
       send({
         type: 'content_block_start',
@@ -167,6 +172,38 @@ const server = http.createServer((req, res) => {
     if (s === 'refusal') return stream(res, [], 'refusal', { details: { category: 'cyber' } })
     if (s === 'full')
       return stream(res, [text('Filling the window')], 'model_context_window_exceeded')
+    if (s === 'fulltool')
+      return stream(res, [text('Calling.'), call()], 'model_context_window_exceeded')
+    if (s === 'fallback')
+      return stream(
+        res,
+        [
+          { type: 'thinking', text: 'The first model thinks.' },
+          {
+            type: 'raw',
+            block: {
+              type: 'fallback',
+              from: { model: 'claude-opus-5-5' },
+              to: { model: 'claude-sonnet-5-5' },
+              trigger: { type: 'refusal' }
+            }
+          },
+          text('From the fallback model.')
+        ],
+        'end_turn'
+      )
+    if (s === 'compact')
+      return stream(
+        res,
+        [
+          {
+            type: 'raw',
+            block: { type: 'compaction', content: 'Summary so far.', encrypted_content: null }
+          },
+          text('After compacting.')
+        ],
+        'end_turn'
+      )
     if (s === 'error') {
       res.writeHead(401, { 'content-type': 'application/json' })
       res.end(
@@ -276,7 +313,10 @@ try {
     'stop',
     'refusal',
     'full',
-    'error'
+    'error',
+    'fulltool',
+    'fallback',
+    'compact'
   ]) {
     step(s)
     const before = (await events()).length
