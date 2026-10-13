@@ -179,7 +179,7 @@ try {
   )
   const claudeModels = await section(w, 'claude').locator('[data-check-models]').innerText()
   check(
-    /Sonnet 5\.5 \(not available to this key\)/.test(claudeModels) &&
+    /Sonnet 5\.5 · Your key can't use this model/.test(claudeModels) &&
       !/Not yet supported/.test(claudeModels),
     'Claude marks a model its key can’t use, and lists nothing extra'
   )
@@ -221,20 +221,29 @@ try {
   await w.click('button:text-is("Done")')
 
   step('The picker shows only known models')
-  const ds = await w.locator('select[title=Model] optgroup[label=DeepSeek] option').allInnerTexts()
+  // The picker under the message box: a tab per provider.
+  const picked = async (tab) => {
+    await w.click(`[aria-label="Pick a model"] [role=tab]:text-is("${tab}")`)
+    return w
+      .locator('[data-picker-models] [data-pick]')
+      .evaluateAll((bs) => bs.map((b) => b.childNodes[0].textContent))
+  }
+  await w.click('button[title=Model]')
+  const groups = await w
+    .locator('[aria-label="Pick a model"] [role=tab]')
+    .evaluateAll((ts) => ts.map((t) => t.textContent))
+  const ds = await picked('DeepSeek')
   check(
     JSON.stringify(ds) === JSON.stringify(['DeepSeek V4 Pro', 'DeepSeek Flash']),
-    `DeepSeek's picker group is the known models (${ds.join(', ')})`
+    `DeepSeek's picker tab is the known models (${ds.join(', ')})`
   )
-  const all = await w.locator('select[title=Model] option').allInnerTexts()
+  const all = [...(await picked('Claude')), ...(await picked('OpenAI')), ...ds]
   check(!all.some((o) => /V5/.test(o)), 'the unsupported model is not in the picker')
-  const groups = await w
-    .locator('select[title=Model] optgroup')
-    .evaluateAll((gs) => gs.map((g) => g.label))
   check(
     JSON.stringify(groups) === JSON.stringify(['Claude', 'OpenAI', 'DeepSeek']) && all.length === 8,
     `the picker has the same 8 models from all three providers (${groups.join(', ')})`
   )
+  await w.keyboard.press('Escape')
 
   step('After a restart: no requests, and the last check is kept')
   await app.close()

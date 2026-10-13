@@ -79,6 +79,9 @@ import { isWebTool, runWebTool, webTools } from './web'
 import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
   chatModels,
+  isChatModel,
+  isEffort,
+  type ChatSettings,
   isMode,
   introduce,
   providerOf,
@@ -262,6 +265,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   if (fileIds.length && !acceptsAttachments(existing?.mode ?? req.mode))
     return refuse('Files can be attached in Chat and Design modes only.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
+  // The chat is bound to the model and effort this message was sent with.
+  conversation.model = model.id
+  conversation.effort = isEffort(req.settings.effort) ? req.settings.effort : 'medium'
   // Earlier chats picked in the message box, checked before anything changes.
   let references: ChatReference[] = []
   try {
@@ -1034,7 +1040,16 @@ async function continueFrom(id: string, withoutSummary: boolean): Promise<Contin
     return await continueChat(
       {
         load: getConversation,
-        create: (mode, title) => ({ ...newConversation(mode, title), title }),
+        // The new chat keeps the model and effort of the one it continues.
+        create: (mode, title) => {
+          const from = getConversation(id)
+          return {
+            ...newConversation(mode, title),
+            title,
+            ...(from?.model ? { model: from.model } : {}),
+            ...(from?.effort ? { effort: from.effort } : {})
+          }
+        },
         save: saveConversation,
         summarizer: (original) => {
           const p = providerOf(original.context?.model ?? getChatSettings().model)
@@ -1057,6 +1072,19 @@ export function registerChatHandlers(): void {
   handle('chat:continue', (_, id: string, withoutSummary?: boolean) =>
     continueFrom(id, !!withoutSummary)
   )
+  // Picking another model (or effort) in an open chat: saved on the chat, so
+  // its next message goes there. No provider is asked.
+  handle('conversations:setModel', (_, id: string, settings: ChatSettings) => {
+    const c = openConversation(String(id))
+    if (!c) throw new Error('That chat is gone.')
+    if (active.has(c.id)) throw new Error('Wait for this chat to finish answering first.')
+    if (!isChatModel(settings?.model) || !isEffort(settings?.effort))
+      throw new Error('Unknown model or effort.')
+    c.model = settings.model
+    c.effort = settings.effort
+    saveConversation(c)
+    return c
+  })
   // The chats that continue this one, for "Continued in".
   handle('conversations:continuations', (_, id: string) =>
     allConversations()

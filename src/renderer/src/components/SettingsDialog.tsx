@@ -2,7 +2,16 @@ import { useCallback, useEffect, useState } from 'react'
 import { providerIds, providers, providerNames, type Provider } from '../../../shared/providers'
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
-import type { UsageMonth } from '../../../shared/chat'
+import {
+  chatModels,
+  deepseekEffort,
+  deepseekEfforts,
+  efforts,
+  isChatModel,
+  isEffort,
+  type ChatSettings,
+  type UsageMonth
+} from '../../../shared/chat'
 import type { Capability, ModelCheck } from '../../../shared/adapter'
 import { formatCost } from '../../../shared/pricing'
 
@@ -145,17 +154,26 @@ function KeySection({
       )}
       {hasKey && !checking && check?.result === 'ok' && (
         <div className="mt-2 text-xs text-ash-400" data-check-models>
-          <p>
-            {known.map((m, i) => (
-              <span key={m.id}>
-                {i > 0 && ' · '}
+          <p className="text-ash-300">Available models</p>
+          <ul className="mt-0.5">
+            {known.map((m) => (
+              <li key={m.id} data-model-row={m.id} data-available={m.available}>
                 <span className={m.available ? 'text-ash-200' : 'text-ash-500 line-through'}>
                   {m.label}
                 </span>
-                {!m.available && ' (not available to this key)'}
-              </span>
+                {!m.available && (
+                  <span className="text-ash-500"> · Your key can&apos;t use this model</span>
+                )}
+              </li>
             ))}
-          </p>
+          </ul>
+          {provider === 'deepseek' && (
+            <p className="mt-1 text-ash-500" data-effort-note>
+              DeepSeek&apos;s model list also names effort levels (fast, balanced, thorough).
+              Custard doesn&apos;t read them yet: the picker&apos;s Fast, Balanced and Thorough send
+              low, high and max, the values DeepSeek documents for its Responses API.
+            </p>
+          )}
           {unsupported.length > 0 && (
             <div className="mt-2" data-unsupported>
               <p className="text-ash-300">
@@ -169,6 +187,76 @@ function KeySection({
           )}
         </div>
       )}
+    </section>
+  )
+}
+
+// The model new chats start on. Each chat keeps the model it was started
+// with (or switched to); changing this changes no existing chat.
+function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JSX.Element {
+  const [s, setS] = useState<ChatSettings | null>(null)
+  useEffect(() => {
+    window.custard.settings.get().then(setS)
+  }, [])
+  if (!s) return <section className="mb-6" />
+  const model = chatModels.find((m) => m.id === s.model)
+  const save = (next: ChatSettings): void => {
+    setS(next)
+    window.custard.settings.set(next).then(onChanged)
+  }
+  const select =
+    'rounded-lg border border-forge-700 bg-forge-900 px-2 py-1.5 text-sm outline-none focus:border-molten-500/60'
+  return (
+    <section className="mb-6" data-default-model>
+      <h3 className="mb-1 text-sm font-medium">Default model</h3>
+      <p className="mb-3 text-sm text-ash-300">
+        New chats start on it. Each chat keeps its own model; pick another under the message box.
+      </p>
+      <div className="flex gap-2">
+        <select
+          title="Default model"
+          className={`${select} flex-1`}
+          value={s.model}
+          onChange={(e) => {
+            const id = e.target.value
+            if (!isChatModel(id)) return
+            const deepseek = chatModels.find((m) => m.id === id)?.provider === 'deepseek'
+            save({ model: id, effort: deepseek ? deepseekEffort(s.effort) : s.effort })
+          }}
+        >
+          {providerIds.map((p) => (
+            <optgroup key={p} label={providerNames[p]}>
+              {chatModels
+                .filter((m) => m.provider === p)
+                .map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </select>
+        {model?.effort && (
+          <select
+            title="Default effort"
+            className={select}
+            value={model.provider === 'deepseek' ? deepseekEffort(s.effort) : s.effort}
+            onChange={(e) => isEffort(e.target.value) && save({ ...s, effort: e.target.value })}
+          >
+            {model.provider === 'deepseek'
+              ? deepseekEfforts.map((e) => (
+                  <option key={e.effort} value={e.effort}>
+                    {e.label}
+                  </option>
+                ))
+              : efforts.map((e) => (
+                  <option key={e} value={e}>
+                    {e} effort
+                  </option>
+                ))}
+          </select>
+        )}
+      </div>
     </section>
   )
 }
@@ -355,6 +443,7 @@ function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Eleme
               Keys are encrypted with Windows secure storage and stay on this computer. Pick a model
               from any provider under the message box.
             </p>
+            <DefaultModelSection onChanged={onChanged} />
             {providerIds.map((p) => (
               <KeySection key={p} provider={p} onChanged={onChanged} />
             ))}

@@ -39,7 +39,8 @@ type Turn = {
   maxSteps: number
   apiKey: string
   model: string
-  effort: Effort
+  // None for a model that takes no effort.
+  effort?: Effort
   instructions: string
   // The history as sent this time (calls to unavailable tools turned into text).
   history: BetaMessageParam[]
@@ -193,7 +194,7 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
           instructions: turn.instructions,
           input,
           reasoning: {
-            effort: turn.effort,
+            ...(turn.effort ? { effort: turn.effort } : {}),
             ...(features.reasoningSummary ? { summary: 'auto' as const } : {})
           },
           // Nothing is stored at the provider; reasoning is passed back

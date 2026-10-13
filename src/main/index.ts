@@ -7,7 +7,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { allModels } from './adapters/registry'
-import { checkProvider, forgetCheck, lastCheck } from './adapters/checks'
+import { checkProvider, forgetCheck, lastCheck, modelAvailability } from './adapters/checks'
 import { scanCapabilities, type ScanSources } from './adapters/scan'
 import { DISCOVERY_SKILL, gapFor, starterPrompt } from './plugins/discovery'
 import { isProvider } from '../shared/providers'
@@ -40,7 +40,14 @@ import {
   vaultEditsDir
 } from './store'
 import type { VaultInfo } from '../shared/vault'
-import { isMode, type ChatSettings, type Mode, type Provider } from '../shared/chat'
+import {
+  isChatModel,
+  isEffort,
+  isMode,
+  type ChatSettings,
+  type Mode,
+  type Provider
+} from '../shared/chat'
 import { listSkills } from './vault'
 import { pinProviderEndpoints } from './endpoints'
 import {
@@ -139,6 +146,9 @@ app.whenReady().then(() => {
   handle('models:list', () => allModels())
   // Settings only: Save and Refresh check a key with its own provider.
   handle('models:check', (_, p: Provider) => checkProvider(p))
+  // Which models can be picked now, from saved keys and the last check: no
+  // request.
+  handle('models:availability', () => modelAvailability())
   handle('models:lastCheck', (_, p: Provider) => (isProvider(p) ? lastCheck(p) : null))
   // Settings → Capabilities, and its Refresh: local files and rules only, so
   // it asks no provider and no model (see adapters/scan).
@@ -160,7 +170,11 @@ app.whenReady().then(() => {
     return { pluginId: made.id, name: made.name, request: p.request }
   })
   handle('settings:get', () => getChatSettings())
-  handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
+  // The default model: only a model and effort Custard knows.
+  handle('settings:set', (_, s: ChatSettings) => {
+    if (!isChatModel(s?.model) || !isEffort(s?.effort)) throw new Error('Unknown model or effort.')
+    setChatSettings({ model: s.model, effort: s.effort })
+  })
   handle('conversations:list', (_, mode: Mode | null) =>
     mode === null ? listConversations(null) : isMode(mode) ? listConversations(mode) : []
   )

@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import type { ModelCheck } from '../../shared/adapter'
+import { chatModels, type ModelAvailability } from '../../shared/chat'
 import { isProvider, providerNames, type Provider } from '../../shared/providers'
 import { getApiKey } from '../apiKey'
 import { toProviderError } from '../providerError'
@@ -74,3 +75,25 @@ export function checkProvider(provider: Provider): Promise<ModelCheck | null> {
   running.set(provider, job)
   return job.finally(() => running.delete(provider))
 }
+
+// Whether each of Custard's models can be picked, from the saved keys and the
+// last check only: no request. A check that couldn't reach the provider
+// (timeout, no connection) says nothing about the key, so it doesn't make a
+// model unavailable; a rejected key or a list without the model does.
+export function availabilityFrom(
+  hasKey: (p: Provider) => boolean,
+  check: (p: Provider) => ModelCheck | null
+): ModelAvailability[] {
+  return chatModels.map((m): ModelAvailability => {
+    if (!hasKey(m.provider)) return { id: m.id, available: false, reason: 'no-key' }
+    const c = check(m.provider)
+    if (c && (c.result === 'auth' || c.result === 'permission'))
+      return { id: m.id, available: false, reason: 'rejected' }
+    if (c?.result === 'ok' && !c.models.some((x) => x.id === m.id && x.available))
+      return { id: m.id, available: false, reason: 'removed' }
+    return { id: m.id, available: true }
+  })
+}
+
+export const modelAvailability = (): ModelAvailability[] =>
+  availabilityFrom((p) => getApiKey(p) !== null, lastCheck)

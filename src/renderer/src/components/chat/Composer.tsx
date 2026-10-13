@@ -1,17 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
-import { chatModels, efforts, type ChatSettings, type Effort } from '../../../../shared/chat'
-import { providerIds, providerNames } from '../../../../shared/providers'
+import {
+  chatModels,
+  efforts,
+  type ChatSettings,
+  type Effort,
+  type ModelAvailability
+} from '../../../../shared/chat'
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from '../icons'
 import type { DraftAttachment } from '../../../../shared/attachments'
 import { DraftFiles } from './Attachments'
 import { DraftReferences, ReferenceButton } from './References'
 import type { ChatLink } from '../../../../shared/chat'
+import ModelPicker from './ModelPicker'
 
 type Props = {
   busy: boolean
   placeholder: string
   settings: ChatSettings
   onSettings: (s: ChatSettings) => void
+  // Which models can be used now (null until known).
+  availability: ModelAvailability[] | null
+  // Bumped to open the model picker (Pick a different model).
+  pickerSignal?: number
+  // The chat's model can't be used now: nothing can be sent.
+  blocked?: boolean
   onSend: (text: string) => void
   onStop: () => void
   draft: string
@@ -42,24 +54,13 @@ const chip =
 
 function Composer(props: Props): React.JSX.Element {
   const { busy, placeholder, settings, onSettings, onSend, onStop, draft, setDraft, files } = props
-  const { meter, references } = props
+  const { meter, references, availability, pickerSignal, blocked } = props
   const [focused, setFocused] = useState(false)
   const [dragging, setDragging] = useState(false)
   const hasFiles = !!files?.items.length
-  const canSend = !busy && !files?.adding && (!!draft.trim() || hasFiles)
+  const canSend = !busy && !blocked && !files?.adding && (!!draft.trim() || hasFiles)
   const input = useRef<HTMLTextAreaElement>(null)
   const model = chatModels.find((m) => m.id === settings.model)
-  // The picker's models come from the provider adapters; Custard's own list
-  // stands in until they answer, so the picker never starts empty.
-  const [listed, setListed] = useState<{ id: string; label: string; provider: string }[]>(() => [
-    ...chatModels
-  ])
-  useEffect(() => {
-    window.custard.models
-      .list()
-      .then((l) => setListed(l.filter((m) => m.source === 'profile')))
-      .catch(() => {})
-  }, [])
   const submit = (): void => {
     if (canSend) onSend(draft)
   }
@@ -150,27 +151,15 @@ function Composer(props: Props): React.JSX.Element {
             disabled={busy}
           />
         )}
-        <select
+        <ModelPicker
           className={chip}
-          title="Model"
-          value={settings.model}
-          onChange={(e) =>
-            onSettings({ ...settings, model: e.target.value as ChatSettings['model'] })
-          }
-        >
-          {providerIds.map((p) => (
-            <optgroup key={p} label={providerNames[p]}>
-              {listed
-                .filter((m) => m.provider === p)
-                .map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-            </optgroup>
-          ))}
-        </select>
-        {model?.effort && (
+          settings={settings}
+          availability={availability}
+          onPick={onSettings}
+          openSignal={pickerSignal}
+        />
+        {/* DeepSeek's three levels are in the picker. */}
+        {model?.effort && model.provider !== 'deepseek' && (
           <select
             className={chip}
             value={settings.effort}

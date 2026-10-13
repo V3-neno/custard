@@ -1,4 +1,5 @@
 import type { ResponseInputItem } from 'openai/resources/responses/responses'
+import { chatModels, deepseekEffort, type Effort } from '../../shared/chat'
 import { providers, type Provider } from '../../shared/providers'
 import { openaiStart } from '../compaction'
 import { runOpenAI, toBlocks, toInput } from '../openai'
@@ -24,6 +25,12 @@ import type { OneShotRequest, OneShotResult, ProviderAdapter, TurnEnd, TurnReque
 // and replies back to stored blocks (toBlocks).
 
 export function responsesAdapter(id: Provider): ProviderAdapter {
+  // The effort a request carries: none for a model that takes none (ignored
+  // without a word), and for DeepSeek one of the levels its docs list.
+  const effortFor = (model: string, e: Effort | undefined): Effort | undefined => {
+    if (!e || chatModels.find((m) => m.id === model)?.effort === false) return undefined
+    return id === 'deepseek' ? deepseekEffort(e) : e
+  }
   const streamMessage = async (turn: TurnRequest): Promise<TurnEnd> => {
     const end = await runOpenAI({
       requestId: turn.requestId,
@@ -31,7 +38,7 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
       maxSteps: turn.maxSteps,
       apiKey: turn.apiKey,
       model: turn.model,
-      effort: turn.effort,
+      effort: effortFor(turn.model, turn.effort),
       instructions: turn.system.map((b) => b.text).join('\n\n'),
       history: turn.history(),
       conversation: turn.conversation,
@@ -60,7 +67,9 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
             ? req.messages
             : (toInput(req.messages) as ResponseInputItem[]),
         max_output_tokens: req.maxTokens,
-        ...(req.effort ? { reasoning: { effort: req.effort } } : {}),
+        ...(effortFor(req.model, req.effort)
+          ? { reasoning: { effort: effortFor(req.model, req.effort) } }
+          : {}),
         store: false,
         ...(req.schema
           ? {

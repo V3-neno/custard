@@ -21,7 +21,7 @@ import type { VaultGrant } from '../shared/vaultGrants'
 import type { AutomationView, PendingQuestion } from '../shared/automations'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
-import type { ApprovalDecision } from '../shared/chat'
+import type { ApprovalDecision, ModelAvailability } from '../shared/chat'
 import type {
   Artifact,
   ArtifactSummary,
@@ -49,6 +49,8 @@ const custard = {
     list: (): Promise<ListedModel[]> => ipcRenderer.invoke('models:list'),
     // Asks the provider, with the saved key. Settings' Save and Refresh only.
     check: (p: Provider): Promise<ModelCheck | null> => ipcRenderer.invoke('models:check', p),
+    // From saved keys and the last check only; asks no provider.
+    availability: (): Promise<ModelAvailability[]> => ipcRenderer.invoke('models:availability'),
     lastCheck: (p: Provider): Promise<ModelCheck | null> =>
       ipcRenderer.invoke('models:lastCheck', p)
   },
@@ -233,7 +235,10 @@ const custard = {
     get: (id: string): Promise<Conversation | null> => ipcRenderer.invoke('conversations:get', id),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id),
     continuations: (id: string): Promise<ChatLink[]> =>
-      ipcRenderer.invoke('conversations:continuations', id)
+      ipcRenderer.invoke('conversations:continuations', id),
+    // Another model or effort for this chat's next message. No request.
+    setModel: (id: string, settings: ChatSettings): Promise<Conversation> =>
+      ipcRenderer.invoke('conversations:setModel', id, settings)
   },
   // Files for a Chat-mode message (see main/attachments). A draft is one
   // message's files before it is sent.
