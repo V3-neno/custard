@@ -178,6 +178,8 @@ Rules the recommendation follows:
 - **Never acts.** Recommending doesn't install, activate, turn on or configure a plugin, and doesn't grant a permission. The user turns it on in Plugins mode as usual, with the usual permission review.
 - **Local only.** The scan reads the manifests on this computer. It calls no provider, no model and no plugin tool.
 
+Next to a gap with no plugin, Settings → Capabilities offers **Start building**. It makes a new plugin like New plugin does and opens its workspace with a starter prompt from the `plugin-discovery` skill, for any gap, including the ones `fills` can't name. The result is an ordinary plugin: once it declares `fills` for a gap it really fills, Refresh shows it there.
+
 ### Declaring `fills`: examples
 
 A web search plugin whose `search` tool calls Serper:

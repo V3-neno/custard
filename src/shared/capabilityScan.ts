@@ -59,6 +59,10 @@ export type Recommendation = {
   // Who lacks it: a provider, or the models of one that lack it.
   provider: Provider
   models: string[]
+  // How the sentence names them ("DeepSeek", "DeepSeek V4 Pro"), and the
+  // provider's models that have it.
+  who: string
+  having: string[]
   text: string
   // Custard's own tools and features that need it.
   affects: string[]

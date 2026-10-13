@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { MemorySettings } from '../shared/memory'
-import type { ListedModel, ModelCheck } from '../shared/adapter'
+import type { Capability, ListedModel, ModelCheck } from '../shared/adapter'
 import type { CapabilityScan } from '../shared/capabilityScan'
 import type {
   ChatLink,
@@ -55,7 +55,14 @@ const custard = {
   // Settings → Capabilities. Read from Custard's own rules and files; asks no
   // provider.
   capabilities: {
-    scan: (): Promise<CapabilityScan> => ipcRenderer.invoke('capabilities:scan')
+    scan: (): Promise<CapabilityScan> => ipcRenderer.invoke('capabilities:scan'),
+    // Start building: makes a new plugin for a gap and returns the starter
+    // prompt for its workspace's message box.
+    startPlugin: (
+      provider: Provider,
+      capability: Capability
+    ): Promise<{ pluginId: string; name: string; request: string }> =>
+      ipcRenderer.invoke('capabilities:startPlugin', provider, capability)
   },
   settings: {
     get: (): Promise<ChatSettings> => ipcRenderer.invoke('settings:get'),

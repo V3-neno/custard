@@ -1,3 +1,4 @@
+import { clearPluginWorkspace, peekPluginWorkspace } from './workspaceEntry'
 import { chatHasOutsideText } from '../../../../shared/outsideText'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
@@ -165,9 +166,15 @@ function ChatView(props: Props): React.JSX.Element {
   const [list, setList] = useState<ConversationSummary[]>([])
   const [filter, setFilter] = useState<Mode | null>(historyFilter)
   const [current, setCurrent] = useState<Conversation | null>(null)
-  const restoring = useRef(openChats.has(mode))
+  // Start building (Settings → Capabilities): a new chat in that plugin's
+  // workspace instead of the chat that was open here.
+  const [entered] = useState(() => (mode === 'code' ? peekPluginWorkspace() : null))
   useEffect(() => {
-    const id = openChats.get(mode)
+    if (entered) clearPluginWorkspace(entered)
+  }, [entered])
+  const restoring = useRef(!entered && openChats.has(mode))
+  useEffect(() => {
+    const id = entered ? undefined : openChats.get(mode)
     if (!id) return
     window.custard.conversations
       .get(id)
@@ -180,7 +187,7 @@ function ChatView(props: Props): React.JSX.Element {
         restoring.current = false
         openChats.delete(mode)
       })
-  }, [mode])
+  }, [mode, entered])
   useEffect(() => {
     if (restoring.current) return
     if (current) openChats.set(mode, current.id)
@@ -191,11 +198,11 @@ function ChatView(props: Props): React.JSX.Element {
   // The unsent message (and its files) of each mode, kept when switching
   // mode, which mounts a new view.
   const saved = unsent.get(mode)
-  const [draft, setDraft] = useState(saved?.text ?? '')
+  const [draft, setDraft] = useState(entered?.request ?? saved?.text ?? '')
   // Chat mode: files for the next message. They live in a draft folder in
   // app data until sent (see main/attachments).
   const [draftId, setDraftId] = useState<string>(() => saved?.draftId ?? crypto.randomUUID())
-  const [files, setFiles] = useState<DraftAttachment[]>(saved?.files ?? [])
+  const [files, setFiles] = useState<DraftAttachment[]>(entered ? [] : (saved?.files ?? []))
   useEffect(() => {
     unsent.set(mode, { text: draft, draftId, files })
   }, [mode, draft, draftId, files])
@@ -210,7 +217,11 @@ function ChatView(props: Props): React.JSX.Element {
   // hub). An open chat's own workspace decides it, so going back from a chat
   // lands in its workspace.
   const [workspace, setWorkspace] = useState<Workspace | null>(() =>
-    mode === 'code' ? openWorkspace : null
+    entered
+      ? { kind: 'internal', pluginId: entered.pluginId }
+      : mode === 'code'
+        ? openWorkspace
+        : null
   )
   useEffect(() => {
     if (mode === 'code') openWorkspace = workspace

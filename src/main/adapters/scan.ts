@@ -182,7 +182,7 @@ export function modelColumns(checks: ScanSources['checks']): MatrixColumn[] {
   return [...known, ...discovered]
 }
 
-const list = (names: string[]): string =>
+export const list = (names: string[]): string =>
   names.length <= 1
     ? (names[0] ?? '')
     : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
@@ -221,7 +221,7 @@ export function providerColumn(provider: Provider, models: MatrixColumn[]): Matr
 }
 
 // A capability as a sentence says it: "DeepSeek lacks PDF input."
-const GAP: Record<Capability, string> = {
+export const GAP: Record<Capability, string> = {
   text: 'text chat',
   streaming: 'streamed replies',
   tool_use: 'tools',
@@ -271,7 +271,14 @@ export function recommend(
       const affects = inventory
         .filter((i) => i.needs.includes(c) && i.category !== 'skill')
         .map((i) => i.name)
-      const base = { capability: c, provider, models: lacking.map((m) => m.id), affects }
+      const base = {
+        capability: c,
+        provider,
+        models: lacking.map((m) => m.id),
+        who,
+        having: having.map((m) => m.label),
+        affects
+      }
       if (!isFillable(c)) {
         out.push({ ...base, text: `${head} No plugin can add this: it is part of the model.` })
         continue

@@ -8,14 +8,21 @@ import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { allModels } from './adapters/registry'
 import { checkProvider, forgetCheck, lastCheck } from './adapters/checks'
-import { scanCapabilities } from './adapters/scan'
+import { scanCapabilities, type ScanSources } from './adapters/scan'
+import { DISCOVERY_SKILL, gapFor, starterPrompt } from './plugins/discovery'
 import { isProvider } from '../shared/providers'
 import { chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
 import { chatNotes, memory, registerMemoryHandlers } from './memory'
 import { allowOnlyAppPage, handle } from './ipc'
 import { sameAppPage } from './appPage'
-import { pluginHost, protectedRoots, registerPluginHandlers, startPlugins } from './plugins'
+import {
+  createPluginNamed,
+  pluginHost,
+  protectedRoots,
+  registerPluginHandlers,
+  startPlugins
+} from './plugins'
 import { extensionRefusal, extensionTarget } from './modes/extensions'
 import { listEdits, undoEdit } from './vault/edit'
 import { isPluginContents } from './plugins/runtime'
@@ -36,7 +43,12 @@ import type { VaultInfo } from '../shared/vault'
 import { isMode, type ChatSettings, type Mode, type Provider } from '../shared/chat'
 import { listSkills } from './vault'
 import { pinProviderEndpoints } from './endpoints'
-import { addMissingStarterSkills, createStarterVault, starterSkillFolders } from './vaultTemplate'
+import {
+  addMissingStarterSkills,
+  createStarterVault,
+  starterFile,
+  starterSkillFolders
+} from './vaultTemplate'
 import { createSkill, readSkill, skillEntries } from './skillsHub'
 
 function vaultInfo(): VaultInfo {
@@ -130,13 +142,23 @@ app.whenReady().then(() => {
   handle('models:lastCheck', (_, p: Provider) => (isProvider(p) ? lastCheck(p) : null))
   // Settings → Capabilities, and its Refresh: local files and rules only, so
   // it asks no provider and no model (see adapters/scan).
-  handle('capabilities:scan', () =>
-    scanCapabilities({
-      vault: getVaultPath(),
-      plugins: () => pluginHost().list(),
-      checks: lastCheck
-    })
-  )
+  const capabilitySources = (): ScanSources => ({
+    vault: getVaultPath(),
+    plugins: () => pluginHost().list(),
+    checks: lastCheck
+  })
+  handle('capabilities:scan', () => scanCapabilities(capabilitySources()))
+  // Start building: a new plugin for a gap, like New plugin in Plugins mode,
+  // with a starter prompt from the plugin-discovery skill (filled in here, no
+  // model asked) for the user to check and send in its workspace.
+  handle('capabilities:startPlugin', (_, provider: unknown, capability: unknown) => {
+    const gap = gapFor(scanCapabilities(capabilitySources()), provider, capability)
+    const bundled = starterFile(DISCOVERY_SKILL)
+    if (!bundled) throw new Error('Custard is missing its plugin-discovery skill.')
+    const p = starterPrompt(gap, getVaultPath(), bundled)
+    const made = createPluginNamed(p.name)
+    return { pluginId: made.id, name: made.name, request: p.request }
+  })
   handle('settings:get', () => getChatSettings())
   handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
   handle('conversations:list', (_, mode: Mode | null) =>

@@ -3,7 +3,7 @@ import { providerIds, providers, providerNames, type Provider } from '../../../s
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
 import type { UsageMonth } from '../../../shared/chat'
-import type { ModelCheck } from '../../../shared/adapter'
+import type { Capability, ModelCheck } from '../../../shared/adapter'
 import { formatCost } from '../../../shared/pricing'
 
 import DesignTab from './settings/DesignTab'
@@ -12,7 +12,12 @@ import EditableFolders from './settings/EditableFolders'
 import Automations from './settings/Automations'
 import { cleanError, primary, secondary } from './settings/ui'
 
-type Props = { onClose: () => void; onChanged: () => void }
+type Props = {
+  onClose: () => void
+  onChanged: () => void
+  // Capabilities → Start building (see App).
+  onBuild: (provider: Provider, capability: Capability) => Promise<void>
+}
 type Tab = 'general' | 'design' | 'capabilities'
 
 const checkedAt = (t: number): string =>
@@ -274,7 +279,7 @@ function MemorySection(): React.JSX.Element {
   )
 }
 
-function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
+function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('general')
   const [vault, setVault] = useState<VaultInfo>(null)
 
@@ -343,7 +348,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
         {tab === 'design' ? (
           <DesignTab />
         ) : tab === 'capabilities' ? (
-          <CapabilitiesTab />
+          <CapabilitiesTab onBuild={onBuild} />
         ) : (
           <>
             <p className="mb-5 -mt-1 text-sm text-ash-400">

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import TopBar from './components/TopBar'
 import SettingsDialog from './components/SettingsDialog'
 import ChatView from './components/chat/ChatView'
+import { queuePluginWorkspace } from './components/chat/workspaceEntry'
 import {
   defaultChatSettings,
   modes,
@@ -25,6 +26,7 @@ function App(): React.JSX.Element {
   const [temporary, setTemporary] = useState(false)
   const [newChat, setNewChat] = useState(0)
   const [home, setHome] = useState(0)
+  const [entry, setEntry] = useState(0)
   const [busy, setBusy] = useState(false)
   const [outsideText, setOutsideText] = useState(false)
   const provider = providerOf(settings.model)
@@ -71,7 +73,7 @@ function App(): React.JSX.Element {
           />
           {/* Each mode has its own history; coming back to a mode reopens its chat. */}
           <ChatView
-            key={mode}
+            key={mode === 'code' ? `code-${entry}` : mode}
             mode={mode}
             onModeChange={(m) => {
               // The mode already shown: back to its start page (a new chat).
@@ -102,6 +104,18 @@ function App(): React.JSX.Element {
                 refreshStatus()
               }}
               onChanged={refreshStatus}
+              onBuild={async (provider, capability) => {
+                // A chat answering in Plugins mode keeps its place.
+                if (busy && mode === 'code')
+                  throw new Error('Wait for the Plugins chat to finish answering first.')
+                const r = await window.custard.capabilities.startPlugin(provider, capability)
+                queuePluginWorkspace({ pluginId: r.pluginId, request: r.request })
+                setSettingsOpen(false)
+                refreshStatus()
+                // A fresh Plugins view, which opens the queued workspace.
+                setEntry((n) => n + 1)
+                setMode('code')
+              }}
             />
           )}
         </div>

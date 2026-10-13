@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { capabilities, capabilityLabels } from '../../../../shared/adapter'
+import { capabilities, capabilityLabels, type Capability } from '../../../../shared/adapter'
+import type { Provider } from '../../../../shared/providers'
 import type {
   CapabilityScan,
   InventoryCategory,
   MatrixCell,
-  MatrixColumn
+  MatrixColumn,
+  Recommendation
 } from '../../../../shared/capabilityScan'
 import { cleanError, secondary } from './ui'
 
@@ -83,8 +85,27 @@ function Cell({
   )
 }
 
-function CapabilitiesTab(): React.JSX.Element {
+type Props = {
+  // Start building: makes a plugin for the gap and opens its workspace.
+  onBuild: (provider: Provider, capability: Capability) => Promise<void>
+}
+
+function CapabilitiesTab({ onBuild }: Props): React.JSX.Element {
   const [scan, setScan] = useState<CapabilityScan | null>(null)
+  const [building, setBuilding] = useState<string | null>(null)
+  const [buildError, setBuildError] = useState<{ id: string; error: string } | null>(null)
+  const build = async (r: Recommendation): Promise<void> => {
+    const id = `${r.provider}:${r.capability}`
+    setBuilding(id)
+    setBuildError(null)
+    try {
+      await onBuild(r.provider, r.capability)
+    } catch (e) {
+      setBuildError({ id, error: cleanError(e) })
+    } finally {
+      setBuilding(null)
+    }
+  }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'provider' | 'model'>('provider')
@@ -191,7 +212,9 @@ function CapabilitiesTab(): React.JSX.Element {
         <section className="mt-5">
           <h3 className="mb-1 text-sm font-medium">Gaps and plugins</h3>
           <p className="mb-2 text-xs text-ash-500">
-            Recommendations only. Custard never turns a plugin on by itself.
+            Recommendations only. Custard never turns a plugin on by itself. Start building makes a
+            new plugin in Plugins mode, with a first message about the gap for you to check and
+            send.
           </p>
           <ul className="space-y-1.5 text-sm">
             {scan.recommendations.map((r) => (
@@ -205,6 +228,19 @@ function CapabilitiesTab(): React.JSX.Element {
                   <span className="block text-xs text-ash-500">
                     Affects: {r.affects.join(', ')}
                   </span>
+                )}
+                {!r.plugin && (
+                  <button
+                    onClick={() => build(r)}
+                    disabled={building !== null}
+                    title={`Make a new plugin for this gap and open it in Plugins mode`}
+                    className="mt-1 block rounded-full border border-forge-700 px-2.5 py-0.5 text-xs text-ash-300 hover:text-molten-200 disabled:opacity-40"
+                  >
+                    {building === `${r.provider}:${r.capability}` ? 'Starting…' : 'Start building'}
+                  </button>
+                )}
+                {buildError?.id === `${r.provider}:${r.capability}` && (
+                  <span className="block text-xs text-ember-600">{buildError.error}</span>
                 )}
               </li>
             ))}
