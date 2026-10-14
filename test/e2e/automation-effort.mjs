@@ -63,7 +63,7 @@ const levels = () =>
   w.locator(`${box} button`).evaluateAll((bs) => bs.map((b) => b.textContent.trim()))
 const pressed = () =>
   w
-    .locator(`${box} button[aria-pressed="true"]`)
+    .locator(`${box} button[aria-checked="true"]`)
     .evaluateAll((bs) => bs.map((b) => b.textContent.trim()))
 const allDisabled = () =>
   w.locator(`${box} button`).evaluateAll((bs) => bs.length > 0 && bs.every((b) => b.disabled))

@@ -440,8 +440,9 @@ try {
   await w.click('button[title=Settings]')
   await w.selectOption('select[title="Default model"]', 'deepseek-flash')
   check(
-    JSON.stringify(await w.locator('select[title="Default effort"] option').allInnerTexts()) ===
-      '["Fast","Balanced","Thorough"]',
+    JSON.stringify(
+      await w.locator('[role=radiogroup][aria-label="Default effort"] [role=radio]').allInnerTexts()
+    ) === '["Fast","Balanced","Thorough"]',
     'its effort list is Fast, Balanced, Thorough'
   )
   await w

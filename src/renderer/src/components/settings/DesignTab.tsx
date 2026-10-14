@@ -5,7 +5,8 @@ import type {
   DesignSettings,
   ProviderListing
 } from '../../../../shared/design'
-import { cleanError, input } from './ui'
+import { cleanError } from './ui'
+import Select from '../ui/Select'
 
 // Design settings: which provider makes images (and with which model), and
 // which plugin makes video by default. Only ids are saved here; keys stay in
@@ -102,9 +103,9 @@ function DesignTab(): React.JSX.Element {
         <label className="mb-1 block text-xs text-ash-400" htmlFor="design-image-provider">
           Image provider
         </label>
-        <select
+        <Select
           id="design-image-provider"
-          className={input}
+          className="w-full"
           value={settings.image.provider ?? ''}
           onChange={(e) =>
             save({
@@ -119,7 +120,7 @@ function DesignTab(): React.JSX.Element {
               {p.name} · {STATE[p.state]}
             </option>
           ))}
-        </select>
+        </Select>
         {settings.image.provider && !image && (
           <p className="mt-2 text-xs text-ember-600">
             The chosen provider isn&apos;t installed any more. Choose another.
@@ -131,9 +132,9 @@ function DesignTab(): React.JSX.Element {
             <label className="mb-1 mt-3 block text-xs text-ash-400" htmlFor="design-image-model">
               Model
             </label>
-            <select
+            <Select
               id="design-image-model"
-              className={input}
+              className="w-full"
               value={model?.id ?? ''}
               onChange={(e) =>
                 save({ ...settings, image: { ...settings.image, model: e.target.value } })
@@ -144,7 +145,7 @@ function DesignTab(): React.JSX.Element {
                   {m.name}
                 </option>
               ))}
-            </select>
+            </Select>
             {model?.note && <p className="mt-1 text-xs text-ash-500">{model.note}</p>}
           </>
         )}
@@ -165,9 +166,9 @@ function DesignTab(): React.JSX.Element {
         <label className="mb-1 block text-xs text-ash-400" htmlFor="design-video-provider">
           Default video provider
         </label>
-        <select
+        <Select
           id="design-video-provider"
-          className={input}
+          className="w-full"
           value={settings.video.provider ?? ''}
           onChange={(e) => save({ ...settings, video: { provider: e.target.value || null } })}
         >
@@ -179,7 +180,7 @@ function DesignTab(): React.JSX.Element {
               {p.name} · {STATE[p.state]}
             </option>
           ))}
-        </select>
+        </Select>
         {!videoProviders.length && (
           <p className="mt-2 text-xs text-ash-500">No enabled plugin offers video.</p>
         )}

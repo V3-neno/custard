@@ -14,6 +14,7 @@
   --color-ash-400: #95826a;
   --color-ash-300: #b3a086;
   --color-ash-100: #eee2cc;
+  --color-ash-200: #d1c1a9;
   --color-molten-200: #ffe2a3;
   --color-molten-300: #ffcd6e;
   --color-molten-400: #f5ae3f;
@@ -31,6 +32,8 @@
 
 /* Glow colors as RGB channels, for use with an alpha: rgb(var(--glow) / 0.3). */
 :root {
+  /* Native parts (scrollbars, spinners, any popup the OS draws) in dark. */
+  color-scheme: dark;
   --glow: 245 174 63;
   --glow-deep: 224 138 30;
   --glow-ember: 180 83 26;
@@ -48,6 +51,7 @@
   --color-ash-400: #838e9c;
   --color-ash-300: #a3adba;
   --color-ash-100: #e3e8ee;
+  --color-ash-200: #c3cbd4;
   --color-molten-200: #dbe6f3;
   --color-molten-300: #bccfe4;
   --color-molten-400: #95afcc;
@@ -71,6 +75,7 @@
   --color-ash-400: #7c88a8;
   --color-ash-300: #a0abc8;
   --color-ash-100: #e1e6f5;
+  --color-ash-200: #c1c9df;
   --color-molten-200: #d6e0ff;
   --color-molten-300: #aec2ff;
   --color-molten-400: #7d9bff;
@@ -104,6 +109,102 @@ body {
 input[type='checkbox'],
 input[type='radio'] {
   accent-color: rgb(var(--glow));
+}
+
+/* The keyboard focus mark for controls that have no other (docs/ui-dropdowns.md). */
+.focus-ring:focus-visible {
+  outline: 2px solid rgb(var(--glow-deep) / 0.6);
+  outline-offset: 2px;
+}
+
+/* ---------- Select (components/ui/Select.tsx) ---------- */
+
+/* A native <select> drawn as Custard: the closed box like an input, the open
+   list like the chat box's model picker. Chromium's customizable select;
+   where it isn't supported the box keeps these looks and the list is the
+   platform's. */
+.select,
+.select::picker(select) {
+  appearance: base-select;
+}
+.select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  border: 1px solid var(--color-forge-700);
+  border-radius: var(--radius-lg);
+  background: var(--color-forge-900);
+  color: var(--color-ash-100);
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.select:hover {
+  border-color: var(--color-forge-600);
+}
+.select:open {
+  border-color: rgb(var(--glow-deep) / 0.6);
+}
+.select:focus-visible {
+  outline: 2px solid rgb(var(--glow-deep) / 0.6);
+  outline-offset: 2px;
+}
+.select:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.select::picker-icon {
+  color: var(--color-ash-400);
+  transition: rotate 0.15s;
+}
+.select:open::picker-icon {
+  rotate: 180deg;
+}
+.select::picker(select) {
+  margin-block: 0.375rem;
+  border: 1px solid var(--color-forge-700);
+  border-radius: var(--radius-2xl);
+  background: var(--color-forge-850);
+  padding: 0.375rem;
+  box-shadow: var(--shadow-xl);
+  max-height: 20rem;
+}
+.select option {
+  border-radius: var(--radius-lg);
+  padding: 0.375rem 0.5rem;
+  color: var(--color-ash-100);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.select option::checkmark {
+  display: none;
+}
+.select option:hover,
+.select option:focus-visible {
+  outline: none;
+  background: var(--color-forge-800);
+}
+.select option:checked {
+  background: var(--color-forge-700);
+  color: var(--color-molten-200);
+}
+.select option:disabled {
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--color-ash-500);
+}
+.select optgroup {
+  padding-top: 0.25rem;
+  color: var(--color-ash-400);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+.select optgroup + optgroup {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--color-forge-700);
 }
 
 * {

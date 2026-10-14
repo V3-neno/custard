@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { VaultEditEntry } from '../../../../shared/vault'
 import { GRANT_MODES, type GrantMode, type VaultGrant } from '../../../../shared/vaultGrants'
 import { cleanError, danger, input, secondary } from './ui'
+import PillGroup from '../ui/PillGroup'
 
 // Folders Claude may change without asking about each edit, and a list of
 // what it changed, with Undo. Nothing is allowed until the user adds a folder.
@@ -103,23 +104,23 @@ export default function EditableFolders(): React.JSX.Element {
           placeholder="Folder in the vault, like Projects/Notes"
           className={input}
         />
-        <select
-          aria-label="What Claude may do there"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as GrantMode)}
-          title={GRANT_MODES.find((m) => m.id === mode)?.help}
-          className="rounded-lg border border-forge-700 bg-forge-900 px-2 text-sm outline-none"
-        >
-          {GRANT_MODES.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
         <button onClick={() => void add()} disabled={!folder.trim()} className={secondary}>
           Allow
         </button>
       </div>
+      <p className="mt-2 mb-1 text-xs text-ash-400" aria-hidden>
+        What Claude may do there
+      </p>
+      <PillGroup
+        label="What Claude may do there"
+        className="max-w-xs"
+        options={GRANT_MODES.map((m) => ({ value: m.id, label: m.label }))}
+        value={mode}
+        onChange={setMode}
+      />
+      <p className="mt-1 text-xs text-ash-500" data-grant-help>
+        {GRANT_MODES.find((m) => m.id === mode)?.help}.
+      </p>
       {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
 
       {edits.length > 0 && (
