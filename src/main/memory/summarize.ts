@@ -166,6 +166,8 @@ export function summarizer(provider: Provider, apiKey: string, onUsage?: OnUsage
     for (const u of r.usage) onUsage?.(u.model, u.usage)
     if (r.stop === 'refused') throw new Error('The summary was declined.')
     if (r.stop === 'cut-off') throw new Error('The summary was cut off.')
+    if (r.stop === 'too-long') throw new Error('The chat was too long to summarize.')
+    if (r.stop === 'failed') throw new Error(`The summary failed: ${r.error ?? 'no reason given'}`)
     return parseSummary(r.text)
   }
 }

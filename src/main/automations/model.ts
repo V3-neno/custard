@@ -14,7 +14,8 @@ import { charge } from '../store'
 // provider:
 //   - declined, or the context window filled: the run ends with the reason
 //   - cut off while calling a tool: the run ends and the call is not run
-//   - cut off with text only: the text is the step's answer
+//   - cut off with text only: the text is the step's answer, and the run's
+//     record says it ended early at the output limit (CUT_OFF_REASON)
 //   - the provider couldn't finish: the run ends with its reason
 
 export function stepFor(modelId: string): Step | string {
@@ -48,6 +49,6 @@ export function stepFor(modelId: string): Step | string {
     if (r.stop === 'failed') throw new Error(`${provider} could not finish this: ${r.error}`)
     if (r.stop === 'cut-off' && r.calls.length)
       throw new Error('The answer was cut off while it was calling a tool, so nothing was run.')
-    return { text: r.text, calls: r.calls }
+    return { text: r.text, calls: r.calls, ...(r.stop === 'cut-off' ? { cutOff: true } : {}) }
   }
 }

@@ -62,7 +62,7 @@ describe('automation steps go through the adapter', () => {
       reply = { stop: 'cut-off', calls: [call] }
       await expect(run(m)).rejects.toThrow('cut off while it was calling a tool')
       reply = { stop: 'cut-off', text: 'Partial' }
-      expect(await run(m)).toEqual({ text: 'Partial', calls: [] })
+      expect(await run(m)).toEqual({ text: 'Partial', calls: [], cutOff: true })
       reply = { stop: 'too-long' }
       await expect(run(m)).rejects.toThrow('too long for the model')
       reply = { stop: 'refused' }
