@@ -200,11 +200,12 @@ Not touched: `normalizeGrants`, `grantFor`, `modeAllows`, `edit.ts`,
 
 | Check | Result |
 | --- | --- |
-| Unit (vitest) | BASE_UNIT |
+| Unit (vitest) | 1,304 passed, 82 files |
 | Typecheck (node + web) | clean |
 | eslint `src test` | clean |
+| Build (`electron-vite build`) | clean |
 | prettier `src test` | 5 warnings, all e2e golden JSON files (pre-existing; left identical) |
-| e2e (one suite at a time) | BASE_E2E |
+| e2e (one suite at a time, my ✓/✕ line counter) | 48 suites, 1,554 checks, 0 failures after one re-run. First run: `media-sizes` failed 1 timing check ("the app window never stalled for a second", 1,055 ms); re-run alone it passed 41/41. Phase 3 reported 1,528 for the same 48 suites with its own counter; I have not traced the 26-check difference. |
 
 No live provider calls were made.
 
