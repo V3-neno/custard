@@ -1,0 +1,42 @@
+{
+ "claude-opus-5-5": {
+  "tools": [
+   {
+    "type": "web_search_20260209",
+    "name": "web_search",
+    "max_uses": 1,
+    "allowed_callers": [
+     "direct"
+    ]
+   }
+  ],
+  "output_config": {
+   "effort": "low"
+  }
+ },
+ "claude-sonnet-5-5": {
+  "tools": [
+   {
+    "type": "web_search_20260209",
+    "name": "web_search",
+    "max_uses": 1,
+    "allowed_callers": [
+     "direct"
+    ]
+   }
+  ],
+  "output_config": {
+   "effort": "low"
+  }
+ },
+ "claude-haiku-4-5": {
+  "tools": [
+   {
+    "type": "web_search_20250305",
+    "name": "web_search",
+    "max_uses": 1
+   }
+  ],
+  "output_config": null
+ }
+}

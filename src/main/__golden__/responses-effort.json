@@ -1,0 +1,92 @@
+{
+ "gpt-6-astra": {
+  "none": null,
+  "low": {
+   "effort": "low"
+  },
+  "medium": {
+   "effort": "medium"
+  },
+  "high": {
+   "effort": "high"
+  },
+  "xhigh": {
+   "effort": "xhigh"
+  },
+  "max": {
+   "effort": "max"
+  }
+ },
+ "gpt-6.1-sol": {
+  "none": null,
+  "low": {
+   "effort": "low"
+  },
+  "medium": {
+   "effort": "medium"
+  },
+  "high": {
+   "effort": "high"
+  },
+  "xhigh": {
+   "effort": "xhigh"
+  },
+  "max": {
+   "effort": "max"
+  }
+ },
+ "gpt-6-luna": {
+  "none": null,
+  "low": {
+   "effort": "low"
+  },
+  "medium": {
+   "effort": "medium"
+  },
+  "high": {
+   "effort": "high"
+  },
+  "xhigh": {
+   "effort": "xhigh"
+  },
+  "max": {
+   "effort": "max"
+  }
+ },
+ "deepseek-v4-pro": {
+  "none": null,
+  "low": {
+   "effort": "low"
+  },
+  "medium": {
+   "effort": "high"
+  },
+  "high": {
+   "effort": "high"
+  },
+  "xhigh": {
+   "effort": "high"
+  },
+  "max": {
+   "effort": "max"
+  }
+ },
+ "deepseek-flash": {
+  "none": null,
+  "low": {
+   "effort": "low"
+  },
+  "medium": {
+   "effort": "high"
+  },
+  "high": {
+   "effort": "high"
+  },
+  "xhigh": {
+   "effort": "high"
+  },
+  "max": {
+   "effort": "max"
+  }
+ }
+}
