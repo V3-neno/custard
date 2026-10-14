@@ -20,7 +20,10 @@ vi.mock('../../src/main/attachments/request', async (load) => {
   const real = await load<typeof import('../../src/main/attachments/request')>()
   return {
     ...real,
-    withFiles: (m: Parameters<typeof real.withFiles>[0], b: Parameters<typeof real.withFiles>[1]) => {
+    withFiles: (
+      m: Parameters<typeof real.withFiles>[0],
+      b: Parameters<typeof real.withFiles>[1]
+    ) => {
       record('withFiles', m, { files: [...b.entries()] })
       return real.withFiles(m, b)
     }

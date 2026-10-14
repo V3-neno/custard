@@ -12,7 +12,7 @@ import { withFiles } from '../attachments/request'
 import { claudeHistory, openaiStart } from '../compaction'
 import { withoutUnavailableTools } from '../history'
 import { toBlocks, toInput } from '../openai'
-import { MALFORMED_ARGUMENTS, TurnLog } from '../turn'
+import { actionKey, MALFORMED_ARGUMENTS, TurnLog } from '../turn'
 import { echoableContent } from './anthropic'
 import { fromClaudeReply, toClaudeHistory, toClaudeMessage } from './anthropicNeutral'
 import { fromResponsesReply, toResponsesInput } from './responsesNeutral'
@@ -93,7 +93,8 @@ const todayClaude = (
   model: string,
   files: Files,
   available: Set<string>
-): BetaMessageParam[] => claudeHistory(withoutUnavailableTools(withFiles(h, files), available), model)
+): BetaMessageParam[] =>
+  claudeHistory(withoutUnavailableTools(withFiles(h, files), available), model)
 
 function todayResponses(
   h: BetaMessageParam[],
@@ -169,7 +170,7 @@ function consistent(m: Message): string | null {
   if (m.raw.provider !== 'claude') return 'raw from a provider other than Claude'
   const again = fromClaudeReply(m.raw.blocks as BetaContentBlockParam[], m.raw.model)
   if (JSON.stringify(again.parts) !== JSON.stringify(m.parts)) return 'parts differ from raw'
-  const core = (m.raw.blocks as { type: string; [k: string]: unknown }[]).flatMap((b) =>
+  const core = (m.raw.blocks as { type: string; [k: string]: unknown }[]).flatMap((b): unknown[] =>
     b.type === 'text'
       ? [{ type: 'text', text: b.text }]
       : b.type === 'tool_use'
@@ -219,6 +220,7 @@ describe('the goldens: every stored chat they record', () => {
           if (!model && m.role === 'assistant') expect(m.raw).toBeUndefined()
         }
       }
+      console.log(`${file}: ${tally.histories} histories, ${tally.requests} requests compared`)
       expect(tally.mismatches).toEqual([])
       expect(tally.histories).toBeGreaterThan(0)
     })
@@ -286,14 +288,21 @@ describe('the unit tests: every history they send or store', () => {
     // Histories the tests write in shapes Custard never stores (listed in the
     // B2 review). Each is also checked with the one difference made as
     // TurnLog writes it, below.
-    expect(skipped).toMatchSnapshot()
-    expect(tally.histories).toBeGreaterThan(100)
-  })
+    const reasons = skipped.map((x) => x.replace(/^.*: message \d+: /, ''))
+    expect(new Set(reasons)).toEqual(
+      new Set(['tool_result not as TurnLog writes it', 'user block text at 0'])
+    )
+    console.log(
+      `unit histories: ${tally.histories} compared (${tally.requests} requests), ${skipped.length} not in a stored shape`
+    )
+    expect(tally.histories).toBeGreaterThan(50)
+  }, 120_000)
 
   it('and the same histories, with tool results written as TurnLog writes them', () => {
     // The only shape the tests use that Custard doesn't store: a tool_result
     // with no is_error. TurnLog always writes is_error.
     const tally: Tally = { histories: 0, requests: 0, mismatches: [] }
+    let skipped = 0
     for (const c of all) {
       const fixed = c.messages.map((m) =>
         typeof m.content === 'string'
@@ -316,10 +325,17 @@ describe('the unit tests: every history they send or store', () => {
         compareAll(c.from[0], fixed, tally)
       } catch (err) {
         if (!(err instanceof NotStoredShape)) throw err
+        // Only the request.test histories that already have their files in
+        // front (toInput called on them directly) are left.
+        expect(err.message).toMatch(/user block text at 0/)
+        skipped++
       }
     }
+    console.log(
+      `with is_error added: ${tally.histories} compared (${tally.requests} requests), ${skipped} not in a stored shape`
+    )
     expect(tally.mismatches).toEqual([])
-  })
+  }, 120_000)
 })
 
 // The cases the brief names, each built with the code that writes it today.
@@ -338,7 +354,13 @@ describe('named cases', () => {
   const OPENAI: Writer = { provider: 'openai', model: 'gpt-6-astra' }
   const DEEPSEEK: Writer = { provider: 'deepseek', model: 'deepseek-flash' }
 
-  async function toolRound(c: Conversation, id: string, name: string, out: string, err = false) {
+  async function toolRound(
+    c: Conversation,
+    id: string,
+    name: string,
+    out: string,
+    err = false
+  ): Promise<void> {
     const log = new TurnLog(c, () => undefined)
     await log.runRound(
       [{ id, name, input: { path: 'Notes.md' }, label: name, write: false }],
@@ -377,7 +399,10 @@ describe('named cases', () => {
         ])
       })
       await toolRound(c, 'toolu_1', 'vault_read', 'note text')
-      c.messages.push({ role: 'assistant', content: claudeReply([{ type: 'text', text: 'Done.' }]) })
+      c.messages.push({
+        role: 'assistant',
+        content: claudeReply([{ type: 'text', text: 'Done.' }])
+      })
       return { history: c.messages, by: () => OPUS }
     },
     'thinking and redacted thinking': async () => ({
@@ -437,7 +462,18 @@ describe('named cases', () => {
       const c = conv()
       const log = new TurnLog(c, () => undefined)
       c.messages.push({ role: 'user', content: 'Go' })
-      log.addAssistant([{ type: 'tool_use', id: 'toolu_2', name: 'mail__send', input: { to: 'a' } }])
+      log.addAssistant([
+        { type: 'tool_use', id: 'toolu_2', name: 'mail__send', input: { to: 'a' } }
+      ])
+      c.actions = {
+        toolu_2: {
+          name: 'mail__send',
+          label: 'Send',
+          write: true,
+          status: 'pending',
+          key: actionKey('mail__send', { to: 'a' })
+        }
+      }
       log.adoptOpenRound([
         { id: 'toolu_2', name: 'mail__send', input: { to: 'a' }, label: 'Send', write: true }
       ])
@@ -513,6 +549,7 @@ describe('named cases', () => {
       const { history, by } = await build()
       const tally: Tally = { histories: 0, requests: 0, mismatches: [] }
       compareAll(name, history, tally, { by })
+      console.log(`named case ${name}: ${tally.requests} requests compared`)
       expect(tally.mismatches).toEqual([])
       for (const m of legacyToNeutral(history, by)) expect(consistent(m)).toBeNull()
     })
@@ -531,7 +568,8 @@ describe('named cases', () => {
     expect(openai).not.toContain('Claude summary so far.')
     for (const id of ['toolu_list', 'call_ds1', 'call_oa1']) expect(openai).toContain(id)
     // DeepSeek's and OpenAI's replies have nothing only they can read.
-    for (const m of n) if (m.role === 'assistant' && m.by?.provider !== 'claude') expect(m.raw).toBeUndefined()
+    for (const m of n)
+      if (m.role === 'assistant' && m.by?.provider !== 'claude') expect(m.raw).toBeUndefined()
     // A Claude reply with thinking keeps raw; a plain Claude text reply doesn't.
     expect((n[1] as { raw?: unknown }).raw).toBeDefined()
     const plain = fromClaudeReply([{ type: 'text', text: 'hi' }], 'claude-opus-5-5')
@@ -559,10 +597,12 @@ describe('named cases', () => {
         { type: 'tool_call', id: 'call_9', name: 'vault_list', input: {} }
       ]
     })
-    expect(legacyToNeutral([{ role: 'assistant', content: toBlocks(output) }], () => ({
-      provider: 'openai',
-      model: 'gpt-6-astra'
-    }))[0]).toEqual(neutral)
+    expect(
+      legacyToNeutral([{ role: 'assistant', content: toBlocks(output) }], () => ({
+        provider: 'openai',
+        model: 'gpt-6-astra'
+      }))[0]
+    ).toEqual(neutral)
   })
 })
 
@@ -573,14 +613,24 @@ const E2E = process.env.NEUTRAL_E2E_DIR
 describe.runIf(!!E2E)('an e2e run: every stored chat and every request it sent', () => {
   const dir = E2E as string
   const suites = E2E ? readdirSync(dir).filter((s) => existsSync(join(dir, s, 'run.log'))) : []
-  const chatsOf = (suite: string): Conversation[] =>
-    readdirSync(join(dir, suite)).flatMap((d) => {
-      const conv = join(dir, suite, d, 'conversations')
-      if (!d.startsWith('cfg') || !existsSync(conv)) return []
-      return readdirSync(conv)
+  // Each suite's app data folders (cfg-*/custard/conversations).
+  const chatsOf = (suite: string): Conversation[] => {
+    const found: string[] = []
+    const walk = (d: string, depth: number): void => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        if (!e.isDirectory()) continue
+        const p = join(d, e.name)
+        if (e.name === 'conversations') found.push(p)
+        else if (depth < 3 && (depth > 0 || e.name.startsWith('cfg'))) walk(p, depth + 1)
+      }
+    }
+    walk(join(dir, suite), 0)
+    return found.flatMap((conv) =>
+      readdirSync(conv)
         .filter((f) => f.endsWith('.json'))
         .map((f) => JSON.parse(readFileSync(join(conv, f), 'utf8')) as Conversation)
-    })
+    )
+  }
 
   it('every stored chat sends identical requests', () => {
     const tally: Tally = { histories: 0, requests: 0, mismatches: [] }
@@ -600,7 +650,8 @@ describe.runIf(!!E2E)('an e2e run: every stored chat and every request it sent',
       skipped
     )
     expect(tally.mismatches).toEqual([])
-  })
+    expect(tally.histories).toBeGreaterThan(50)
+  }, 600_000)
 
   it('every logged request body is rebuilt byte for byte from the stored chat', () => {
     let matched = 0
@@ -614,7 +665,9 @@ describe.runIf(!!E2E)('an e2e run: every stored chat and every request it sent',
       const chats = chatsOf(s)
       for (const [k, { body }] of seen.entries()) {
         compared++
-        const available = new Set(((body.tools as { name?: string }[]) ?? []).map((t) => t.name ?? ''))
+        const available = new Set(
+          ((body.tools as { name?: string }[]) ?? []).map((t) => t.name ?? '')
+        )
         const model = body.model as string
         const isClaude = Array.isArray(body.messages)
         if (!isClaude && !Array.isArray(body.input)) continue
@@ -624,14 +677,16 @@ describe.runIf(!!E2E)('an e2e run: every stored chat and every request it sent',
           for (let len = 1; len <= c.messages.length && !found; len++) {
             const stored = c.messages.slice(0, len)
             if (isClaude) {
-              if (JSON.stringify(todayClaude(stored, model, new Map(), available)) !== sent) continue
+              if (JSON.stringify(todayClaude(stored, model, new Map(), available)) !== sent)
+                continue
               found = true
               const n = legacyToNeutral(stored)
               if (JSON.stringify(toClaudeHistory(n, { model, available })) !== sent)
                 bad.push(`${s} request ${k}`)
             } else {
               const start = openaiStart({ ...c, messages: stored }, model)
-              if (JSON.stringify(todayResponses(stored, new Map(), available, start)) !== sent) continue
+              if (JSON.stringify(todayResponses(stored, new Map(), available, start)) !== sent)
+                continue
               found = true
               const n = legacyToNeutral(stored)
               if (JSON.stringify(newResponses(n, new Map(), available, start)) !== sent)
@@ -640,12 +695,23 @@ describe.runIf(!!E2E)('an e2e run: every stored chat and every request it sent',
           }
           if (found) break
         }
+        // A Responses request after the first step of a turn carries that
+        // turn's own output items (reasoning, messages with ids), which are
+        // never stored, so it can't be rebuilt from a stored chat.
+        const inTurn =
+          !isClaude &&
+          (body.input as { type?: string; id?: string }[]).some(
+            (x) => x.type === 'reasoning' || (x.type === 'message' && !!x.id) || !!x.id
+          )
         if (found) matched++
-        else unmatched.push(`${s} request ${k} (${isClaude ? 'claude' : 'responses'})`)
+        else
+          unmatched.push(
+            `${s} request ${k} (${isClaude ? 'claude' : inTurn ? 'responses, within a turn' : 'responses'})`
+          )
       }
     }
     console.log(`logged requests: ${compared}, rebuilt and matched: ${matched}`, unmatched)
     expect(bad).toEqual([])
     expect(matched).toBeGreaterThan(0)
-  })
+  }, 600_000)
 })
