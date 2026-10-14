@@ -3,6 +3,7 @@
 
 import type { PluginMediaSpec } from './design'
 import type { WidgetSpec } from './widgets'
+import type { FillableCapability } from './capabilityScan'
 
 export const PLUGIN_API_VERSION = 1
 export const SUPPORTED_API_VERSIONS = [1]
@@ -83,7 +84,13 @@ export type PluginManifest = {
   // Image or video generation the plugin offers to Design (see
   // shared/design PluginMediaSpec). Optional; older manifests are unchanged.
   media?: PluginMediaSpec[]
+  // Capabilities one of its tools adds to a model that lacks them (web
+  // search, reading PDFs, describing images). Settings → Capabilities
+  // recommends the plugin for those gaps; it never turns it on. Optional.
+  fills?: PluginFill[]
 }
+
+export type PluginFill = { capability: FillableCapability; tool: string }
 
 export type BuildInfo = { buildId: string; version: string; builtAt: number }
 
@@ -118,6 +125,7 @@ export type PluginStatus = {
   // it was on, but this version asks for more than it covered.
   chatDesign: 'on' | 'off' | 'changed'
   widgets?: { id: string; title: string }[]
+  fills?: PluginFill[]
   errors: { at: number; message: string }[]
   log: string[]
 }
@@ -139,11 +147,15 @@ export type PluginReview = {
 
 export type TestReport = {
   ok: boolean
-  results: { name: string; ok: boolean; error?: string }[]
+  results: { name: string; ok: boolean; error?: string; ms?: number; file?: string }[]
   error?: string
+  // Tests that ran, and the ones a file or name filter left out.
+  ran?: number
+  skipped?: number
 }
 
-// Code-mode workspaces, stored on the conversation.
+// Plugins-mode workspaces, stored on the conversation. `general` was General
+// Code, since removed: old chats that have it open to read, but can't send.
 export type Workspace =
   { kind: 'internal'; pluginId: string } | { kind: 'general'; root: string; coreAccess?: boolean }
 
@@ -178,4 +190,25 @@ export function describePermission(p: string): string {
     default:
       return p
   }
+}
+
+// A new plugin's id (its folder, tool prefix and storage key, which never
+// change) made from the name the user typed: "SEO Check" → "seo-check".
+// `taken` ids get a number: "seo-check-2". Null when the name has no letters
+// or digits to make one from.
+export function pluginIdFrom(name: string, taken: ReadonlySet<string> = new Set()): string | null {
+  let base = name
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^[^a-z]+/, '')
+    .replace(/-+$/, '')
+    .slice(0, 28)
+    .replace(/-+$/, '')
+  if (!base) return null
+  if (base.length < 2) base = `${base}-plugin`
+  if (!taken.has(base)) return base
+  for (let n = 2; n < 100; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`
+  return null
 }

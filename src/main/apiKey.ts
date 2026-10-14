@@ -1,15 +1,15 @@
 import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import type { Provider } from '../shared/chat'
+import { isProvider, type Provider } from '../shared/providers'
+import { KEY_FILES } from './providers'
 
 // Keys are encrypted with the OS keychain (DPAPI on Windows) and never
 // leave the main process. One file per provider.
 // The provider name comes from the renderer, so only known names make a path.
 function keyPath(provider: Provider): string {
-  if (provider === 'claude') return join(app.getPath('userData'), 'api-key.bin')
-  if (provider === 'openai') return join(app.getPath('userData'), 'openai-key.bin')
-  throw new Error('Unknown provider')
+  if (!isProvider(provider)) throw new Error('Unknown provider')
+  return join(app.getPath('userData'), KEY_FILES[provider])
 }
 
 export function getApiKey(provider: Provider): string | null {

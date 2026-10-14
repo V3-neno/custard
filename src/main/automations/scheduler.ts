@@ -21,6 +21,7 @@ export type RunResult = {
   calls: RunRecord['calls']
   changes: RunRecord['changes']
   summary?: string
+  questions?: string[]
 }
 
 export type SchedulerDeps = {
@@ -32,7 +33,8 @@ export type SchedulerDeps = {
     a: Automation,
     slot: string | undefined,
     signal: AbortSignal,
-    ctx: RunContext
+    ctx: RunContext,
+    runId: string
   ) => Promise<RunResult>
   // Called when a record changes, so the window can refresh.
   changed?: () => void
@@ -177,7 +179,7 @@ export class Scheduler {
       id: randomUUID(),
       automationId: id,
       kind,
-      ...(slot ? { slot: slot.label } : {}),
+      ...(slot ? { slot: slot.label, slotAt: slot.instant } : {}),
       ...(how.catchUp ? { catchUp: true } : {}),
       startedAt: this.d.now(),
       status: 'running',
@@ -197,7 +199,7 @@ export class Scheduler {
         // Before this run was added, so it can't be its own last success.
         runs: f.runs
       })
-      result = await this.d.run(a, slot?.label, this.abort.signal, ctx)
+      result = await this.d.run(a, slot?.label, this.abort.signal, ctx, run.id)
     } catch (err) {
       result = {
         status: 'failed',

@@ -521,9 +521,11 @@ describe('capture', () => {
     expect(job().plan).toBeUndefined()
     const a = note(job().notes![0])
     expect(a).toMatch(
-      /^---\ncustard-capture: "chat-1:0-4"\nchat: "chat-1"\ndate: "2026-10-07"\n---/
+      /^---\ncustard-capture: "chat-1:0-4"\nchat: "chat-1"\ndate: "2026-10-07"\ntime_zone: "[^"]+"\noutside: "true"\n---/
     )
     expect(a).toContain('# Spotify test')
+    // A date and time with no zone would be ambiguous twice a year.
+    expect(a).toMatch(/on 2026-10-07 at 12:00 \([A-Za-z_]+(\/[A-Za-z_+\-0-9]+)*\)\. Custard writes/)
     expect(a).toContain('Custard writes this note once and never changes it.')
     expect(a).toContain('## Preferences\n\n- Likes Discover Weekly on Mondays')
     expect(a).toContain('### Play Discover Weekly')
@@ -683,6 +685,21 @@ describe('capture', () => {
     expect(job('chat-2').status).toBe('failed')
     expect(job('chat-2').reason).toBe("Couldn't summarize it: down")
     expect(cap.pending()).toEqual([])
+  })
+
+  it('a declined summary is never written (Phase 8)', async () => {
+    const c = newChat()
+    turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
+    answer = async () => {
+      throw new Error('The summary was declined.')
+    }
+    const cap = capture()
+    await captured(cap, c)
+    await cap.run()
+    await cap.run()
+    expect(job().status).toBe('failed')
+    expect(job().reason).toBe("Couldn't summarize it: The summary was declined.")
+    expect(notes()).toEqual([])
   })
 
   it('a crash after writing, before recording, is recorded as saved without writing again', async () => {
@@ -1012,6 +1029,103 @@ describe('capture', () => {
 })
 
 // --- Opting out, deleting and forgetting -----------------------------------
+
+describe('outside text and captures', () => {
+  const hostile =
+    'Prefers [[Planted note]] and [docs](https://evil.example/x) at https://evil.example/y or obsidian://new?vault=v&name=z, key sk-a1B2c3D4e5F6g7H8i9J0k1L2, <a href="https://evil.example">go</a>'
+
+  it('a note says whether its chat held outside text, and later chats are told', async () => {
+    const plain = newChat('chat-plain', 'Plain')
+    turn(plain, 'Please remember: I prefer short answers', [
+      { name: 'vault_read', status: 'completed', result: 'x' }
+    ])
+    answer = async () => summary({ preferences: [pref('Likes short answers')] })
+    await captured(capture(), plain)
+    expect(note(job('chat-plain').notes![0])).toContain('\noutside: "false"\n')
+    expect(readCaptures(vault).outside).toBe(false)
+
+    const web = newChat('chat-web', 'Web')
+    turn(web, 'Look it up and remember I like sources', [
+      { name: 'web_search', status: 'completed', result: 'r' }
+    ])
+    answer = async () => summary({ preferences: [pref('Likes sources')] })
+    await captured(capture(), web)
+    expect(note(job('chat-web').notes![0])).toContain('\noutside: "true"\n')
+    expect(readCaptures(vault).outside).toBe(true)
+  })
+
+  it('a chat that read notes it cannot vouch for, or was shown such captures, counts', async () => {
+    for (const why of ['notes', 'memory'] as const) {
+      const c = newChat(`chat-${why}`, why)
+      turn(c, 'Remember I like tea')
+      c.outside = [why]
+      answer = async () => summary({ preferences: [pref('Likes tea')] })
+      await captured(capture(), c)
+      expect(note(job(`chat-${why}`).notes![0])).toContain('\noutside: "true"\n')
+    }
+  })
+
+  it('a capture without the field counts as made from outside text, and only when shown', () => {
+    const dir = join(vault, 'Custard/Captures')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, '2026-10-01 1200 Old abcd1234.md'),
+      '---\ncustard-capture: "o"\n---\n\n## Preferences\n\n- Likes jazz\n'
+    )
+    const old = readCaptures(vault)
+    expect(old.remembered).toHaveLength(1)
+    expect(old.outside).toBe(true)
+    writeFileSync(
+      join(dir, '2026-10-01 1200 Old abcd1234.md'),
+      '---\ncustard-capture: "o"\noutside: "false"\n---\n\n## Preferences\n\n- Likes jazz\n'
+    )
+    expect(readCaptures(vault).outside).toBe(false)
+    // A note with nothing in it that is shown brings nothing.
+    writeFileSync(
+      join(dir, '2026-10-02 1200 Empty abcd1235.md'),
+      '---\ncustard-capture: "e"\n---\n'
+    )
+    expect(readCaptures(vault).outside).toBe(false)
+  })
+
+  it('links, wikilinks, tags and key-shaped text from the model do not reach the note', async () => {
+    const c = newChat()
+    turn(c, 'Play it', [
+      {
+        name: 'spotify__play',
+        status: 'completed',
+        write: true,
+        result: 'ok',
+        label: `Play ${'long '.repeat(100)}https://evil.example/z [[Planted]]`
+      }
+    ])
+    answer = async () =>
+      summary({
+        preferences: [pref(hostile)],
+        decisions: [hostile],
+        unresolved: [hostile],
+        workflows: [workflow({ title: hostile, request: hostile, uncertain: hostile })]
+      })
+    await captured(capture(), c)
+    const a = saved()
+    for (const bad of [
+      'evil.example',
+      '[[',
+      ']]',
+      '](',
+      'obsidian://',
+      'sk-a1B2c3D4e5F6g7H8i9J0k1L2',
+      '<a ',
+      'Planted]]'
+    ])
+      expect(a, bad).not.toContain(bad)
+    // What was said stays readable.
+    expect(a).toContain('Prefers Planted note and docs at [link removed]')
+    expect(a).toContain('[redacted]')
+    // A long action label is cut.
+    expect(a).toMatch(/- Play (long ){1,}[^\n]*… \[shortened\]: accepted/)
+  })
+})
 
 describe('opt-out, deletion and forgetting', () => {
   const played = (c: Conversation, what = 'play'): void =>

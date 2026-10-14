@@ -155,12 +155,15 @@ export type RunRecord = {
   kind: 'scheduled' | 'manual'
   // The slot it ran for, as local "YYYY-MM-DDTHH:MM" (scheduled runs).
   slot?: string
+  // The same slot as an instant (epoch ms); older records only have the label.
+  slotAt?: number
   // The slot was missed and this is its late run.
   catchUp?: boolean
   startedAt: number
   endedAt?: number
   status: RunStatus
-  // Why it was skipped, stopped or failed, in plain words.
+  // Why it was skipped, stopped or failed, in plain words; on a completed
+  // run, that its last reply was cut off (CUT_OFF_REASON).
   reason?: string
   // What it did, in order: the call label and how it ended.
   calls: { label: string; outcome: string }[]
@@ -168,6 +171,8 @@ export type RunRecord = {
   changes: { path: string; kind: 'create' | 'append' | 'edit' }[]
   // The end of its last message, capped.
   summary?: string
+  // Questions it left for the user (ids).
+  questions?: string[]
 }
 
 // Automation state kept apart from settings.
@@ -191,6 +196,9 @@ export type AutomationView = {
 
 // What a run is told about itself, as JSON, in the names the user confirmed.
 // The skill decides what a window means and can record "data unavailable".
+// `local` is ISO 8601 with the offset then ("2026-10-25T02:30+01:00"), so a
+// repeated hour when clocks go back is two different values; `utc` is the same
+// instant.
 export type When = { local: string; utc: string }
 export type RunContext = {
   scheduled_for: When
@@ -203,4 +211,46 @@ export type RunContext = {
   missed_slots_omitted?: number
   catch_up: boolean
   time_zone: string
+  // Set when the time of day this slot was configured for does not exist on
+  // that date (the clocks jump over it). The run is at the moment they jump,
+  // which is what scheduled_for says; this is the time that was configured,
+  // with the offset in force just before the jump.
+  configured_local_time?: string
+}
+
+// --- questions from unattended runs -----------------------------------------
+
+// A run can't ask anything, so it can leave a question. The next chat shows
+// Claude the open ones; Claude asks briefly and applies the answer.
+export const QUESTION_LIMITS = {
+  question: 300,
+  context: 500,
+  option: 60,
+  options: 4,
+  answer: 500,
+  // Per run, open in total, and kept in total.
+  perRun: 3,
+  open: 50,
+  kept: 200,
+  // Shown to one chat at a time.
+  shown: 5
+}
+
+export type PendingQuestion = {
+  id: string
+  automationId: string
+  automationName: string
+  runId: string
+  // The slot of the run that left it.
+  slot?: string
+  created: number
+  question: string
+  // Why it is asked, in the run's words.
+  context?: string
+  // The note the answer is for, if any.
+  path?: string
+  options?: string[]
+  status: 'open' | 'answered' | 'dismissed'
+  answer?: string
+  closed?: number
 }

@@ -10,6 +10,7 @@ import {
 } from '../../shared/automations'
 import { handle } from '../ipc'
 import {
+  automationQuestionsFile,
   automationRunsDir,
   getAutomations,
   getVaultGrants,
@@ -21,12 +22,13 @@ import { extensionRefusal, extensionTarget } from '../modes/extensions'
 import { pluginHost, protectedRoots } from '../plugins'
 import { stepFor } from './model'
 import { deleteRuns, loadRuns, updateState } from './records'
+import { addQuestion, closeQuestion, deleteQuestionsOf, loadQuestions } from './questions'
 import { runAutomation, type RunDeps } from './run'
 import { Scheduler, type RunResult } from './scheduler'
 
 let scheduler: Scheduler | null = null
 
-function deps(): RunDeps {
+function deps(a: Automation): RunDeps {
   const vault = getVaultPath()
   const root = vault && existsSync(vault) ? vault : null
   return {
@@ -53,6 +55,13 @@ function deps(): RunDeps {
     },
     describePlugin: (name, input) => pluginHost().describeCall(name, input)?.label ?? null,
     step: stepFor,
+    leaveQuestion: (runId, slot, q) => {
+      return addQuestion(
+        automationQuestionsFile(),
+        { automationId: a.id, automationName: a.name, runId, ...(slot ? { slot } : {}) },
+        q
+      )
+    },
     now: () => Date.now()
   }
 }
@@ -61,7 +70,8 @@ async function runOne(
   a: Automation,
   slot: string | undefined,
   signal: AbortSignal,
-  ctx: RunContext
+  ctx: RunContext,
+  runId: string
 ): Promise<RunResult> {
   const limit = new AbortController()
   let timedOut = false
@@ -72,7 +82,7 @@ async function runOne(
   const onAbort = (): void => limit.abort()
   signal.addEventListener('abort', onAbort, { once: true })
   try {
-    const r = await runAutomation(a, slot, limit.signal, deps(), ctx)
+    const r = await runAutomation(a, slot, limit.signal, deps(a), ctx, runId)
     return timedOut
       ? { ...r, status: 'stopped', reason: `Stopped at the limit of ${a.limits.minutes} minutes.` }
       : r
@@ -146,6 +156,7 @@ export function registerAutomationHandlers(): void {
   handle('automations:delete', (_, id: string) => {
     setAutomations(getAutomations().filter((a) => a.id !== id))
     deleteRuns(automationRunsDir(), String(id))
+    deleteQuestionsOf(automationQuestionsFile(), String(id))
     notify()
   })
   handle('automations:setEnabled', (_, id: string, enabled: boolean) => {
@@ -157,6 +168,13 @@ export function registerAutomationHandlers(): void {
   })
   handle('automations:resume', (_, id: string) => {
     scheduler?.resume(String(id))
+    notify()
+  })
+  handle('automations:questions', () =>
+    loadQuestions(automationQuestionsFile()).sort((a, b) => b.created - a.created)
+  )
+  handle('automations:dismissQuestion', (_, id: string) => {
+    closeQuestion(automationQuestionsFile(), String(id), { status: 'dismissed' })
     notify()
   })
   handle('automations:runNow', (_, id: string) => scheduler?.runNow(String(id)) ?? false)

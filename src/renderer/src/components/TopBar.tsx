@@ -41,7 +41,7 @@ function TopBar(props: Props): React.JSX.Element {
         {outsideText && (
           <span
             className="mr-1 flex items-center gap-1.5 rounded-full border border-molten-500/50 px-2.5 py-1 text-xs text-molten-200"
-            title="This chat has web or plugin text in it, so changes to notes ask for approval first, even in allowed folders."
+            title="This chat has web, plugin or automation text in it, so changes to notes ask for approval first, even in allowed folders."
           >
             Outside text
           </span>

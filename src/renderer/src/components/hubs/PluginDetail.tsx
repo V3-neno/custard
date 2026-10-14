@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   describePermission,
   type ConfigField,
@@ -6,7 +6,7 @@ import {
   type PluginStatus,
   type TestReport
 } from '../../../../shared/plugins'
-import { cleanError, danger, input, primary, secondary } from './ui'
+import { cleanError, danger, input, primary, secondary } from '../settings/ui'
 import type { MemorySettings } from '../../../../shared/memory'
 
 const stateLabel: Record<PluginStatus['state'], string> = {
@@ -18,7 +18,7 @@ const stateLabel: Record<PluginStatus['state'], string> = {
 const when = (t: number): string =>
   new Date(t).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
 
-function Badge({ p }: { p: PluginStatus }): React.JSX.Element {
+export function Badge({ p }: { p: PluginStatus }): React.JSX.Element {
   const color =
     p.state === 'enabled'
       ? p.running
@@ -350,7 +350,7 @@ function Review({
   )
 }
 
-function Detail({
+export function Detail({
   p,
   onChange
 }: {
@@ -612,69 +612,3 @@ function Detail({
     </div>
   )
 }
-
-function PluginsTab(): React.JSX.Element {
-  const [plugins, setPlugins] = useState<PluginStatus[] | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const apply = useCallback((list: PluginStatus[]) => {
-    setPlugins(list)
-    setSelected((s) => s ?? list[0]?.id ?? null)
-  }, [])
-  const load = useCallback(
-    () =>
-      window.custard.plugins
-        .list()
-        .then(apply)
-        .catch((e) => setError(cleanError(e))),
-    [apply]
-  )
-  useEffect(() => {
-    window.custard.plugins
-      .list()
-      .then(apply)
-      .catch((e) => setError(cleanError(e)))
-  }, [apply])
-
-  const replace = (s: PluginStatus): void =>
-    setPlugins((list) => (list ?? []).map((x) => (x.id === s.id ? s : x)))
-  const p = plugins?.find((x) => x.id === selected)
-
-  return (
-    <div className="flex min-h-[420px] gap-5">
-      <div className="w-44 shrink-0 border-r border-forge-700 pr-3">
-        {plugins?.length === 0 && (
-          <p className="text-sm text-ash-500">
-            No plugins yet. Create one in Code mode under Plugins.
-          </p>
-        )}
-        {plugins?.map((x) => (
-          <button
-            key={x.id}
-            onClick={() => setSelected(x.id)}
-            className={`mb-1 block w-full rounded-lg px-2 py-1.5 text-left ${
-              x.id === selected ? 'bg-forge-800' : 'hover:bg-forge-800/60'
-            }`}
-          >
-            <span className="block truncate text-sm text-ash-100">{x.name}</span>
-            <Badge p={x} />
-          </button>
-        ))}
-        <button onClick={load} className="mt-2 text-xs text-ash-500 hover:text-molten-200">
-          Refresh
-        </button>
-      </div>
-      <div className="min-w-0 flex-1">
-        {error && <p className="text-sm text-ember-600">{error}</p>}
-        {p ? (
-          <Detail key={p.id} p={p} onChange={replace} />
-        ) : plugins === null ? (
-          <p className="text-sm text-ash-500">Loading…</p>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
-export default PluginsTab

@@ -36,9 +36,11 @@ export function createStarterVault(parent: string): string {
   return root
 }
 
-// Copies starter skills that an existing vault
-// doesn't have yet. Never overwrites: files that exist are left alone.
-const STARTER_SKILL_FILES = /^Custard\/Skills\//
+// Copies the starter skills, and the Custard reference notes the skills point
+// to (Resources/Custard *.md), that an existing vault doesn't have yet. Never
+// overwrites: files that exist are left alone, so a note the user edited stays
+// and a newer version of one they already have is not delivered.
+const STARTER_SKILL_FILES = /^(Custard\/Skills\/|Resources\/Custard [^/]+\.md$)/
 
 export function addMissingStarterSkills(vault: string): string[] {
   const added: string[] = []
@@ -53,3 +55,16 @@ export function addMissingStarterSkills(vault: string): string[] {
   }
   return added
 }
+
+// Folder names of the starter skills.
+export function starterSkillFolders(): Set<string> {
+  const names = new Set<string>()
+  for (const key of Object.keys(templateFiles)) {
+    const m = /^Custard\/Skills\/([^/]+)\//.exec(key.slice(PREFIX.length))
+    if (m) names.add(m[1])
+  }
+  return names
+}
+
+// One file of the starter vault as bundled, by its path inside the vault.
+export const starterFile = (rel: string): string | null => templateFiles[PREFIX + rel] ?? null

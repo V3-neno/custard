@@ -3,7 +3,7 @@ import { join, relative, sep } from 'path'
 import type { Conversation } from '../../shared/chat'
 import { resolveInVault, safeName } from './paths'
 import { FsafeExistsError } from '../fsafe'
-import { captureNotes, createNote, frontmatter, sections } from './write'
+import { captureNotes, createNote, frontmatter, madeFromOutside, sections } from './write'
 
 // Plugin knowledge: one folder per plugin under Custard/Plugins, with an
 // Overview made once (what the plugin said about itself, related notes) and
@@ -283,7 +283,9 @@ export function pluginContext(
   vault: string,
   c: Conversation,
   text: string,
-  plugins: PluginInfo[]
+  plugins: PluginInfo[],
+  // Set when a note shown was made from a chat that held outside text.
+  recall?: { outside: boolean }
 ): string {
   const parts: string[] = []
   for (const p of relevantPlugins(c, text, plugins)) {
@@ -302,6 +304,7 @@ export function pluginContext(
     for (const rel of captureNotes(vault, `${folder}/Activity`).slice(0, RETRIEVAL.notes)) {
       const text = read(rel)
       const date = /(\d{4}-\d{2}-\d{2})[^/]*$/.exec(rel)?.[1] ?? ''
+      if (recall && text && madeFromOutside(text)) recall.outside = true
       for (const l of (sections(text).get('Preferences') ?? '').split('\n')) {
         if (!l.startsWith('- ')) continue
         const pref = `- ${date}: ${l.slice(2).trim()}`

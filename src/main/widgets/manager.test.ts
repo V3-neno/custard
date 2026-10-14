@@ -373,6 +373,21 @@ describe('failures stay in the widget', () => {
 })
 
 describe('calls from a widget', () => {
+  it('tells the widget when its data was left out, and why', async () => {
+    const v = showReady()
+    invokeImpl = async (name) => ({
+      content: `ran ${name}`,
+      isError: false,
+      outcome: 'completed',
+      dataDropped: 'it is 70 KB and the limit is 64 KB'
+    })
+    const r = await v.events.call('count', {})
+    expect(r).toEqual({
+      status: 'completed',
+      content: 'ran tally__count',
+      dataDropped: 'it is 70 KB and the limit is 64 KB'
+    })
+  })
   it("runs reads of its own plugin's listed tools, with data", async () => {
     const v = showReady()
     const r = await v.events.call('count', {})
