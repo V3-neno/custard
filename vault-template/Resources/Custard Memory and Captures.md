@@ -178,8 +178,19 @@ _Saved by Custard from the chat "Spotify test" on 2026-10-12 at 14:32 (Europe/St
 - Main: `Custard/Captures/`. Plugin knowledge: `Custard/Plugins/<folder>/Activity/` where `<folder>` is the plugin's name (made safe; `Name (id)` if the name is taken) and is found again by the `custard-plugin-id` in `Overview.md` or the `plugin` key of its newest Activity note, so renaming the folder is tolerated. [C]
 - File name: `YYYY-MM-DD HHMM <title up to 60 chars> <8 hex chars>.md`, e.g. `2026-10-12 1432 Spotify test c5345f88.md`. Date and time are local (the zone is in the note, not in the file name) and come from when the job was queued; the title is the chat title with attached-file names scrubbed and made file-safe; the 8 hex are the start of SHA-256 of the job id. Same name already taken by a different job: ` (2)` ... ` (20)` suffix; after 20: error `Too many notes with the same name.` [C][T] Probe: 5 chats with the same title in the same minute gave 5 different names. [T]
 - One immutable note per capture (per chat message range), written with exclusive create; Custard never reopens a written note for writing. A note already holding the same job (crash after write) counts as written. [C][T]
-- A second turn in the same chat makes a new note for the new range only (probe: job `chat-A:8-10`, new file `...7d6d1fa4.md`). There is no per-chat roll-up note. [T]
+- A second turn in the same chat makes a new note for the new range only (probe: job `chat-A:8-10`, new file `...7d6d1fa4.md`). Captures are never rolled up; the per-chat summary is a separate chat note (1.5). [T]
 - Template vault: `vault-template/Custard/` ships only `Memory.md`, `README.md`, `Skills/`. `Custard/Captures/` is created on first capture. [C]
+
+### 1.5 Chat notes (`Custard/Chats`)
+
+Separate from captures: every chat gets one summary note, so the chat itself can stay in Custard while the vault holds a readable record, and History can show where each chat stands. [C][T]
+
+- When: a pause after a turn ends (45 seconds; another turn restarts it), and waiting notes are written at startup and when a vault or key is added. Not for temporary or forgotten chats, chats with memory off, or while "Remember automatically" is off (turning it off cancels waiting notes). [C][T]
+- How: the same tool-less summary call as "Continue in a new chat", from the same bounded evidence (no tool output, file contents or thinking), with its own instructions (`CHAT_NOTE_SYSTEM` in `chatNotes.ts`). Every model-written line goes through the capture sanitizer (links, HTML, secrets). [C][T]
+- Name: `Custard/Chats/YYYY-MM-DD <title up to 60 chars> <first 8 of the chat id>.md`, created with exclusive create (` (2)`… if taken). Frontmatter: `custard-chat` (the chat id), `mode`, `title`, `started`, `updated`, `messages`, `outside`. Sections: Goal, Where it stands, Decided, Still open, Requirements, and "What Custard did" (Custard's own action record, at most 40 lines). [C][T]
+- Updates: unlike captures, Custard rewrites this one note as the chat goes on, but only while it is exactly what Custard last wrote (a SHA-256 of it is kept with the chat). Once you change it, Custard leaves it alone for good; once you delete it, Custard doesn't write it again. [C][T]
+- Forget deletes it with the chat's captures and lists it in the confirmation. Deleting a chat in History keeps its note. [C][T]
+- Protected like Captures: a grant on a parent folder doesn't cover `Custard/Chats`, and notes there count as outside text when read in a chat. They are not read into prompts yet. [C]
 
 ---
 

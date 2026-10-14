@@ -40,7 +40,8 @@ const parts = (path: string): string[] => split(path).map(fold)
 const PROTECTED: string[][] = [
   ['custard', 'memory.md'],
   ['custard', 'skills'],
-  ['custard', 'captures']
+  ['custard', 'captures'],
+  ['custard', 'chats']
 ]
 
 // The protected place a note path is in, as the number of leading path
@@ -58,13 +59,13 @@ export function protectedDepth(path: string): number {
 // What a note's place says about the text in it, for the outside-text rule:
 // 'own' for notes the user or Custard's own flow wrote on purpose (memory and
 // skills), 'derived' for notes Custard wrote from chats that may have held
-// text from the web or a plugin (captures, plugin activity), null for the
+// text from the web or a plugin (captures, chat notes, plugin activity), null for the
 // rest of the vault.
 export function placeKind(path: string): 'own' | 'derived' | null {
   const p = parts(path)
   if (p[0] !== 'custard') return null
   if (p[1] === 'memory.md' || p[1] === 'skills') return 'own'
-  if (p[1] === 'captures') return 'derived'
+  if (p[1] === 'captures' || p[1] === 'chats') return 'derived'
   if (p[1] === 'plugins' && p.length >= 4 && p[3] === 'activity') return 'derived'
   if (p[1] === 'plugins' && p.length === 4 && p[3] === 'overview.md') return 'own'
   return null

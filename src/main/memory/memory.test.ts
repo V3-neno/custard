@@ -687,6 +687,21 @@ describe('capture', () => {
     expect(cap.pending()).toEqual([])
   })
 
+  it('a declined summary is never written (Phase 8)', async () => {
+    const c = newChat()
+    turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])
+    answer = async () => {
+      throw new Error('The summary was declined.')
+    }
+    const cap = capture()
+    await captured(cap, c)
+    await cap.run()
+    await cap.run()
+    expect(job().status).toBe('failed')
+    expect(job().reason).toBe("Couldn't summarize it: The summary was declined.")
+    expect(notes()).toEqual([])
+  })
+
   it('a crash after writing, before recording, is recorded as saved without writing again', async () => {
     const c = newChat()
     turn(c, 'play', [{ name: 'spotify__play', status: 'completed', write: true }])

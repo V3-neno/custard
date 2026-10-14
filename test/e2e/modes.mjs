@@ -1,12 +1,13 @@
 // Mode boundaries in the built app, against test/e2e/interrupt-mock.mjs:
-//   - Chat and Design can't create a skill, by its path, by a case or
-//     trailing-dot variant, or through a folder link inside the vault; the
+//   - Chat and Design can't create a skill, by its path, by a case
+//     variant, by a trailing-dot variant, or through a folder link inside the vault; the
 //     call is refused before any approval card, and nothing is written
 //   - Chat and Design aren't offered Code's file tools, and a call to one
 //     does nothing
 //   - a skill whose frontmatter and text claim permissions changes nothing
 //     about the tools Design is offered (Chat's, plus its own design_ tools)
 //   - Skills mode can still propose a skill (it asks first, as before)
+//   - the mode bar reads Chat, Design, Plugins (was Code), Skills
 // Usage, from the repo root after `npx electron-vite build`:
 //   node test/e2e/interrupt-mock.mjs <out> &   (with <out>/vault and <out>/plugin as for widgets.mjs)
 //   node test/e2e/modes.mjs <out> <screenshot dir>
@@ -39,7 +40,9 @@ const forged = () =>
     `${SKILLS}/forged`,
     `${SKILLS}/forged-case`,
     `${SKILLS}/forged-link`,
-    `${VAULT}/custard/SKILLS.`,
+    `${SKILLS}/forged-dot`,
+    `${VAULT}/custard/SKILLS`,
+    `${VAULT}/Custard/Skills.`,
     `${OUT}/plugin/forged`
   ].filter((p) => fs.existsSync(p))
 
@@ -114,6 +117,19 @@ const turn = async (t) => {
 }
 
 try {
+  step('Mode bar: Chat, Design, Plugins, Skills')
+  const bar = await w
+    .locator('button[title]')
+    .evaluateAll((bs) =>
+      bs
+        .map((b) => b.textContent.trim())
+        .filter((t) => ['Chat', 'Code', 'Design', 'Plugins', 'Skills'].includes(t))
+    )
+  check(
+    bar.join(',') === 'Chat,Design,Plugins,Skills',
+    `the mode bubbles read Chat, Design, Plugins, Skills (${bar.join(', ')})`
+  )
+
   step('Setup: key and vault')
   await w.click('button[title=Settings]')
   await w.fill('input[aria-label="Claude API key"]', 'sk-ant-test')
@@ -126,16 +142,20 @@ try {
   for (const mode of ['Chat', 'Design']) {
     step(`${mode}: extensions can't be written`)
     await w.click(`button:text-is("${mode}")`)
+    const boundary = `${mode} mode can't create or change skills`
+    // A trailing dot is refused before the mode boundary is even reached:
+    // Windows would read "Skills." as "Skills", so no vault path may end in one.
     const cases = [
-      ['mode skill test', 'by its path'],
-      ['mode case test', 'by a case and trailing-dot variant'],
-      ['mode link test', 'through a folder link inside the vault']
+      ['mode skill test', 'by its path', boundary],
+      ['mode case test', 'by a case variant', boundary],
+      ['mode dot test', 'by a trailing-dot variant', "Names can't end in a dot or a space."],
+      ['mode link test', 'through a folder link inside the vault', boundary]
     ]
-    for (const [ask, how] of cases) {
+    for (const [ask, how, refusal] of cases) {
       const asked = await turn(`${ask} (${mode})`)
       check(!asked, `${mode}: no approval card for a skill ${how}`)
       check(
-        lastResult().includes(`${mode} mode can't create or change skills`),
+        lastResult().includes(refusal),
         `${mode}: a skill ${how} is refused (${lastResult().slice(0, 70)})`
       )
     }
@@ -171,18 +191,26 @@ try {
     `Design is offered Chat's tools plus its own design_ tools (${toolsBy.Design.filter((n) => n.startsWith('design_')).join(', ')})`
   )
 
-  step('Skills mode can still propose a skill, asking first')
+  step('Skills mode writes a skill only from inside that skill (see skills-hub.mjs)')
   await w.click('button:text-is("Skills")')
-  const asked = await turn('mode skill test (Skills)')
-  check(asked, 'Skills mode asks before creating a skill')
-  if (asked) {
-    const text = await card().first().innerText()
-    check(text.includes('Custard/Skills/forged/SKILL.md'), 'the card names the skill file')
-    await shot('modes-skills-card')
-    await card().first().getByRole('button', { name: "Don't allow", exact: true }).click()
-    await idle()
-  }
-  check(!fs.existsSync(`${SKILLS}/forged`), 'declined, so nothing was written')
+  const hubAsked = await turn('mode skill test (Skills)')
+  check(!hubAsked, 'the Skills hub chat asks nothing')
+  check(
+    /isn't available in this chat/.test(lastResult()),
+    `the Skills hub chat has no write tool (${lastResult().slice(0, 60)})`
+  )
+  await w.click('button[title="Skills history"]')
+  await w.click('button:has-text("New skills chat")')
+  await w.click('button[aria-label="Open escalate"]')
+  await w.waitForSelector('text=Workspace · Custard/Skills/escalate')
+  const otherAsked = await turn('mode skill test (Skills)')
+  check(!otherAsked, "a skill's workspace asks nothing for another skill")
+  check(
+    lastResult().includes('can only write inside Custard/Skills/escalate/'),
+    `and refuses it (${lastResult().slice(0, 70)})`
+  )
+  await shot('modes-skills-workspace')
+  check(!fs.existsSync(`${SKILLS}/forged`), 'nothing was written')
 } catch (err) {
   console.log('✕ error:', err)
   process.exitCode = 1

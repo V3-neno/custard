@@ -22,7 +22,7 @@ import {
 import { lineDiff } from './diff'
 import { FsafeError, isAtomicTemp, writeReplaceSync } from '../fsafe'
 
-// File tools for Code mode. They only ever touch paths inside the
+// File tools for Plugins mode. They only ever touch paths inside the
 // conversation's workspace, resolved by resolveInside. There is no shell:
 // in the Plugins workspace, building and testing go through host operations
 // that never run plugin code outside its sandbox.

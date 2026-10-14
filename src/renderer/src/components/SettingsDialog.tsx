@@ -1,20 +1,48 @@
 import { useCallback, useEffect, useState } from 'react'
-import { providerNames, type Provider } from '../../../shared/chat'
+import { providerIds, providers, providerNames, type Provider } from '../../../shared/providers'
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
+import {
+  chatModels,
+  deepseekEffort,
+  deepseekEfforts,
+  efforts,
+  isChatModel,
+  isEffort,
+  type ChatSettings,
+  type UsageMonth
+} from '../../../shared/chat'
+import type { Capability, ModelCheck } from '../../../shared/adapter'
+import { formatCost } from '../../../shared/pricing'
 
-import PluginsTab from './settings/PluginsTab'
 import DesignTab from './settings/DesignTab'
+import CapabilitiesTab from './settings/CapabilitiesTab'
 import EditableFolders from './settings/EditableFolders'
 import Automations from './settings/Automations'
 import { cleanError, primary, secondary } from './settings/ui'
 
-type Props = { onClose: () => void; onChanged: () => void }
-type Tab = 'general' | 'design' | 'plugins'
+type Props = {
+  onClose: () => void
+  onChanged: () => void
+  // Capabilities → Start building (see App).
+  onBuild: (provider: Provider, capability: Capability) => Promise<void>
+}
+type Tab = 'general' | 'design' | 'capabilities'
 
-const keyInfo: Record<Provider, { placeholder: string; where: string }> = {
-  claude: { placeholder: 'sk-ant-…', where: 'console.anthropic.com' },
-  openai: { placeholder: 'sk-…', where: 'platform.openai.com' }
+const checkedAt = (t: number): string =>
+  new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+
+// What the last check found, in a sentence.
+function checkLine(provider: Provider, c: ModelCheck): { text: string; ok: boolean } {
+  const name = providerNames[provider]
+  const at = checkedAt(c.checkedAt)
+  if (c.result === 'ok') return { text: `Checked ${at}: the key works.`, ok: true }
+  if (c.result === 'auth')
+    return { text: `Checked ${at}: ${name} rejected this key. Paste a new one above.`, ok: false }
+  return {
+    text: `Couldn't check at ${at}. ${c.message ?? ''} Your saved key wasn't changed.`,
+    ok: false
+  }
 }
 
 function KeySection({
@@ -27,11 +55,28 @@ function KeySection({
   const [key, setKey] = useState('')
   const [hasKey, setHasKey] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The last check with the provider (Save or Refresh only), and whether one
+  // is running.
+  const [check, setCheck] = useState<ModelCheck | null>(null)
+  const [checking, setChecking] = useState(false)
+  const name = providerNames[provider]
 
   const refresh = useCallback(() => window.custard.apiKey.has(provider).then(setHasKey), [provider])
   useEffect(() => {
     refresh()
-  }, [refresh])
+    window.custard.models.lastCheck(provider).then(setCheck)
+  }, [refresh, provider])
+
+  const runCheck = async (): Promise<void> => {
+    setChecking(true)
+    try {
+      setCheck(await window.custard.models.check(provider))
+    } catch (e) {
+      setError(cleanError(e))
+    } finally {
+      setChecking(false)
+    }
+  }
 
   const save = async (): Promise<void> => {
     try {
@@ -42,42 +87,237 @@ function KeySection({
       onChanged()
     } catch (e) {
       setError(cleanError(e))
+      return
     }
+    await runCheck()
   }
 
   const clear = async (): Promise<void> => {
     await window.custard.apiKey.clear(provider)
+    setCheck(null)
     refresh()
     onChanged()
   }
 
+  const line = check && checkLine(provider, check)
+  const known = check?.models.filter((m) => m.source === 'profile') ?? []
+  const unsupported = check?.models.filter((m) => m.source === 'discovered') ?? []
   return (
-    <section className="mb-6">
+    <section className="mb-6" data-provider-key={provider}>
       <h3 className="mb-1 text-sm font-medium">
-        {providerNames[provider]} API key{' '}
-        {hasKey && <span className="text-molten-300">· saved</span>}
+        {name} API key {hasKey && <span className="text-molten-300">· saved</span>}
       </h3>
-      <p className="mb-3 text-sm text-ash-300">Get one at {keyInfo[provider].where}.</p>
+      <p className="mb-3 text-sm text-ash-300">Get one at {providers[provider].keyWhere}.</p>
       <div className="flex gap-2">
         <input
           type="password"
-          aria-label={`${providerNames[provider]} API key`}
+          aria-label={`${name} API key`}
           value={key}
           onChange={(e) => setKey(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && key.trim() && save()}
-          placeholder={hasKey ? 'Paste a new key to replace it' : keyInfo[provider].placeholder}
+          placeholder={
+            hasKey ? 'Paste a new key to replace it' : providers[provider].keyPlaceholder
+          }
           className="flex-1 rounded-lg border border-forge-700 bg-forge-900 px-3 py-2 text-sm outline-none focus:border-molten-500/60"
         />
-        <button onClick={save} disabled={!key.trim()} className={primary}>
+        <button onClick={save} disabled={!key.trim() || checking} className={primary}>
           Save
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
       {hasKey && (
-        <button onClick={clear} className="mt-2 text-xs text-ash-500 hover:text-ember-600">
-          Remove key
-        </button>
+        <div className="mt-2 flex items-start gap-3 text-xs" aria-live="polite">
+          <p
+            className={`flex-1 ${checking ? 'text-ash-400' : line ? (line.ok ? 'text-molten-300' : 'text-ember-600') : 'text-ash-400'}`}
+            data-check-status
+          >
+            {checking
+              ? `Checking the key with ${name}…`
+              : (line?.text ??
+                `Not checked yet. Refresh asks ${name} which models this key can use.`)}
+          </p>
+          <button
+            onClick={runCheck}
+            disabled={checking}
+            className="shrink-0 whitespace-nowrap text-ash-400 hover:text-molten-200 disabled:opacity-40"
+            title={`Check the key with ${name} and see which models it can use`}
+          >
+            Refresh
+          </button>
+          <button
+            onClick={clear}
+            className="shrink-0 whitespace-nowrap text-ash-500 hover:text-ember-600"
+          >
+            Remove key
+          </button>
+        </div>
       )}
+      {hasKey && !checking && check?.result === 'ok' && (
+        <div className="mt-2 text-xs text-ash-400" data-check-models>
+          <p className="text-ash-300">Available models</p>
+          <ul className="mt-0.5">
+            {known.map((m) => (
+              <li key={m.id} data-model-row={m.id} data-available={m.available}>
+                <span className={m.available ? 'text-ash-200' : 'text-ash-500 line-through'}>
+                  {m.label}
+                </span>
+                {!m.available && (
+                  <span className="text-ash-500"> · Your key can&apos;t use this model</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {provider === 'deepseek' && (
+            <p className="mt-1 text-ash-500" data-effort-note>
+              DeepSeek&apos;s model list also names effort levels (fast, balanced, thorough).
+              Custard doesn&apos;t read them yet: the picker&apos;s Fast, Balanced and Thorough send
+              low, high and max, the values DeepSeek documents for its Responses API.
+            </p>
+          )}
+          {unsupported.length > 0 && (
+            <div className="mt-2" data-unsupported>
+              <p className="text-ash-300">
+                Not yet supported: {unsupported.map((m) => m.label).join(', ')}
+              </p>
+              <p className="mt-0.5 text-ash-500">
+                {name} offers these, but Custard has no prices, context limits or file rules for
+                them yet, so they can&apos;t be picked. They&apos;re shown so you know they exist.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// The model new chats start on. Each chat keeps the model it was started
+// with (or switched to); changing this changes no existing chat.
+function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JSX.Element {
+  const [s, setS] = useState<ChatSettings | null>(null)
+  useEffect(() => {
+    window.custard.settings.get().then(setS)
+  }, [])
+  if (!s) return <section className="mb-6" />
+  const model = chatModels.find((m) => m.id === s.model)
+  const save = (next: ChatSettings): void => {
+    setS(next)
+    window.custard.settings.set(next).then(onChanged)
+  }
+  const select =
+    'rounded-lg border border-forge-700 bg-forge-900 px-2 py-1.5 text-sm outline-none focus:border-molten-500/60'
+  return (
+    <section className="mb-6" data-default-model>
+      <h3 className="mb-1 text-sm font-medium">Default model</h3>
+      <p className="mb-3 text-sm text-ash-300">
+        New chats start on it. Each chat keeps its own model; pick another under the message box.
+      </p>
+      <div className="flex gap-2">
+        <select
+          title="Default model"
+          className={`${select} flex-1`}
+          value={s.model}
+          onChange={(e) => {
+            const id = e.target.value
+            if (!isChatModel(id)) return
+            const deepseek = chatModels.find((m) => m.id === id)?.provider === 'deepseek'
+            save({ model: id, effort: deepseek ? deepseekEffort(s.effort) : s.effort })
+          }}
+        >
+          {providerIds.map((p) => (
+            <optgroup key={p} label={providerNames[p]}>
+              {chatModels
+                .filter((m) => m.provider === p)
+                .map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </select>
+        {model?.effort && (
+          <select
+            title="Default effort"
+            className={select}
+            value={model.provider === 'deepseek' ? deepseekEffort(s.effort) : s.effort}
+            onChange={(e) => isEffort(e.target.value) && save({ ...s, effort: e.target.value })}
+          >
+            {model.provider === 'deepseek'
+              ? deepseekEfforts.map((e) => (
+                  <option key={e.effort} value={e.effort}>
+                    {e.label}
+                  </option>
+                ))
+              : efforts.map((e) => (
+                  <option key={e} value={e}>
+                    {e} effort
+                  </option>
+                ))}
+          </select>
+        )}
+      </div>
+    </section>
+  )
+}
+
+// A monthly budget for model calls. Custard warns under the message box from
+// 80% of it and when it is passed; it never stops a chat.
+function SpendingSection(): React.JSX.Element {
+  const [month, setMonth] = useState<UsageMonth | null>(null)
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    window.custard.usage.month().then((m) => {
+      setMonth(m)
+      setDraft(m.budget === null ? '' : String(m.budget))
+    })
+  }, [])
+  const save = async (): Promise<void> => {
+    const text = draft.trim().replace(/^\$/, '')
+    const dollars = text === '' ? null : Number(text)
+    if (dollars !== null && !(Number.isFinite(dollars) && dollars > 0 && dollars <= 1_000_000)) {
+      setError('Enter an amount in dollars, like 20, or leave it empty for no budget.')
+      return
+    }
+    setError(null)
+    const m = await window.custard.usage.setBudget(dollars)
+    setMonth(m)
+    setDraft(m.budget === null ? '' : String(m.budget))
+  }
+  const saved = month?.budget === null ? '' : String(month?.budget ?? '')
+  return (
+    <section className="mb-6">
+      <h3 className="mb-1 text-sm font-medium">Spending</h3>
+      <p className="mb-3 text-sm text-ash-300">
+        {month
+          ? `This month so far: about ${formatCost(month.cost)} across ${month.calls} model ${month.calls === 1 ? 'call' : 'calls'}${month.budget ? `, of your ${formatCost(month.budget)} budget` : ''}.`
+          : 'This month so far: …'}{' '}
+        Custard estimates it from each provider&apos;s published prices, including its own summaries
+        and automations. Image generation isn&apos;t counted, and your provider&apos;s bill is what
+        counts.
+      </p>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-ash-400">$</span>
+        <input
+          inputMode="decimal"
+          aria-label="Monthly budget in dollars"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && save()}
+          placeholder="No budget"
+          className="w-32 rounded-lg border border-forge-700 bg-forge-900 px-3 py-2 text-sm outline-none focus:border-molten-500/60"
+        />
+        <span className="text-sm text-ash-400">a month</span>
+        <button onClick={save} disabled={draft.trim() === saved} className={primary}>
+          Save
+        </button>
+      </div>
+      {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
+      <p className="mt-2 text-xs text-ash-400">
+        From 80% of the budget, and when it is passed, a line under the message box says so. Custard
+        never stops a chat because of it.
+      </p>
     </section>
   )
 }
@@ -108,7 +348,9 @@ function MemorySection(): React.JSX.Element {
           tests, failures) or that went on for a while, Custard makes one short summary with your
           provider&apos;s cheapest model and saves it as a new note in Custard/Captures in your
           vault. Small talk and plain questions aren&apos;t saved, and neither are keys, passwords,
-          note contents or web pages.
+          note contents or web pages. Each chat also gets one summary note in Custard/Chats (what it
+          was for, where it stands, what was decided), which Custard keeps up to date as the chat
+          goes on and stops updating once you change it.
         </span>
       </label>
       <p className="mt-2 text-xs text-ash-400">
@@ -118,42 +360,14 @@ function MemorySection(): React.JSX.Element {
       </p>
       <p className="mt-2 text-xs text-ash-400">
         {settings && !settings.auto
-          ? "Off: nothing new is saved, and waiting summaries are cancelled. Notes already in your vault stay until you edit them, and chats from while it was off aren't saved later."
-          : "To keep one chat out, start it as a Temporary chat from the top bar; Forget in History deletes a chat's notes. You can also turn it off for a plugin in its settings. Edit or delete anything in your vault; what you delete is not added back."}
+          ? "Off: nothing new is saved, and waiting summaries and chat notes are cancelled. Notes already in your vault stay until you edit them, and chats from while it was off aren't saved later."
+          : "To keep one chat out, start it as a Temporary chat from the top bar; Forget in History deletes a chat's notes, its chat note included. You can also turn it off for a plugin with Manage in Plugins mode. Edit or delete anything in your vault; what you delete is not added back."}
       </p>
     </section>
   )
 }
 
-function SecuritySection(): React.JSX.Element {
-  const [ask, setAsk] = useState<boolean | null>(null)
-  useEffect(() => {
-    window.custard.security.get().then((s) => setAsk(s.askBeforeWriteTools))
-  }, [])
-  return (
-    <section className="mb-6">
-      <h3 className="mb-1 text-sm font-medium">Security</h3>
-      <label className="flex items-start gap-2 text-sm text-ash-300">
-        <input
-          type="checkbox"
-          className="mt-1"
-          checked={ask ?? true}
-          disabled={ask === null}
-          onChange={(e) => {
-            setAsk(e.target.checked)
-            window.custard.security.set({ askBeforeWriteTools: e.target.checked })
-          }}
-        />
-        <span>
-          Ask before plugin actions that change things (queueing music, opening apps, sending data).
-          This is the default for every plugin action; you can change single actions in Plugins.
-        </span>
-      </label>
-    </section>
-  )
-}
-
-function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
+function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('general')
   const [vault, setVault] = useState<VaultInfo>(null)
 
@@ -196,7 +410,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
       onClick={onClose}
     >
       <div
-        className={`max-h-[90vh] overflow-y-auto rounded-3xl border border-forge-700 bg-forge-850 p-6 ${tab === 'plugins' ? 'w-[820px]' : 'w-[480px]'}`}
+        className={`max-h-[90vh] overflow-y-auto rounded-3xl border border-forge-700 bg-forge-850 p-6 ${tab === 'capabilities' ? 'w-[760px] max-w-[95vw]' : 'w-[480px]'}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center gap-4">
@@ -205,7 +419,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
             className="flex gap-1 rounded-full border border-forge-700 p-0.5 text-sm"
             role="tablist"
           >
-            {(['general', 'design', 'plugins'] as Tab[]).map((t) => (
+            {(['general', 'design', 'capabilities'] as Tab[]).map((t) => (
               <button
                 key={t}
                 role="tab"
@@ -213,24 +427,27 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
                 onClick={() => setTab(t)}
                 className={`rounded-full px-3 py-1 ${tab === t ? 'bg-forge-700 text-ash-100' : 'text-ash-400 hover:text-ash-100'}`}
               >
-                {t === 'general' ? 'General' : t === 'design' ? 'Design' : 'Plugins'}
+                {t === 'general' ? 'General' : t === 'design' ? 'Design' : 'Capabilities'}
               </button>
             ))}
           </div>
         </div>
 
-        {tab === 'plugins' ? (
-          <PluginsTab />
-        ) : tab === 'design' ? (
+        {tab === 'design' ? (
           <DesignTab />
+        ) : tab === 'capabilities' ? (
+          <CapabilitiesTab onBuild={onBuild} />
         ) : (
           <>
             <p className="mb-5 -mt-1 text-sm text-ash-400">
               Keys are encrypted with Windows secure storage and stay on this computer. Pick a model
-              from either provider under the message box.
+              from any provider under the message box.
             </p>
-            <KeySection provider="claude" onChanged={onChanged} />
-            <KeySection provider="openai" onChanged={onChanged} />
+            <DefaultModelSection onChanged={onChanged} />
+            {providerIds.map((p) => (
+              <KeySection key={p} provider={p} onChanged={onChanged} />
+            ))}
+            <SpendingSection />
 
             <section>
               <h3 className="mb-1 text-sm font-medium">
@@ -294,7 +511,6 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
             </section>
             <div className="mt-6">
               <MemorySection />
-              <SecuritySection />
             </div>
           </>
         )}

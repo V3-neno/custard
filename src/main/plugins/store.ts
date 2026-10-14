@@ -56,7 +56,7 @@ const MAX_DATA_BYTES = 1024 * 1024
 export class SecretsLockedError extends Error {
   constructor() {
     super(
-      "Custard can't read this plugin's saved secrets right now: the system's secure storage refused. Nothing was changed. Unlock it (or sign in to your keyring) and restart Custard, or reset the plugin's saved secrets in Settings → Plugins."
+      "Custard can't read this plugin's saved secrets right now: the system's secure storage refused. Nothing was changed. Unlock it (or sign in to your keyring) and restart Custard, or reset the plugin's saved secrets with Manage on its card in Plugins mode."
     )
   }
 }

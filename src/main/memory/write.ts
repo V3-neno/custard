@@ -1,7 +1,14 @@
 import { readdirSync, readFileSync, realpathSync, statSync, unlinkSync } from 'fs'
 import { createHash, randomUUID } from 'crypto'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'path'
-import { FsafeError, FsafeExistsError, makeDirs, writeNewSync, type Guard } from '../fsafe'
+import {
+  FsafeError,
+  FsafeExistsError,
+  makeDirs,
+  writeNewSync,
+  writeReplaceSync,
+  type Guard
+} from '../fsafe'
 import { resolveInVault, safeName } from './paths'
 
 // Where automatic memory goes. Each capture is a new note, created only if
@@ -63,6 +70,15 @@ export function createNote(vault: string, full: string, text: string): void {
     insideOf(realVault, real) ? null : 'That path leads outside the vault, so nothing was written.'
   makeDirs(vault, relative(vault, dirname(full)).split(sep).filter(Boolean), { guard })
   writeNewSync(full, text, { guard })
+}
+
+// Replaces a note Custard wrote (a chat note), the same way: the new text goes
+// into a fresh file beside it that is renamed over it, inside the real vault.
+export function replaceNote(vault: string, full: string, text: string): void {
+  const realVault = realpathSync(vault)
+  const guard: Guard = (real) =>
+    insideOf(realVault, real) ? null : 'That path leads outside the vault, so nothing was written.'
+  writeReplaceSync(full, text, { guard })
 }
 
 // Creates `folder/name.md` (or "name (2).md", …) with exclusive create, so
@@ -213,6 +229,7 @@ export function readCaptures(
 
 // Every capture note Custard saved from one chat, wherever it is under
 // Custard/ (plugin folders included), found by its frontmatter. Bounded.
+// (Its summary note in Custard/Chats too, which says `custard-chat`.)
 export function chatCaptures(vault: string, chatId: string): string[] {
   const found: string[] = []
   let budget = 5000
@@ -235,7 +252,8 @@ export function chatCaptures(vault: string, chatId: string): string[] {
           continue
         }
         const fm = frontmatter(read(full) ?? '')
-        if (fm['custard-capture'] && fm.chat === chatId) found.push(child)
+        if ((fm['custard-capture'] && fm.chat === chatId) || fm['custard-chat'] === chatId)
+          found.push(child)
       }
     }
   }

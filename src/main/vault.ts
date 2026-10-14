@@ -189,6 +189,8 @@ export function listSkills(vault: string): Skill[] {
       const skillModes = field('modes')
         .toLowerCase()
         .split(/[\s,[\]]+/)
+        // Plugins mode's id is still `code`; skills may use either name.
+        .map((m) => (m === 'plugins' ? 'code' : m))
         .filter((m): m is Mode => modes.some((x) => x.id === m))
       return description
         ? [{ name: field('name') || e.name, folder: e.name, description, path, modes: skillModes }]
@@ -275,7 +277,7 @@ export function vaultSystemPrompt(
     'When you create notes, write clean Obsidian Markdown and use [[wikilinks]] to related notes you know exist.',
     todayLine(),
     skills.length
-      ? `Skills are instructions for specific tasks in this vault. When a request matches a skill's description, read its SKILL.md with vault_read before doing anything else, then follow it.\n<skills>\n${skills.map((s) => `- ${s.name} (${s.path})${mode === 'skills' && s.modes.length ? ` [modes: ${s.modes.join(', ')}]` : ''}: ${s.description}`).join('\n')}\n</skills>${all.length > skills.length ? `\n${all.length - skills.length} more skills aren't listed here; vault_list ${SKILLS_DIR} shows them all.` : ''}`
+      ? `Skills are instructions for specific tasks in this vault. When a request matches a skill's description, read its SKILL.md with vault_read before doing anything else, then follow it.\n<skills>\n${skills.map((s) => `- ${s.name} (${s.path})${mode === 'skills' && s.modes.length ? ` [modes: ${s.modes.map((m) => (m === 'code' ? 'plugins' : m)).join(', ')}]` : ''}: ${s.description}`).join('\n')}\n</skills>${all.length > skills.length ? `\n${all.length - skills.length} more skills aren't listed here; vault_list ${SKILLS_DIR} shows them all.` : ''}`
       : '',
     memory.trim()
       ? `<memory>\n${boundMemory(memory)}\n</memory>`

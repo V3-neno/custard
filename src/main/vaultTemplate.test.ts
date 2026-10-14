@@ -25,6 +25,24 @@ describe('the starter vault', () => {
     expect(existsSync(join(root, 'Resources/Custard Skill Authoring.md'))).toBe(true)
     expect(existsSync(join(root, 'Resources/Custard Automation Skill Authoring.md'))).toBe(true)
   })
+  it('holds the efficiency skills, each listed where it should be and small enough to read at once', () => {
+    const root = createStarterVault(parent)
+    const skills = listSkills(root)
+    const modesOf = (folder: string): string[] | undefined =>
+      skills.find((k) => k.folder === folder && k.name === folder)?.modes
+    for (const global of [
+      'lean-work',
+      'chat-recall',
+      'chat-housekeeping',
+      'chat-guard',
+      'focus-planner'
+    ])
+      expect(modesOf(global)).toEqual([])
+    expect(modesOf('plugin-blueprint')).toEqual(['code'])
+    expect(modesOf('custard-tuneup')).toEqual(['skills'])
+    for (const k of skills)
+      expect(readFileSync(join(root, k.path), 'utf8').length).toBeLessThan(4_500)
+  })
   it('adds missing skills and Custard notes to an existing vault, and never overwrites', () => {
     const vault = join(parent, 'mine')
     mkdirSync(join(vault, 'Resources'), { recursive: true })

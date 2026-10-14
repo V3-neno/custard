@@ -15,7 +15,8 @@ type Props = {
 type Ramp = [number, [number, number, number]][]
 
 // Brightness ramps for the dots. The library paints in grayscale; Custard
-// paints the same dots in molten metal for Claude and cool steel for OpenAI.
+// paints the same dots in molten metal for Claude, cool steel for OpenAI and
+// deep blue for DeepSeek.
 const RAMPS: Record<Provider, Ramp> = {
   claude: [
     [0, [58, 43, 29]],
@@ -30,6 +31,13 @@ const RAMPS: Record<Provider, Ramp> = {
     [0.7, [113, 144, 179]],
     [0.88, [188, 207, 228]],
     [1, [240, 245, 250]]
+  ],
+  deepseek: [
+    [0, [27, 38, 68]],
+    [0.45, [47, 79, 194]],
+    [0.7, [77, 114, 240]],
+    [0.88, [174, 194, 255]],
+    [1, [236, 241, 255]]
   ]
 }
 

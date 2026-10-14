@@ -1,9 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk'
-import OpenAI from 'openai'
-import type { ActionRecord, Continuation, Conversation, Provider } from '../shared/chat'
+import type { ActionRecord, Continuation, Conversation } from '../shared/chat'
+import { providerIds, providers, type Provider } from '../shared/providers'
 import { redact } from './memory/evidence'
 import { filesNote } from '../shared/attachments'
-import { anthropicEndpoint, openaiEndpoint } from './endpoints'
+import { adapterFor } from './adapters/registry'
+import type { OnUsage } from '../shared/pricing'
 
 // "Continue in a new chat": a bounded handoff from a chat that is too long
 // to go on. It is built from the saved chat in code, so it works however
@@ -16,10 +16,9 @@ import { anthropicEndpoint, openaiEndpoint } from './endpoints'
 //   bounded evidence. It can't act, read anything else or reach the web.
 // Neither is ever saved to the vault.
 
-export const HANDOFF_MODELS: Record<Provider, string> = {
-  claude: 'claude-haiku-4-5',
-  openai: 'gpt-6-luna'
-}
+export const HANDOFF_MODELS: Record<Provider, string> = Object.fromEntries(
+  providerIds.map((p) => [p, providers[p].summaryModel])
+) as Record<Provider, string>
 export const HANDOFF_LIMITS = {
   evidence: 40_000,
   request: 1_200,
@@ -209,6 +208,10 @@ export type HandoffSummary = {
   decisions: string[]
   open: string[]
   state: string
+  // Chat notes only (CHAT_NOTE_SCHEMA): a short title for the chat and what
+  // it worked on.
+  title?: string
+  tags?: string[]
 }
 
 const str = { type: 'string' }
@@ -229,6 +232,18 @@ export const HANDOFF_SYSTEM = [
   'Never include passwords, keys, tokens or raw data. Write short plain sentences in the language the user used.'
 ].join('\n')
 
+// Chat notes add a title and tags to the handoff fields.
+export const CHAT_NOTE_SCHEMA = {
+  ...HANDOFF_SCHEMA,
+  properties: { ...HANDOFF_SCHEMA.properties, title: str, tags: strings },
+  required: [...HANDOFF_SCHEMA.required, 'title', 'tags']
+}
+
+// Added to the instructions for a second try when a summary came back in a
+// language the user never wrote in (see language.ts).
+export const STRICT_LANGUAGE =
+  'Your last summary was in a different language from the user\'s. Write every field only in the language of the user\'s own messages (the lines starting with "User:"), even if the assistant answered in another language.'
+
 const clean = (s: unknown, n = 400): string => (typeof s === 'string' ? oneLine(s).slice(0, n) : '')
 
 export function parseHandoff(raw: string): HandoffSummary {
@@ -243,55 +258,64 @@ export function parseHandoff(raw: string): HandoffSummary {
       .map((y) => clean(y, 300))
       .filter(Boolean)
       .slice(0, 12)
+  // A few short tags, each a word or two, without duplicates.
+  const tags = [
+    ...new Set(
+      (Array.isArray(v.tags) ? v.tags : [])
+        .map((t) => clean(t, 40).replace(/^#/, '').trim().toLowerCase())
+        .filter((t) => t && t.length <= 32)
+    )
+  ].slice(0, 5)
   return {
     goal: clean(v.goal, 600),
     constraints: list(v.constraints),
     decisions: list(v.decisions),
     open: list(v.open),
-    state: clean(v.state, 800)
+    state: clean(v.state, 800),
+    ...(typeof v.title === 'string' && clean(v.title, 80) ? { title: clean(v.title, 80) } : {}),
+    ...(Array.isArray(v.tags) ? { tags } : {})
   }
 }
 
-export type HandoffSummarizer = (evidence: string, signal?: AbortSignal) => Promise<HandoffSummary>
+// `strict`: a second try after a summary in the wrong language.
+export type HandoffSummarizer = (
+  evidence: string,
+  signal?: AbortSignal,
+  strict?: boolean
+) => Promise<HandoffSummary>
 
-export function handoffSummarizer(provider: Provider, apiKey: string): HandoffSummarizer {
-  const opts = { timeout: HANDOFF_LIMITS.timeoutMs, maxRetries: HANDOFF_LIMITS.retries }
-  if (provider === 'openai') {
-    const client = new OpenAI({ apiKey, ...opts, ...openaiEndpoint() })
-    return async (evidence, signal) => {
-      const r = await client.responses.create(
-        {
-          model: HANDOFF_MODELS.openai,
-          instructions: HANDOFF_SYSTEM,
-          input: evidence,
-          max_output_tokens: HANDOFF_LIMITS.maxTokens,
-          reasoning: { effort: 'low' },
-          store: false,
-          text: {
-            format: { type: 'json_schema', name: 'handoff', strict: true, schema: HANDOFF_SCHEMA }
-          }
-        },
-        { signal }
-      )
-      if (r.status === 'incomplete') throw new Error('The summary was cut off.')
-      return parseHandoff(r.output_text)
-    }
-  }
-  const client = new Anthropic({ apiKey, ...opts, ...anthropicEndpoint() })
-  return async (evidence, signal) => {
-    const m = await client.messages.create(
-      {
-        model: HANDOFF_MODELS.claude,
-        max_tokens: HANDOFF_LIMITS.maxTokens,
-        system: HANDOFF_SYSTEM,
-        messages: [{ role: 'user', content: evidence }],
-        output_config: { format: { type: 'json_schema', schema: HANDOFF_SCHEMA } }
-      },
-      { signal }
-    )
-    if (m.stop_reason === 'refusal') throw new Error('The summary was declined.')
-    if (m.stop_reason === 'max_tokens') throw new Error('The summary was cut off.')
-    return parseHandoff(m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))
+// `system` swaps the instructions (chat notes use their own); the schema and
+// limits stay the same.
+export function handoffSummarizer(
+  provider: Provider,
+  apiKey: string,
+  system = HANDOFF_SYSTEM,
+  // Told what each call used (see usage.ts).
+  onUsage?: OnUsage,
+  schema: typeof HANDOFF_SCHEMA = HANDOFF_SCHEMA
+): HandoffSummarizer {
+  const instructions = (strict?: boolean): string =>
+    strict ? `${system}\n${STRICT_LANGUAGE}` : system
+  const adapter = adapterFor(provider)
+  return async (evidence, signal, strict) => {
+    const r = await adapter.sendMessage({
+      model: HANDOFF_MODELS[provider],
+      apiKey,
+      system: instructions(strict),
+      messages: evidence,
+      schema: { name: 'handoff', schema },
+      maxTokens: HANDOFF_LIMITS.maxTokens,
+      effort: 'low',
+      timeoutMs: HANDOFF_LIMITS.timeoutMs,
+      retries: HANDOFF_LIMITS.retries,
+      signal
+    })
+    for (const u of r.usage) onUsage?.(u.model, u.usage)
+    if (r.stop === 'refused') throw new Error('The summary was declined.')
+    if (r.stop === 'cut-off') throw new Error('The summary was cut off.')
+    if (r.stop === 'too-long') throw new Error('The chat was too long to summarize.')
+    if (r.stop === 'failed') throw new Error(`The summary failed: ${r.error ?? 'no reason given'}`)
+    return parseHandoff(r.text)
   }
 }
 
