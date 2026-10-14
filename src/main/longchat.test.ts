@@ -379,6 +379,7 @@ describe('provider history', () => {
       c,
       { id: 'cmp_1', type: 'compaction', encrypted_content: 'E1' },
       'gpt-6-astra',
+      'openai',
       1
     )
     c.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'four' }] })
@@ -410,7 +411,8 @@ describe('provider history', () => {
     recordOpenAICompaction(
       c,
       { id: 'x', type: 'compaction', encrypted_content: 'E' },
-      'gpt-6.1-sol'
+      'gpt-6.1-sol',
+      'openai'
     )
     expect(openaiStart(c, 'gpt-6.1-sol').item).toBeNull()
   })

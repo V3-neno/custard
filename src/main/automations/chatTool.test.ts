@@ -97,12 +97,15 @@ describe('closing from a chat', () => {
 })
 
 describe('where it exists', () => {
-  it('is a questions tool, in Chat and Skills only', () => {
+  it('is a questions tool, in Chat only', () => {
     expect(toolKind(questionTool.name, { isWorkspace: () => false, isWeb: () => false })).toBe(
       'questions'
     )
     expect(modePolicy('chat').tools.has('questions')).toBe(true)
-    expect(modePolicy('skills').tools.has('questions')).toBe(true)
+    // Skills chats work on one skill (or brainstorm on the hub); open
+    // questions are answered in Chat.
+    expect(modePolicy('skills').tools.has('questions')).toBe(false)
+    expect(modePolicy('skills', undefined, 'weekly-review').tools.has('questions')).toBe(false)
     expect(modePolicy('design').tools.has('questions')).toBe(false)
     expect(modePolicy('code').tools.has('questions')).toBe(false)
   })

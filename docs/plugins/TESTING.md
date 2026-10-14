@@ -73,16 +73,18 @@ It doesn't exercise the real Spotify API, a real browser sign-in or the OS sandb
 
 Run with `npm run dev` on Windows, with an API key, a vault and a Spotify Premium account. See [../SPOTIFY.md](../SPOTIFY.md) for the Spotify app setup.
 
-1. **Open the Plugins workspace and select Spotify.** Go to Code mode, choose Workspace **Plugins**, then pick **Spotify (spotify)**. The workspace line shows `Plugins · plugin/spotify` once you send.
+1. **Open the Plugins workspace and select Spotify.** Go to Plugins mode, then press the **Spotify** card. The path bar shows `All plugins › Spotify`.
 2. **Edit only its folder.**
    - Ask: "Bump the version to 1.0.1 and make the search tool's default limit 6."
    - The stages show reads and writes under `plugin/spotify` only.
    - Then ask it to read `../../src/main/index.ts` or `C:\Windows\win.ini`. Both are refused.
 3. **Validate and test without activating.**
    - Ask it to validate and test. It runs `plugin_validate` and `plugin_test` and reports the results.
-   - In Settings → Plugins, Spotify still runs the old version, or is "Not activated".
+   - `plugin_validate` also type-checks the plugin's TypeScript (strict; plugin code has no `fetch` or DOM, widgets and tests have the DOM) and lists type errors apart from validation errors. The build works without types, and review and activation don't wait on them. If the check can't run, validation says so as a note.
+   - `plugin_test` takes `file` (for example `tests/player.test.ts`) and `name` (part of a test's name) to run less; the load check is then skipped. Every result carries its time, a test that doesn't finish is failed after 10 seconds, and a run stopped at 30 seconds still reports the tests that had finished and the one that was running (a test stuck in a busy loop is named by its start, not its progress). A run in which no test ran says so and doesn't say it passed.
+   - With **Manage** on its card in Plugins mode, Spotify still runs the old version, or is "Not activated".
 4. **Review and grant permissions.**
-   - Settings → Plugins → Spotify → **Review update** (or **Review and activate** the first time).
+   - Plugins mode → Spotify → **Manage** → **Review update** (or **Review and activate** the first time).
    - Check the version change, the file diff and the permission list. Tick each new permission.
    - **Run tests** shows every check passing.
 5. **Activate and connect.**
@@ -100,7 +102,7 @@ Run with `npm run dev` on Windows, with an API key, a vault and a Spotify Premiu
    - Spotify's queue shows the songs in that order, and nothing started playing.
    - Then ask "Recommend three more like that." It answers in chat, and no approval card appears.
 10. **Disable.**
-    - Settings → Plugins → Spotify → **Disable**.
+    - Plugins mode → Spotify → **Manage** → **Disable**.
     - In the same chat, ask to queue another song. The tools are gone, and the assistant says Spotify isn't available.
     - Nothing reaches Spotify, and the plugin's Health stays quiet.
 11. **Roll back a faulty update.**
@@ -112,8 +114,5 @@ Run with `npm run dev` on Windows, with an API key, a vault and a Spotify Premiu
 Also check on Windows:
 
 - **OS sandbox.** Task Manager → Details → enable the _Command line_ column. The plugin renderer processes (`--type=renderer` with a `custard-plugin-…` partition) must not have `--no-sandbox`.
-- **General Code.**
-  - Pick a project folder and ask for a change. Files outside it are refused.
-  - Pick the Custard repository itself. A warning asks for core access. Cancel, and the folder isn't used.
 - **Write approvals.** Click **Don't allow** on a queue card. The reply says nothing was queued, and Spotify shows nothing new.
 - **Uninstall.** Afterwards Spotify shows "Not activated", the Client ID is gone, and `plugin/spotify` is still there.

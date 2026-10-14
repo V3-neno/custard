@@ -84,3 +84,12 @@ export const CheckIcon = ({ className }: IconProps): React.JSX.Element => (
     <path d="M5 12.5l4.5 4.5L19 7.5" />
   </svg>
 )
+
+// A speech bubble with an arrow pointing back: an earlier chat.
+export const ChatLinkIcon = ({ className }: IconProps): React.JSX.Element => (
+  <svg {...base} className={className}>
+    <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z" />
+    <path d="M15 12H9" />
+    <path d="M11.5 9.5 9 12l2.5 2.5" />
+  </svg>
+)

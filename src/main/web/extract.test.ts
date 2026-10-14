@@ -85,4 +85,18 @@ describe('extract', () => {
       extract(Buffer.from([0x89, 0x50, 0x00, 0x01]), undefined, 'https://x.example.com')
     ).toThrow(/binary data/)
   })
+
+  it('says how many links it did not list when a page has more than 50', () => {
+    const links = Array.from({ length: 57 }, (_, i) => `<a href="/p${i}">page ${i}</a>`).join(' ')
+    const html = `<!doctype html><html><head><title>T</title></head><body><article><p>${para}</p><p>${links}</p></article></body></html>`
+    const r = extract(Buffer.from(html), 'text/html', 'https://x.example.com/')
+    expect(r.links).toHaveLength(50)
+    expect(r.moreLinks).toBe(7)
+    const few = extract(
+      Buffer.from(`<html><body><article><p>${para}</p><a href="/a">a</a></article></body></html>`),
+      'text/html',
+      'https://x.example.com/'
+    )
+    expect(few.moreLinks).toBeUndefined()
+  })
 })

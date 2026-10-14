@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from 'fs'
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from 'fs'
 import { isAbsolute, join, relative, resolve, sep } from 'path'
 
 // Where a vault path may point. Shared by the vault tools and by Custard's
@@ -44,9 +44,46 @@ function checkLinks(vault: string, realVault: string, rel: string): void {
   }
 }
 
+// Whether the vault's file system tells "Notes" from "notes" apart. Decided
+// from the vault itself (does the same folder answer to a differently cased
+// name?), and from the platform when there is nothing to try. Folder grants
+// cover only their exact spelling where it does (see shared/vaultGrants).
+const sensitivity = new Map<string, boolean>()
+export function caseSensitiveVault(vault: string): boolean {
+  const known = sensitivity.get(vault)
+  if (known !== undefined) return known
+  let result = process.platform === 'linux'
+  try {
+    for (const name of readdirSync(vault)) {
+      const swapped = name.replace(/[a-z]/gi, (c) =>
+        c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()
+      )
+      if (swapped === name) continue
+      const a = join(vault, name)
+      const b = join(vault, swapped)
+      if (!existsSync(b)) result = true
+      else {
+        const x = statSync(a)
+        const y = statSync(b)
+        result = !(x.ino === y.ino && x.dev === y.dev)
+      }
+      sensitivity.set(vault, result)
+      break
+    }
+  } catch {
+    // Unreadable: the platform's usual answer stands, and is not remembered.
+  }
+  return result
+}
+
 export function resolveInVault(vault: string, path: unknown, mustBeNote = true): string {
   if (typeof path !== 'string' || !path.trim()) throw new VaultPathError('A path is required.')
-  const full = resolve(vault, path.trim().replace(/^[/\\]+/, ''))
+  if (path.includes('\0')) throw new VaultPathError('A path cannot contain a null character.')
+  // A backslash separates folders everywhere, so a path means the same folders to
+  // this check, to the grants and to the file system. On Linux and macOS a
+  // backslash would otherwise be a letter of a name that the grant check read
+  // as a folder boundary.
+  const full = resolve(vault, path.trim().replace(/\\/g, '/').replace(/^\/+/, ''))
   const rel = relative(vault, full)
   if (rel.startsWith('..') || isAbsolute(rel))
     throw new VaultPathError('Path is outside the vault.')
@@ -57,6 +94,10 @@ export function resolveInVault(vault: string, path: unknown, mustBeNote = true):
   // that could reach a hidden folder.
   if (parts.some((part) => part.includes(':')))
     throw new VaultPathError('":" is not allowed in note paths.')
+  // Windows drops trailing dots and spaces ("Notes." is "Notes"), so the same
+  // name would mean two folders on different systems. Refused everywhere.
+  if (parts.some((part) => /[. ]$/.test(part)))
+    throw new VaultPathError("Names can't end in a dot or a space.")
   if (parts.some((part) => /~\d/.test(part)))
     throw new VaultPathError('That looks like a Windows short name. Use the full name.')
   if (mustBeNote && !full.toLowerCase().endsWith('.md'))

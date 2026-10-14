@@ -29,6 +29,11 @@ describe('outside text', () => {
     expect(chatHasOutsideText(conv({ a: act('web_read', 'not-run') }))).toBe(false)
     expect(chatHasOutsideText(conv({ a: act('web_read', 'pending') }))).toBe(false)
   })
+  it('counts notes it cannot vouch for, and captures made from outside text', () => {
+    expect(chatHasOutsideText({ outside: ['notes'] } as never)).toBe(true)
+    expect(chatHasOutsideText({ outside: ['memory'] } as never)).toBe(true)
+    expect(chatHasOutsideText({ outside: [] } as never)).toBe(false)
+  })
   it('counts a continued chat, which carries earlier text', () => {
     expect(chatHasOutsideText(conv({}, 'c1'))).toBe(true)
   })
