@@ -13,7 +13,7 @@ import type { ListedModel } from '../../../../shared/adapter'
 import { providerIds, providerNames } from '../../../../shared/providers'
 import { REASONS } from '../chat/modelText'
 import type { PluginStatus } from '../../../../shared/plugins'
-import type { VaultGrant } from '../../../../shared/vaultGrants'
+import { grantLabel, type VaultGrant } from '../../../../shared/vaultGrants'
 import { cleanError, danger, input, primary, secondary } from './ui'
 
 const when = (t: number): string =>
@@ -528,7 +528,7 @@ export default function Automations(): React.JSX.Element {
                   checked={form.folders.includes(g.folder)}
                   onChange={() => setForm({ ...form, folders: toggle(form.folders, g.folder) })}
                 />
-                {g.folder}/ ({g.mode})
+                {g.folder}/ ({grantLabel(g.mode)})
               </label>
             ))}
           </fieldset>
