@@ -171,6 +171,12 @@ try {
     `the model picker lists DeepSeek's models (${options.join(', ')})`
   )
   await w.click('[data-pick=deepseek-flash]')
+  // The tint follows on the next render, so wait for it rather than read once.
+  await w
+    .waitForFunction(() => document.documentElement.dataset.provider === 'deepseek', null, {
+      timeout: 5000
+    })
+    .catch(() => {})
   check(
     (await w.evaluate(() => document.documentElement.dataset.provider)) === 'deepseek',
     'the app follows the DeepSeek tint'

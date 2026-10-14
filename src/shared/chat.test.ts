@@ -4,10 +4,12 @@ import {
   chatSettingsOf,
   deepseekEffort,
   deepseekEfforts,
+  effortChoices,
   efforts,
   isChatModel,
   isEffort,
   isMode,
+  shownEffort,
   modes,
   type Conversation
 } from './chat'
@@ -84,5 +86,25 @@ describe('DeepSeek effort', () => {
 
   it('any other level is Balanced', () => {
     expect(efforts.map(deepseekEffort)).toEqual(['low', 'high', 'high', 'high', 'max'])
+  })
+})
+
+describe('effort buttons in the model picker', () => {
+  it('Claude and OpenAI show every level as it is sent', () => {
+    for (const p of ['claude', 'openai'] as const) {
+      expect(effortChoices(p).map((e) => [e.label, e.effort])).toEqual([
+        ['Low', 'low'],
+        ['Medium', 'medium'],
+        ['High', 'high'],
+        ['X-High', 'xhigh'],
+        ['Max', 'max']
+      ])
+      expect(efforts.map((e) => shownEffort(p, e))).toEqual(efforts)
+    }
+  })
+
+  it('DeepSeek shows its own three, and any other level as Balanced', () => {
+    expect(effortChoices('deepseek')).toBe(deepseekEfforts)
+    expect(shownEffort('deepseek', 'medium')).toBe('high')
   })
 })

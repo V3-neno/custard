@@ -91,6 +91,24 @@ export const deepseekEfforts: { effort: Effort; label: string }[] = [
 // xhigh are DeepSeek aliases of high anyway).
 export const deepseekEffort = (e: Effort): Effort => (e === 'low' || e === 'max' ? e : 'high')
 
+// The effort buttons the model picker shows for a provider, and the value
+// each one stores and sends. Claude and OpenAI take every level as it is;
+// DeepSeek has its own three (above).
+const EFFORT_LABELS: Record<Effort, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'X-High',
+  max: 'Max'
+}
+export const effortChoices = (provider: Provider): { effort: Effort; label: string }[] =>
+  provider === 'deepseek'
+    ? deepseekEfforts
+    : efforts.map((effort) => ({ effort, label: EFFORT_LABELS[effort] }))
+// The level a provider's buttons show as picked for a stored effort.
+export const shownEffort = (provider: Provider, e: Effort): Effort =>
+  provider === 'deepseek' ? deepseekEffort(e) : e
+
 // Whether a model can be picked now, from what Custard already knows (the
 // saved keys and the last Save/Refresh check). Asking costs no request.
 //   no-key: the provider's key isn't saved.

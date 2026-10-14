@@ -86,7 +86,7 @@ The picker offers Custard's levels. What goes on the wire is decided per provide
 
 - Claude: `output_config.effort`, only for models with `effort: true`.
 - Responses: `reasoning.effort`, through `effortFor` in `responses.ts`. DeepSeek's levels go through `deepseekEffort` in `src/shared/chat.ts`.
-- A provider with its own level names needs a mapping like `deepseekEffort` and, today, edits in three places that branch on `'deepseek'` by name: `responses.ts` (`effortFor`), `ModelPicker.tsx` and `SettingsDialog.tsx` (labels). See wrinkles in [providers.md](providers.md#known-wrinkles).
+- A provider with its own level names needs a mapping like `deepseekEffort` and, today, edits in three places that branch on `'deepseek'` by name: `responses.ts` (`effortFor`), `effortChoices` in `src/shared/chat.ts` (the picker's buttons) and `SettingsDialog.tsx` (labels). See wrinkles in [providers.md](providers.md#known-wrinkles).
 - Map only to levels the provider documents. When the docs and the API's own list disagree, ask (Neno's rule for DeepSeek: map to the documented values).
 
 ### 8. Web search
@@ -165,7 +165,7 @@ Not built. Official docs read on 2026-10-14. **Checked** means read on the cited
 
 1. **The address.** It holds a region and a workspace id, and keys only work in their region. Custard pins one official address per provider and never takes one from Settings, so either one region and workspace form is pinned (only works for keys from that region, and the workspace id still has to come from somewhere), or `ENDPOINTS` and Settings learn a region choice from a fixed list. This is a decision for Neno before building.
 2. **The key check.** No documented model list, so `listRaw` can't be `GET /models`. Options: try `GET /models` live and keep it if it works, or a minimal Responses call (costs tokens on each Save/Refresh).
-3. **Effort.** Qwen's levels differ per model (Qwen 3.8: none, low, medium, xhigh). A mapping like `deepseekEffort`, and the three name branches (`responses.ts`, `ModelPicker.tsx`, `SettingsDialog.tsx`), which are better replaced by profile data first.
+3. **Effort.** Qwen's levels differ per model (Qwen 3.8: none, low, medium, xhigh). A mapping like `deepseekEffort`, and the three name branches (`responses.ts`, `effortChoices` in `shared/chat.ts`, `SettingsDialog.tsx`), which are better replaced by profile data first.
 4. **Structured output for summaries.** Captures, chat notes and Continue send `text.format: json_schema`. That is undocumented on Qwen's Responses API, and unsupported in Singapore even on Chat Completions. Until a live test shows it works, Qwen chats' summaries would fail (safely: nothing is written). A fallback means a JSON-in-prompt path in `sendMessage`.
 5. **Web search.** The flag would offer `web_search`, and `searchOpenAI` parses OpenAI's `web_search_call` items and citation annotations. Whether Qwen's results have the same shape is assumed, not checked. Leave the flag off until a live search is recorded.
 6. **Too-long and refusal.** `isContextError` matches OpenAI's wording; Qwen's is unknown. How Qwen declines (a refusal part or plain text) is unknown.

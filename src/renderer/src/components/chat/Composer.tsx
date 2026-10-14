@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  chatModels,
-  efforts,
-  type ChatSettings,
-  type Effort,
-  type ModelAvailability
-} from '../../../../shared/chat'
+import type { ChatSettings, ModelAvailability } from '../../../../shared/chat'
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from '../icons'
 import type { DraftAttachment } from '../../../../shared/attachments'
 import { DraftFiles } from './Attachments'
@@ -60,7 +54,6 @@ function Composer(props: Props): React.JSX.Element {
   const hasFiles = !!files?.items.length
   const canSend = !busy && !blocked && !files?.adding && (!!draft.trim() || hasFiles)
   const input = useRef<HTMLTextAreaElement>(null)
-  const model = chatModels.find((m) => m.id === settings.model)
   const submit = (): void => {
     if (canSend) onSend(draft)
   }
@@ -158,21 +151,6 @@ function Composer(props: Props): React.JSX.Element {
           onPick={onSettings}
           openSignal={pickerSignal}
         />
-        {/* DeepSeek's three levels are in the picker. */}
-        {model?.effort && model.provider !== 'deepseek' && (
-          <select
-            className={chip}
-            value={settings.effort}
-            onChange={(e) => onSettings({ ...settings, effort: e.target.value as Effort })}
-            title="Effort: how hard the model thinks"
-          >
-            {efforts.map((e) => (
-              <option key={e} value={e}>
-                {e} effort
-              </option>
-            ))}
-          </select>
-        )}
         {meter}
         <div className="ml-auto">
           {busy ? (

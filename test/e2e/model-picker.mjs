@@ -189,17 +189,38 @@ try {
 
   step('The picker: a tab per provider, its models in each')
   check(
-    (await chip().innerText()) === 'Opus 5.5',
-    `a new chat starts on Opus 5.5 (${await chip().innerText()})`
+    (await chip().innerText()) === 'Opus 5.5 · Medium',
+    `a new chat starts on Opus 5.5, Medium effort (${await chip().innerText()})`
   )
   check(!(await w.locator('select[title=Model]').count()), 'the old 8-model list is gone')
   await openPicker()
   const tabs = await w.locator(`${panel} [role=tab]`).allInnerTexts()
   check(JSON.stringify(tabs) === '["Claude","OpenAI","DeepSeek"]', `tabs: ${tabs.join(', ')}`)
   const claude = await labels()
+  const claudeEfforts = w.locator('[data-effort="claude"] button')
+  check(
+    JSON.stringify(await claudeEfforts.allInnerTexts()) ===
+      '["Low","Medium","High","X-High","Max"]',
+    'Claude has Low, Medium, High, X-High and Max in the picker'
+  )
+  check(
+    (await w.locator('[data-effort="claude"] button[aria-pressed=true]').innerText()) === 'Medium',
+    'Medium is shown as picked'
+  )
   await w.screenshot({ path: `${SHOTS}/picker-01-claude-tab.png` })
   await tab('OpenAI')
   const openai = await labels()
+  check(
+    JSON.stringify(await w.locator('[data-effort="openai"] button').allInnerTexts()) ===
+      '["Low","Medium","High","X-High","Max"]',
+    'OpenAI has the same five levels'
+  )
+  check(
+    (await w
+      .locator('[data-effort="openai"] button')
+      .evaluateAll((bs) => bs.every((b) => b.disabled))) === true,
+    'they wait until an OpenAI model is picked'
+  )
   await tab('DeepSeek')
   const deepseek = await labels()
   check(
@@ -214,7 +235,7 @@ try {
     JSON.stringify(deepseek) === '["DeepSeek V4 Pro","DeepSeek Flash"]',
     `DeepSeek: ${deepseek.join(', ')}`
   )
-  const efforts = w.locator('[data-deepseek-effort] button')
+  const efforts = w.locator('[data-effort="deepseek"] button')
   check(
     JSON.stringify(await efforts.allInnerTexts()) === '["Fast","Balanced","Thorough"]',
     'DeepSeek has Fast, Balanced and Thorough'
@@ -224,8 +245,46 @@ try {
     'they wait until a DeepSeek model is picked'
   )
 
+  step('Claude and OpenAI effort in the same panel: Max sends output_config.effort "max"')
+  const beforeClaude = seen.length
+  await openPicker()
+  await tab('Claude')
+  await w.click('[data-effort="claude"] button:text-is("Max")')
+  check(
+    (await chip().innerText()) === 'Opus 5.5 · Max',
+    `the chip says Max (${await chip().innerText()})`
+  )
+  await w.click('[data-pick="claude-haiku-4-5"]')
+  check((await chip().innerText()) === 'Haiku 4.5', 'Haiku 4.5 shows no effort')
+  await openPicker()
+  await tab('Claude')
+  check(
+    (await w.locator('[data-effort="claude"] p').innerText()) ===
+      "Haiku 4.5 doesn't take an effort level" &&
+      (await w
+        .locator('[data-effort="claude"] button')
+        .evaluateAll((bs) => bs.every((b) => b.disabled))) === true,
+    'for Haiku 4.5 the levels are greyed out and say why'
+  )
+  await w.click('[data-pick="claude-opus-5-5"]')
+  check(
+    (await chip().innerText()) === 'Opus 5.5 · Max',
+    `back on Opus 5.5 the level is kept (${await chip().innerText()})`
+  )
+  check(seen.length === beforeClaude, 'no request while picking')
+  const maxTurn = await sendText('claude max test')
+  check(
+    maxTurn?.who === 'anthropic' && maxTurn.body.output_config?.effort === 'max',
+    `Opus 5.5 gets output_config.effort ${JSON.stringify(maxTurn?.body.output_config?.effort)}`
+  )
+  await w.waitForSelector('text=Claude answered.')
+  await w.locator('button[title]:text-is("Chat")').click()
+  await w.waitForSelector('textarea')
+
   step('Picking DeepSeek Flash and Thorough sends nothing')
   const before = seen.length
+  await openPicker()
+  await tab('DeepSeek')
   await w.click('[data-pick="deepseek-flash"]')
   check(
     (await chip().innerText()) === 'DeepSeek Flash · Balanced',
@@ -237,11 +296,11 @@ try {
   )
   check(
     !(await w.locator('select[title^="Effort"]').count()),
-    'no separate effort list for DeepSeek: it is in the picker'
+    'no separate effort list: it is in the picker'
   )
   await openPicker()
   await tab('DeepSeek')
-  await w.click('[data-deepseek-effort] button:text-is("Thorough")')
+  await w.click('[data-effort="deepseek"] button:text-is("Thorough")')
   check(
     (await chip().innerText()) === 'DeepSeek Flash · Thorough',
     `the chip says Thorough (${await chip().innerText()})`
@@ -283,12 +342,12 @@ try {
   step('Each Balanced and Fast send high and low')
   await pick('DeepSeek', 'deepseek-flash')
   await openPicker()
-  await w.click('[data-deepseek-effort] button:text-is("Balanced")')
+  await w.click('[data-effort="deepseek"] button:text-is("Balanced")')
   await w.keyboard.press('Escape')
   const balanced = await sendText('balanced test')
   await openPicker()
   await tab('DeepSeek')
-  await w.click('[data-deepseek-effort] button:text-is("Fast")')
+  await w.click('[data-effort="deepseek"] button:text-is("Fast")')
   await w.keyboard.press('Escape')
   const fast = await sendText('fast test')
   check(
@@ -408,7 +467,7 @@ try {
   await w.click('text=switch test one')
   await w.waitForSelector('text=OpenAI answered.')
   check(
-    (await chip().innerText()) === 'GPT-6 Astra',
+    (await chip().innerText()) === 'GPT-6 Astra · High',
     `an older chat keeps its own model (${await chip().innerText()})`
   )
 
@@ -517,7 +576,7 @@ try {
       s.body.stream === undefined && !s.path.includes('/messages') && !s.path.includes('/responses')
   )
   check(!stray.length, `no model lists or checks (${stray.map((s) => s.path)})`)
-  check(turns().length === 8, `8 messages, 8 turn requests (${turns().length})`)
+  check(turns().length === 9, `9 messages, 9 turn requests (${turns().length})`)
   check(!errors.length, `no page errors (${errors.join('; ')})`)
 } finally {
   await app.close()

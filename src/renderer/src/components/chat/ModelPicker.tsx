@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   chatModels,
-  deepseekEffort,
-  deepseekEfforts,
+  effortChoices,
+  shownEffort,
   type ChatSettings,
   type ModelAvailability
 } from '../../../../shared/chat'
@@ -11,8 +11,8 @@ import { providerIds, providerNames, type Provider } from '../../../../shared/pr
 
 // The model picker under the message box: the chat's model as a chip, and a
 // panel with a tab per provider, each provider's models (greyed out with the
-// reason when they can't be used now) and, for DeepSeek, its three effort
-// levels. Picking changes only what the next message is sent to; nothing is
+// reason when they can't be used now) and that provider's effort levels
+// (DeepSeek's are its own three). Picking changes only what the next message is sent to; nothing is
 // asked of any provider.
 
 type Props = {
@@ -63,7 +63,7 @@ function ModelPicker({
   const pick = (id: ChatSettings['model'], provider: Provider): void => {
     onPick({
       model: id,
-      effort: provider === 'deepseek' ? deepseekEffort(settings.effort) : settings.effort
+      effort: shownEffort(provider, settings.effort)
     })
     setOpen(false)
   }
@@ -140,37 +140,37 @@ function ModelPicker({
                 )
               })}
           </ul>
-          {tab === 'deepseek' && (
-            <div className="mt-2 border-t border-forge-700 pt-2" data-deepseek-effort>
-              <p className="mb-1 text-xs text-ash-400">
-                {current?.provider === 'deepseek'
+          <div className="mt-2 border-t border-forge-700 pt-2" data-effort={tab}>
+            <p className="mb-1 text-xs text-ash-400">
+              {current?.provider !== tab
+                ? `Effort: pick a ${providerNames[tab]} model first`
+                : current.effort
                   ? `Effort for ${current.label}`
-                  : 'Effort: pick a DeepSeek model first'}
-              </p>
-              <div className="flex gap-1">
-                {deepseekEfforts.map((e) => {
-                  const on =
-                    current?.provider === 'deepseek' && deepseekEffort(settings.effort) === e.effort
-                  return (
-                    <button
-                      key={e.effort}
-                      type="button"
-                      aria-pressed={on}
-                      disabled={current?.provider !== 'deepseek'}
-                      onClick={() => onPick({ model: settings.model, effort: e.effort })}
-                      className={`flex-1 rounded-full border px-2 py-1 text-xs disabled:opacity-40 ${
-                        on
-                          ? 'border-molten-500/60 text-molten-200'
-                          : 'border-forge-700 text-ash-300 hover:text-molten-200'
-                      }`}
-                    >
-                      {e.label}
-                    </button>
-                  )
-                })}
-              </div>
+                  : `${current.label} doesn't take an effort level`}
+            </p>
+            <div className="flex gap-1">
+              {effortChoices(tab).map((e) => {
+                const usable = current?.provider === tab && current.effort
+                const on = usable && shownEffort(tab, settings.effort) === e.effort
+                return (
+                  <button
+                    key={e.effort}
+                    type="button"
+                    aria-pressed={!!on}
+                    disabled={!usable}
+                    onClick={() => onPick({ model: settings.model, effort: e.effort })}
+                    className={`flex-1 rounded-full border px-1.5 py-1 text-xs disabled:opacity-40 ${
+                      on
+                        ? 'border-molten-500/60 text-molten-200'
+                        : 'border-forge-700 text-ash-300 hover:text-molten-200'
+                    }`}
+                  >
+                    {e.label}
+                  </button>
+                )
+              })}
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>

@@ -1,7 +1,7 @@
 import {
   chatModels,
-  deepseekEffort,
-  deepseekEfforts,
+  effortChoices,
+  shownEffort,
   type ChatSettings,
   type ModelAvailability
 } from '../../../../shared/chat'
@@ -13,11 +13,12 @@ export const REASONS: Record<NonNullable<ModelAvailability['reason']>, (p: strin
   removed: () => "Your key can't use this model."
 }
 
-// The model chip: "Opus 5.5", or for DeepSeek "DeepSeek Flash · Balanced".
+// The model chip with its effort: "Opus 5.5 · High", "DeepSeek Flash ·
+// Balanced", or just "Haiku 4.5" for a model that takes none.
 export const modelLabel = (s: ChatSettings): string => {
   const m = chatModels.find((x) => x.id === s.model)
   if (!m) return s.model
-  if (m.provider !== 'deepseek') return m.label
-  const e = deepseekEfforts.find((x) => x.effort === deepseekEffort(s.effort))
-  return `${m.label} · ${e?.label ?? 'Balanced'}`
+  if (!m.effort) return m.label
+  const e = effortChoices(m.provider).find((x) => x.effort === shownEffort(m.provider, s.effort))
+  return e ? `${m.label} · ${e.label}` : m.label
 }
