@@ -71,7 +71,7 @@ try {
   await w.click('button:text-is("Cancel")')
 
   await w.fill('input[aria-label="Folder to allow"]', 'Notes')
-  await w.click(`[role=radiogroup][aria-label="What Claude may do there"] [data-value="append"]`)
+  await w.click('[role=group][aria-label="What Claude may do there"] button[data-mode=append]')
   await w.click('button:text-is("Allow")')
   await w.waitForSelector('ul[aria-label="Editable folders"] >> text=Notes/')
 

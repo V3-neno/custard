@@ -8,7 +8,8 @@ temporary folder and by an end-to-end test against a mock provider.
 **Editing existing notes: only in folders the user allows (2026-10-12).**
 By default the model can only create new notes, and each one needs the user's
 approval. In Settings → Obsidian vault → **Editable folders** the user can allow
-a folder with a mode: create, append or edit. Inside it, Claude changes notes
+a folder with a level: New notes (`create`), Add to end (`append`) or Edit
+text (`edit`). Inside it, Claude changes notes
 without a card for each change. Nothing is ever overwritten wholesale, renamed
 or deleted. See "Editing in allowed folders" below.
 
@@ -173,6 +174,14 @@ folders can be allowed is the user's choice: core has no list. Modes nest:
 - **append**: also add text to the end of an existing note (`vault_append`);
 - **edit**: also change an existing note in place (`vault_edit`).
 
+In Settings each level is a pill button, and the line under the picked one
+says what it includes. A folder's row has the same buttons, so its level is
+changed in place with one click (saved at once, no confirmation). The add row
+goes back to Add to end after every Allow, accepted or refused. A folder typed
+with trailing dots or spaces (`Notes.`) is the same folder as `Notes`.
+`settings.json` still stores one `{ folder, mode }` per folder, with the mode
+ids above; the automation form shows the same level names.
+
 The most specific folder wins. `vault_append` and `vault_edit` are offered
 only when some folder allows them, and a call outside every allowed folder is
 refused with nothing written. The path is checked as given and where it really
@@ -297,7 +306,7 @@ the same turn.
 - nothing in the vault changes.
 
 **Editing** (`src/main/vault/edit.test.ts`, `src/shared/vaultGrants.test.ts`,
-`test/e2e/vault-edit.mjs`): grants and protected places, every edit type,
+`test/e2e/vault-edit.mjs`, `test/e2e/folder-levels.mjs`): grants and protected places, every edit type,
 atomic failure, stale version, frontmatter, links, limits, records and undo; and
 in the app, no card inside an allowed folder, refusal outside, Settings add and
 remove, Recent changes and Undo, and the outside-text rule (cards with the diff

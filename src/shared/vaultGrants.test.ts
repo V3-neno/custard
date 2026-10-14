@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   anyGrantAllows,
+  cleanFolderInput,
+  folderKey,
+  GRANT_MODES,
   grantFor,
+  grantLabel,
   modeAllows,
   normalizeGrants,
   placeKind,
@@ -152,4 +156,88 @@ describe('separators and case', () => {
     expect(placeKind('Custard/Plugins/Spotify/Listening/a.md')).toBeNull()
     expect(placeKind('Projects/a.md')).toBeNull()
   })
+})
+
+describe('levels in Settings', () => {
+  it('lists the levels from narrowest to widest, each help line saying what it includes', () => {
+    expect(GRANT_MODES.map((m) => [m.id, m.label])).toEqual([
+      ['create', 'New notes'],
+      ['append', 'Add to end'],
+      ['edit', 'Edit text']
+    ])
+    for (let i = 1; i < GRANT_MODES.length; i++)
+      expect(modeAllows(GRANT_MODES[i].id, GRANT_MODES[i - 1].id)).toBe(true)
+    expect(GRANT_MODES[2].help).toMatch(/adding to the end/)
+    expect(GRANT_MODES[1].help).toMatch(/New notes/)
+  })
+  it('names a mode by its level', () => {
+    expect(grantLabel('create')).toBe('New notes')
+    expect(grantLabel('append')).toBe('Add to end')
+    expect(grantLabel('edit')).toBe('Edit text')
+  })
+  it('an edit grant covers append and create on the same folder', () => {
+    const grants = [g('Notes', 'edit')]
+    const mode = grantFor(grants, 'Notes/a.md')
+    expect(mode).toBe('edit')
+    expect(modeAllows(mode!, 'append')).toBe(true)
+    expect(modeAllows(mode!, 'create')).toBe(true)
+    expect(anyGrantAllows(grants, 'append')).toBe(true)
+  })
+})
+
+describe('folders typed in Settings', () => {
+  it('compares folders the way the saved list does', () => {
+    expect(folderKey('Notes.')).toBe(folderKey('notes'))
+    expect(folderKey('Projects/Notes ')).toBe(folderKey('projects/notes'))
+    expect(folderKey('Notes')).not.toBe(folderKey('Notes2'))
+  })
+  it('drops trailing dots and spaces from each name, and tidies separators', () => {
+    expect(cleanFolderInput('Notes.')).toBe('Notes')
+    expect(cleanFolderInput(' Projects. /Notes.. ')).toBe(' Projects/Notes')
+    expect(cleanFolderInput('a\\b//c/')).toBe('a/b/c')
+  })
+  it('keeps "." and ".." as typed, so they are still refused', () => {
+    expect(cleanFolderInput('../outside')).toBe('../outside')
+    expect(cleanFolderInput('a/./b')).toBe('a/./b')
+    expect(cleanFolderInput('...')).toBe('...')
+    for (const f of ['../outside', 'a/./b', '...', '.hidden.'])
+      expect(normalizeGrants([{ folder: cleanFolderInput(f), mode: 'edit' }]).grants).toEqual([])
+  })
+})
+
+describe('old or bad stored values grant no more than before', () => {
+  it('a mode that is not exactly create, append or edit grants nothing', () => {
+    const r = normalizeGrants([
+      { folder: 'A', mode: 'Edit' },
+      { folder: 'B', mode: ['append', 'edit'] },
+      { folder: 'C', mode: 'edit+append' },
+      { folder: 'D', mode: { append: true, edit: true } },
+      { folder: 'E' },
+      { folder: 'F', mode: 2 }
+    ])
+    expect(r.grants).toEqual([])
+    expect(r.dropped).toBe(6)
+  })
+  it('a stored "Notes." keeps its old reach: covered without case, not with it', () => {
+    const grants = normalizeGrants([{ folder: 'Notes.', mode: 'edit' }]).grants
+    expect(grants).toEqual([{ folder: 'Notes.', mode: 'edit' }])
+    expect(grantFor(grants, 'Notes/a.md')).toBe('edit')
+    expect(grantFor(grants, 'Notes/a.md', true)).toBeNull()
+  })
+})
+
+describe('protected places, at every level', () => {
+  const places = [
+    'Custard/Memory.md',
+    'Custard/Skills/x/SKILL.md',
+    'Custard/Captures/c.md',
+    'Custard/Chats/c.md',
+    'Custard/Plugins/Spotify/Activity/a.md',
+    'Custard/Plugins/Spotify/Overview.md'
+  ]
+  for (const mode of ['create', 'append', 'edit'] as const)
+    it(`a parent grant at ${mode} covers none of them`, () => {
+      for (const parent of ['Custard', 'Custard/Plugins', 'Custard/Plugins/Spotify'])
+        for (const p of places) expect(grantFor([g(parent, mode)], p)).toBeNull()
+    })
 })
