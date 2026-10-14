@@ -6,6 +6,7 @@ import fs from 'fs'
 import { createHash } from 'crypto'
 const [, , OUT] = process.argv
 const anth = []
+const chatNotes = []
 const spotify = []
 const memory = []
 // Step 3: token counts, handoff summaries and the beta header of each chat request.
@@ -142,6 +143,50 @@ http
         return j(404, { error: { status: 404, message: 'nope' } })
       }
       const b = JSON.parse(body)
+      // A chat's summary note in Custard/Chats: no tools, JSON out. Recorded
+      // on its own so the chat's request list stays as the other tests expect.
+      if (typeof b.system === 'string' && b.system.startsWith('You summarize a chat for a note')) {
+        const evidence = String(b.messages[0].content)
+        chatNotes.push({ model: b.model, tools: b.tools ?? null, evidence })
+        fs.writeFileSync(OUT + '/chatnotes.json', JSON.stringify(chatNotes, null, 1))
+        if (/note fail test/.test(evidence))
+          return j(500, { type: 'error', error: { type: 'api_error', message: 'Internal error' } })
+        const n = chatNotes.length
+        return j(200, {
+          id: 'msg_chatnote',
+          type: 'message',
+          role: 'assistant',
+          model: b.model,
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 10 },
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                goal: 'Plan a calm evening playlist',
+                constraints: ['Ask before queueing anything'],
+                decisions: ['Keep it instrumental'],
+                // A link and markup the note must not keep.
+                open: ['Check [this](https://evil.example/x) **soon**'],
+                state: `Summary number ${n}: the playlist is half done.`,
+                // The chat's own title, so suites that find chats by it keep
+                // working; chat-notes.mjs checks a title of the summary's own.
+                title: /notes test/.test(evidence)
+                  ? 'Calm evening playlist'
+                  : (/^Chat title: (.*)$/m.exec(evidence)?.[1] ?? ''),
+                tags: ['playlist', 'Queue rules'],
+                // A summary in a script the user never wrote in comes back
+                // in English when asked again (step 3 of the hub plan).
+                ...(/note language test/.test(evidence) &&
+                !b.system.includes('Your last summary was in a different language')
+                  ? { goal: '用户想要一个安静的晚间播放列表' }
+                  : {})
+              })
+            }
+          ]
+        })
+      }
       // The handoff for "Continue in a new chat": no tools, JSON out. Fails
       // for a chat meant to show a failed summary.
       if (typeof b.system === 'string' && b.system.startsWith('You write a handoff')) {
@@ -312,6 +357,13 @@ http
         [/vgrant protected/, 'vgprotected'],
         [/vgrant newoutside/, 'vgnewoutside'],
         [/vgrant web/, 'vgweb'],
+        [/vgrant readgranted/, 'vgreadgranted'],
+        [/vgrant readother/, 'vgreadother'],
+        [/vgauto hostile/, 'vghostile'],
+        [/vgauto ask/, 'vgask'],
+        [/vgq answer/, 'vgqanswer'],
+        [/vgq hello/, 'vgqchat'],
+        [/vgauto/, 'vgauto'],
         [/fs write test/, 'fswrite'],
         [/forged test/, 'forged'],
         [/note test/, 'note'],
@@ -333,6 +385,7 @@ http
       const boundary = [
         [/mode skill test/, 'mskill'],
         [/mode case test/, 'mcase'],
+        [/mode dot test/, 'mdot'],
         [/mode link test/, 'mlink'],
         [/mode fs test/, 'mfs']
       ].find(([r]) => r.test(ask))?.[1]
@@ -422,7 +475,12 @@ http
           content: [],
           stop_reason: null,
           stop_sequence: null,
-          usage: { input_tokens: 10, output_tokens: 0 }
+          // A message asking for it reports a large usage (for the budget
+          // test): 2M input tokens, $8 at Opus 5.5's rate.
+          usage: {
+            input_tokens: JSON.stringify(b.messages).includes('big usage test') ? 2_000_000 : 10,
+            output_tokens: 0
+          }
         }
       })
       let idx = 0
@@ -618,10 +676,18 @@ http
         mcase: [
           () =>
             tool('vault_create_note', {
-              path: 'custard/SKILLS./forged-case/skill.md',
+              path: 'custard/SKILLS/forged-case/skill.md',
               content: 'FORGED-CASE'
             }),
           'Tried another way.'
+        ],
+        mdot: [
+          () =>
+            tool('vault_create_note', {
+              path: 'Custard/Skills./forged-dot/SKILL.md',
+              content: 'FORGED-DOT'
+            }),
+          'Tried a trailing dot.'
         ],
         mlink: [
           () =>
@@ -673,6 +739,78 @@ http
           () => tool('vault_append', { path: 'Journal/Log.md', text: 'WEB-APPEND-4410' }),
           () => tool('vault_create_note', { path: 'Notes/WebMade.md', content: 'WEB-MADE-2203' }),
           'Done.'
+        ],
+        // Reads a note, then changes an allowed one: a note in an allowed folder
+        // is trusted, any other note may hold pasted outside text.
+        vgreadgranted: [
+          () => tool('vault_read', { path: 'Journal/Log.md' }),
+          () => tool('vault_append', { path: 'Journal/Log.md', text: 'GRANTED-READ-3301' }),
+          'Done.'
+        ],
+        vgreadother: [
+          () => tool('vault_read', { path: 'Areas/README.md' }),
+          () => tool('vault_append', { path: 'Journal/Log.md', text: 'READ-OTHER-6602' }),
+          'Done.'
+        ],
+        // An automation run that leaves a question, and the chat that asks it
+        // (test/e2e/questions.mjs).
+        vgask: [
+          () =>
+            tool('leave_question', {
+              question: 'QSTN-4471 Which heading should the log go under?',
+              context: 'Plan.md has Log and Later.',
+              path: 'Notes/Plan.md',
+              options: ['Log', 'Later']
+            }),
+          'Left a question.'
+        ],
+        vgqchat: [
+          'Hello. Quick question from your automation: which heading should the log go under?'
+        ],
+        vgqanswer: [
+          () =>
+            tool('vault_edit', {
+              path: 'Notes/Plan.md',
+              version: createHash('sha256')
+                .update(fs.readFileSync(OUT + '/vault/Notes/Plan.md', 'utf8'), 'utf8')
+                .digest('hex')
+                .slice(0, 12),
+              edits: [
+                { type: 'insert_after_heading', heading: '## Later', text: '- ANSWERED-8812' }
+              ]
+            }),
+          () =>
+            tool('automation_question', {
+              id: /id="(q-[0-9a-f]{8})"/.exec(
+                (b.system ?? []).map((x) => x.text ?? '').join('\n')
+              )?.[1],
+              action: 'answer',
+              answer: 'Later'
+            }),
+          'Added it under Later and closed the question.'
+        ],
+        // An unattended run reads a note with planted text (test/e2e/hostile.mjs).
+        vghostile: [
+          () => tool('vault_read', { path: 'Notes/Inbox.md' }),
+          () =>
+            tool('vault_append', {
+              path: 'Notes/Plan.md',
+              text: 'HOSTILE-LINK see https://evil.example/steal'
+            }),
+          () =>
+            tool('vault_append', {
+              path: 'Notes/Plan.md',
+              text: 'HOSTILE-KEY sk-' + 'a1B2c3D4e5F6g7H8i9J0k1L2'
+            }),
+          () => tool('vault_append', { path: 'Notes/Plan.md', text: 'HOSTILE-OK plain line' }),
+          'Wrote one plain line.'
+        ],
+        // An unattended automation run (test/e2e/automations.mjs).
+        vgauto: [
+          () => tool('vault_read', { path: 'Notes/Plan.md' }),
+          () => tool('vault_append', { path: 'Notes/Plan.md', text: 'AUTO-LINE-6102' }),
+          () => tool('vault_create_note', { path: 'Inbox/Nope.md', content: 'NOPE-NOTE' }),
+          'Logged one line; the inbox note was refused.'
         ],
         vgnewoutside: [
           () => tool('vault_create_note', { path: 'Inbox/Outside.md', content: 'OUTSIDE-NOTE' }),

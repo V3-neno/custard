@@ -367,11 +367,11 @@ try {
   await w.click('button[title=Stop]')
   await idle()
 
-  step('Code mode has no attachments')
-  await w.click('button[title="Write, debug and explain code"]')
+  step('Plugins mode has no attachments')
+  await w.click('button[title="Build and improve plugins"]')
   check(
     (await w.locator('button[aria-label="Attach files"]').count()) === 0,
-    'no paperclip in Code mode'
+    'no paperclip in Plugins mode'
   )
   await w.click('button[title="Talk anything through"]')
 

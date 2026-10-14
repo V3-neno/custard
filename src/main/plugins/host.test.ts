@@ -4,9 +4,12 @@ import { join, resolve } from 'path'
 import vm from 'vm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  cutResult,
+  widgetData,
   PluginHost,
   type ApprovalRequest,
   type RuntimeFactory,
+  type TestRunner,
   type ToolOutcome,
   type ToolSnapshot
 } from './host'
@@ -32,6 +35,9 @@ type Bridge = {
 }
 
 let runtimeStarts = 0
+let testRunnerOverride: TestRunner | null = null
+let typecheckCalls: unknown[][] = []
+let typecheckResult: string[] | Error = []
 let exits: ((reason: string) => void)[] = []
 
 const vmRuntime: RuntimeFactory = async ({ code, onCap, onExit }) => {
@@ -250,6 +256,9 @@ beforeEach(() => {
   net = []
   netRoute = () => ({ status: 200, headers: {}, body: 'ok' })
   runtimeStarts = 0
+  testRunnerOverride = null
+  typecheckCalls = []
+  typecheckResult = []
   exits = []
   ask = true
   browser = () => {}
@@ -259,10 +268,19 @@ beforeEach(() => {
     sdkDir: SDK,
     store,
     runtime: vmRuntime,
-    testRunner: async (code) => {
-      const ctx = vm.createContext({ setTimeout, console, AbortController, URL })
+    testRunner: async (code, o) => {
+      if (testRunnerOverride) return testRunnerOverride(code, o)
+      const ctx = vm.createContext({ setTimeout, clearTimeout, console, AbortController, URL })
       vm.runInContext(code, ctx)
-      return vm.runInContext('globalThis.__custardRunTests()', ctx)
+      return vm.runInContext(
+        `globalThis.__custardRunTests(${JSON.stringify(o?.name ?? null)})`,
+        ctx
+      )
+    },
+    typecheck: async (...a) => {
+      typecheckCalls.push(a)
+      if (typecheckResult instanceof Error) throw typecheckResult
+      return typecheckResult
     },
     openExternal: async (u) => void opened.push(u),
     openBrowser: async (u) => browser(u),
@@ -367,6 +385,90 @@ describe('validation and review', () => {
       ['fails on purpose', false]
     ])
     expect(r.ok).toBe(false)
+  })
+})
+
+describe('plugin_test filters, timings and stops', () => {
+  const TESTS = {
+    'tests/a.test.ts': `
+      import { test, assert } from 'custard-plugin-sdk/testing'
+      test('alpha one', () => assert.equal(1, 1))
+      test('alpha two', () => assert.equal(1, 2))
+    `,
+    'tests/b.test.ts': `
+      import { test, assert } from 'custard-plugin-sdk/testing'
+      test('beta', async () => assert.equal(2, 2))
+    `
+  }
+  it('runs one file, without the load check, and says what it left out', async () => {
+    writePlugin(TESTS)
+    const r = await host.test('demo', undefined, { file: 'tests/b.test.ts' })
+    expect(r.results.map((x) => x.name)).toEqual(['beta'])
+    expect(r.results[0].ms).toBeTypeOf('number')
+    expect(r.ok).toBe(true)
+  })
+  it('accepts a backslash or ./ spelling of the file, and refuses a file that is not a test', async () => {
+    writePlugin(TESTS)
+    expect(
+      (await host.test('demo', undefined, { file: '.\\tests\\b.test.ts' })).results
+    ).toHaveLength(1)
+    const r = await host.test('demo', undefined, { file: 'src/index.ts' })
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/no test file src\/index\.ts.*tests\/a\.test\.ts, tests\/b\.test\.ts/)
+  })
+  it('runs tests by name and counts the others as skipped', async () => {
+    writePlugin(TESTS)
+    const r = await host.test('demo', undefined, { name: 'ALPHA' })
+    expect(r.results.map((x) => [x.name, x.ok])).toEqual([
+      ['alpha one', true],
+      ['alpha two', false]
+    ])
+    expect(r).toMatchObject({ ran: 2, skipped: 1, ok: false })
+  })
+  it('a name that matches nothing is a failure, not a pass', async () => {
+    writePlugin(TESTS)
+    const r = await host.test('demo', undefined, { name: 'zzz' })
+    expect(r).toMatchObject({ ok: false, ran: 0, error: expect.stringMatching(/"zzz"/) })
+  })
+  it('keeps the tests that finished when a run is stopped', async () => {
+    writePlugin(TESTS)
+    testRunnerOverride = async () => {
+      throw Object.assign(new Error('Tests took longer than 30 seconds, so they were stopped.'), {
+        partial: [
+          { name: 'alpha one', ok: true, ms: 3 },
+          { name: 'alpha two', ok: true, skipped: true }
+        ]
+      })
+    }
+    const r = await host.test('demo')
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/longer than 30 seconds/)
+    expect(r.results.map((x) => x.name)).toEqual([
+      'Plugin loads and handles every tool in plugin.json',
+      'alpha one'
+    ])
+  })
+})
+
+describe('plugin_validate type check', () => {
+  it('reports type errors apart from errors, and only when asked', async () => {
+    writePlugin({})
+    typecheckResult = ['src/index.ts:3: TS2322: Type string is not assignable to type number']
+    const plain = await host.validate('demo')
+    expect(plain.typeErrors).toBeUndefined()
+    expect(typecheckCalls).toHaveLength(0)
+    const v = await host.validate('demo', { typeCheck: true })
+    expect(v.ok).toBe(true)
+    expect(v.typeErrors).toEqual(typecheckResult)
+    expect(typecheckCalls[0][2]).toEqual([])
+  })
+  it('a check that cannot run is a warning, not a failed validation', async () => {
+    writePlugin({})
+    typecheckResult = new Error('typescript is missing')
+    const v = await host.validate('demo', { typeCheck: true })
+    expect(v.ok).toBe(true)
+    expect(v.typeErrors).toBeUndefined()
+    expect(v.warnings.join('\n')).toMatch(/Types were not checked: typescript is missing/)
   })
 })
 
@@ -613,6 +715,37 @@ describe('what became of a call', () => {
       }
     )
     expect(r).toMatchObject({ outcome: 'completed', content: 'done x' })
+  })
+})
+
+describe('a long result', () => {
+  it('is cut at 50,000 characters and says how much is left out', async () => {
+    writePlugin({})
+    await activate()
+    netRoute = () => ({ status: 200, headers: {}, body: 'x'.repeat(60_000) })
+    const r = await invoke('demo__call_api', { url: 'https://api.example.com/big' })
+    expect(r.isError).toBe(false)
+    expect(r.content.startsWith('status 200 xxx')).toBe(true)
+    expect(r.content).toContain(
+      '\n[… 10,011 more characters are left out here: Custard keeps at most 50,000 characters of one plugin result]'
+    )
+    expect(r.content.length).toBeLessThan(50_300)
+  })
+  it('is not touched, and gets no note, at or under the limit', () => {
+    expect(cutResult('y'.repeat(50_000))).toBe('y'.repeat(50_000))
+    expect(cutResult('y'.repeat(50_001))).toContain('1 more characters are left out here')
+  })
+  it('redacts a key before it cuts, so a key at the cut is not left half showing', async () => {
+    writePlugin({})
+    await activate()
+    await store.setSecret('demo', 'token', 'S3CRET-VALUE-1234567890')
+    netRoute = () => ({
+      status: 200,
+      headers: {},
+      body: `${'x'.repeat(49_985)}S3CRET-VALUE-1234567890${'z'.repeat(100)}`
+    })
+    const r = await invoke('demo__call_api', { url: 'https://api.example.com/key' })
+    expect(r.content).not.toContain('S3CR')
   })
 })
 
@@ -1175,6 +1308,38 @@ export default defineWidget({ mount(root) { root.textContent = 'board-7712' } })
     expect(leaked.content).not.toContain('sekret-99881')
   })
 
+  it('says why data was left out: to the model, to the widget, and in the log', async () => {
+    writePlugin({ 'src/index.ts': DATA_INDEX })
+    await activate()
+    store.setSecret('demo', 'apiKey', 'sekret-99881')
+    const fine = await invoke('demo__echo', { text: 'you' })
+    expect(fine.dataDropped).toBeUndefined()
+    expect(fine.content).not.toMatch(/left out/)
+    const big = await invoke('demo__echo', { text: 'big' })
+    expect(big.dataDropped).toMatch(/KB and the limit is 64 KB/)
+    expect(big.content).toMatch(/data for widgets from this call was left out because it is \d+ KB/)
+    const leaked = await invoke('demo__echo', { text: 'sekret-99881' })
+    expect(leaked.dataDropped).toBe('it contained a saved credential')
+    expect(leaked.content).not.toContain('sekret-99881')
+    expect(leaked.content).toMatch(/left out because it contained a saved credential/)
+    expect(host.status('demo').log.join('\n')).toMatch(/left out because it is \d+ KB/)
+  })
+
+  it('widgetData reports every way data is refused, without repeating it', () => {
+    expect(widgetData(undefined, [])).toEqual({})
+    expect(widgetData({ a: 1 }, [])).toEqual({ data: { a: 1 } })
+    const cyclic: Record<string, unknown> = {}
+    cyclic.me = cyclic
+    expect(widgetData(cyclic, [])).toEqual({ dropped: "it can't be written as JSON" })
+    expect(widgetData(() => 1, [])).toEqual({ dropped: "it can't be written as JSON" })
+    expect(widgetData('x'.repeat(2048), [], 1024)).toEqual({
+      dropped: 'it is 3 KB and the limit is 1 KB'
+    })
+    expect(widgetData({ k: 'topsecret' }, ['topsecret'])).toEqual({
+      dropped: 'it contained a saved credential'
+    })
+  })
+
   it('needs Use in Chat and Design outside Code', async () => {
     writePlugin({ 'widget/board.ts': BOARD }, manifest({ widgets: [WIDGET] }))
     await activate([...ALL, 'widget:board'])
@@ -1183,6 +1348,41 @@ export default defineWidget({ mount(root) { root.textContent = 'board-7712' } })
     expect(host.widgetCatalog('design')).toEqual([])
     host.setChatDesign('demo', true)
     expect(host.widgetCatalog('chat')).toHaveLength(1)
+  })
+})
+
+describe('readToolSet (unattended runs)', () => {
+  it('offers read tools only, after Use in Chat and Design, and says what is unavailable', async () => {
+    writePlugin({})
+    await activate()
+    const before = host.readToolSet(['demo', 'nope'])
+    expect(before.tools).toEqual([])
+    expect(before.unavailable.sort()).toEqual(['demo', 'nope'])
+    host.setChatDesign('demo', true)
+    const set = host.readToolSet(['demo'])
+    expect(set.unavailable).toEqual([])
+    expect(set.tools.map((t) => t.name)).toContain('demo__echo')
+    const writes = host
+      .status('demo')
+      .tools.filter((t) => t.effect === 'write')
+      .map((t) => t.fullName)
+    expect(writes.length).toBeGreaterThan(0)
+    for (const w of writes) {
+      expect(set.tools.map((t) => t.name)).not.toContain(w)
+      expect(set.snapshot.has(w)).toBe(false)
+    }
+    // A write tool called anyway is refused, not run.
+    const r = await host.invoke(
+      writes[0],
+      {},
+      {
+        snapshot: set.snapshot,
+        signal: new AbortController().signal,
+        approve: async () => true,
+        mode: 'chat'
+      }
+    )
+    expect(r).toMatchObject({ isError: true, outcome: 'not-run' })
   })
 })
 

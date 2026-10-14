@@ -26,6 +26,11 @@ extraResources:
     filter: ['*.ts', '!*.test.ts']
   - from: docs/plugins
     to: docs/plugins
+  # The plugin type check reads TypeScript's lib.*.d.ts; electron-builder drops
+  # .d.ts files from node_modules, so they ship here.
+  - from: node_modules/typescript/lib
+    to: typescript-lib
+    filter: ['lib*.d.ts']
 win:
   executableName: custard
 nsis:

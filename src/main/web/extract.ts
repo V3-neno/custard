@@ -10,6 +10,8 @@ export type Extracted = {
   title: string
   text: string
   links: { text: string; url: string }[]
+  // How many more distinct links the page had than `links` lists.
+  moreLinks?: number
   // Set only with evidence: a <noscript> notice or an empty app root.
   needsScript: boolean
 }
@@ -36,7 +38,12 @@ const squash = (s: string): string => s.replace(/[ \t\f\v\r\u00a0]+/g, ' ').trim
 
 // Block-level text with Markdown-ish headings and list items. Links become
 // "text [n]" with n pointing into the link list.
-function toText(root: Element, base: string, links: Extracted['links']): string {
+function toText(
+  root: Element,
+  base: string,
+  links: Extracted['links'],
+  dropped: Set<string>
+): string {
   const out: string[] = []
   let line = ''
   const flush = (): void => {
@@ -81,6 +88,7 @@ function toText(root: Element, base: string, links: Extracted['links']): string 
           n = links.length
           index.set(url, n)
         }
+        if (n === undefined) dropped.add(url)
         if (n !== undefined) line += ` [${n}]`
       }
     }
@@ -107,6 +115,7 @@ export function extractHtml(html: string, url: string): Extracted {
   const { document } = parseHTML(html)
   const title = squash(document.querySelector('title')?.textContent ?? '')
   const links: Extracted['links'] = []
+  const dropped = new Set<string>()
   // Readability changes the document it reads, so it gets its own copy.
   const article = new Readability(parseHTML(html).document as unknown as Document, {
     charThreshold: 200
@@ -116,18 +125,20 @@ export function extractHtml(html: string, url: string): Extracted {
     const { document: d } = parseHTML(
       `<!doctype html><html><head></head><body>${article.content}</body></html>`
     )
-    text = toText(d.body as unknown as Element, url, links)
+    text = toText(d.body as unknown as Element, url, links, dropped)
   }
   if (text.length < 200) {
     links.length = 0
+    dropped.clear()
     const body = document.body as unknown as Element | null
-    text = body ? toText(body, url, links) : ''
+    text = body ? toText(body, url, links, dropped) : ''
   }
   return {
     kind: 'html',
     title: squash(article?.title || title),
     text,
     links,
+    ...(dropped.size ? { moreLinks: dropped.size } : {}),
     needsScript: scriptEvidence(document as unknown as Document, text)
   }
 }

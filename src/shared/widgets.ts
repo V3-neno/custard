@@ -89,6 +89,9 @@ export type WidgetCallResult = {
   status: 'completed' | 'failed' | 'not-run' | 'unknown'
   content: string
   data?: unknown
+  // Set instead of `data` when the tool returned data that was left out, with
+  // the reason ("it is 70 KB and the limit is 64 KB").
+  dataDropped?: string
 }
 
 export const widgetKey = (pluginId: string, widgetId: string): string => `${pluginId}/${widgetId}`

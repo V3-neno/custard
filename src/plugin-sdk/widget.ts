@@ -20,6 +20,10 @@ export type WidgetCallResult = {
   content: string
   // The tool's `data`, if it returned any (see ToolResult in the main SDK).
   data?: unknown
+  // Set when the tool returned `data` that Custard left out (over 64 KB, not
+  // JSON, or holding a saved credential), with the reason in words. Show the
+  // user that the view is out of date rather than keep showing old data.
+  dataDropped?: string
 }
 
 export interface WidgetContext {

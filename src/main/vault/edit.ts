@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'fs'
 import { join } from 'path'
-import { resolveInVault } from '../memory/paths'
+import { caseSensitiveVault, resolveInVault } from '../memory/paths'
 import { realTarget } from '../modes/extensions'
 import { FsafeError, writeNewSync, writeReplaceSync, type Guard } from '../fsafe'
 import { readNote, toVaultPath, versionOf, ReadError } from './read'
@@ -232,7 +232,8 @@ export type EditRecord = {
   undone?: number
 }
 
-const KEEP_RECORDS = 50
+// Chats and automations share this list.
+export const KEEP_RECORDS = 200
 
 const recordFile = (dir: string, id: string): string => join(dir, `${id}.json`)
 
@@ -286,8 +287,9 @@ function grantedMode(
 ): { path: string; mode: GrantMode | null } {
   const path = toVaultPath(vault, full)
   const real = toVaultPath(realpathSync(vault), realTarget(full))
-  const a = grantFor(grants, path)
-  const b = grantFor(grants, real)
+  const exact = caseSensitiveVault(vault)
+  const a = grantFor(grants, path, exact)
+  const b = grantFor(grants, real, exact)
   const mode = a && b ? (modeAllows(a, b) ? b : a) : null
   return { path, mode }
 }
