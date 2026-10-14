@@ -466,6 +466,7 @@ export class PluginHost {
         effect: t.effect,
         askEveryTime: t.effect === 'write' && (st.askEveryTime[t.name] ?? this.d.askByDefault())
       })),
+      ...(m?.fills?.length ? { fills: m.fills } : {}),
       chatDesign: active ? chatDesignState(active, st.chatDesign) : 'off',
       ...(m?.widgets?.length
         ? { widgets: m.widgets.map((w) => ({ id: w.id, title: w.title })) }
@@ -1608,7 +1609,10 @@ export class PluginHost {
     force: boolean
   ): Promise<string> {
     const raw = this.d.store.secrets(id)[OAUTH_KEY]
-    if (!raw) throw new AuthError('Not signed in. Connect the account in Settings → Plugins.')
+    if (!raw)
+      throw new AuthError(
+        'Not signed in. Connect the account with Manage on its card in Plugins mode.'
+      )
     const tokens = JSON.parse(raw) as Tokens
     if (!force && tokens.expiresAt - Date.now() > 60_000) return tokens.accessToken
     let p = this.refreshing.get(id)
@@ -1623,7 +1627,9 @@ export class PluginHost {
           })
           // Signed out while this was running: the new tokens are dropped.
           if (this.generation(id) !== started)
-            throw new AuthError('Not signed in. Connect the account in Settings → Plugins.')
+            throw new AuthError(
+              'Not signed in. Connect the account with Manage on its card in Plugins mode.'
+            )
           this.d.store.setSecret(id, OAUTH_KEY, JSON.stringify(next))
           return next.accessToken
         } catch (err) {

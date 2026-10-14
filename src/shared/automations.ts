@@ -162,7 +162,8 @@ export type RunRecord = {
   startedAt: number
   endedAt?: number
   status: RunStatus
-  // Why it was skipped, stopped or failed, in plain words.
+  // Why it was skipped, stopped or failed, in plain words; on a completed
+  // run, that its last reply was cut off (CUT_OFF_REASON).
   reason?: string
   // What it did, in order: the call label and how it ended.
   calls: { label: string; outcome: string }[]

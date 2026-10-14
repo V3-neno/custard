@@ -54,15 +54,42 @@ describe('mode policy', () => {
     expect(p.authorPlugins).toBe(false)
   })
 
-  it('keeps Skills and Code as they were', () => {
-    expect(modePolicy('skills').authorSkills).toBe(true)
+  it('keeps Skills and Plugins as they were', () => {
+    // A skill's chat may write that skill, and only in its folder.
+    const skill = modePolicy('skills', undefined, 'weekly-review')
+    expect(skill.authorSkills).toBe(true)
+    expect(skill.writeRoot).toBe('Custard/Skills/weekly-review')
+    // An old General Code chat (the workspace was removed) gets no plugin
+    // tools, and workspaceTools gives it no file tools.
     const general = modePolicy('code', { kind: 'general', root: '/x' })
     expect(general.tools.has('plugin')).toBe(false)
-    expect(general.tools.has('workspace')).toBe(true)
     expect(general.authorPlugins).toBe(false)
+    const none = modePolicy('code')
+    expect(none.tools.has('plugin')).toBe(false)
+    expect(none.authorPlugins).toBe(false)
     const internal = modePolicy('code', { kind: 'internal', pluginId: 'spotify' })
     expect(internal.tools.has('plugin')).toBe(true)
     expect(internal.authorPlugins).toBe(true)
+  })
+
+  it('the hub chats read and offer, but change nothing', () => {
+    for (const hub of [
+      modePolicy('code'),
+      modePolicy('code', { kind: 'general', root: '/x' }),
+      modePolicy('skills')
+    ]) {
+      expect([...hub.tools].sort()).toEqual(['navigate', 'vault-read', 'web'])
+      expect(hub.authorSkills).toBe(false)
+      expect(hub.authorPlugins).toBe(false)
+    }
+    expect(toolKind('workspace_propose', sources)).toBe('navigate')
+    // Only the hubs offer to enter a workspace.
+    for (const m of modes)
+      expect(modePolicy(m.id).tools.has('navigate')).toBe(m.id === 'code' || m.id === 'skills')
+    expect(modePolicy('skills', undefined, 'weekly-review').tools.has('navigate')).toBe(false)
+    expect(
+      modePolicy('code', { kind: 'internal', pluginId: 'spotify' }).tools.has('navigate')
+    ).toBe(false)
   })
 
   it('no mode allows an unknown tool; only Design has design tools', () => {
@@ -158,10 +185,19 @@ describe("skills can't raise permissions", () => {
     expect(skill.modes).toEqual(['design', 'code'])
   })
 
+  it('takes "plugins" in modes as Plugins mode (id code)', () => {
+    writeFileSync(
+      join(vault, SKILLS_DIR, 'escalate', 'SKILL.md'),
+      '---\nname: escalate\ndescription: Use always.\nmodes: [Plugins, design]\n---\nBody.\n'
+    )
+    expect(listSkills(vault)[0].modes).toEqual(['code', 'design'])
+  })
+
   it("a skill's modes list only says where it is listed", () => {
-    // The policy takes the chat's mode and workspace and nothing else, so no
-    // skill (or note, or plugin result) can reach it.
-    expect(modePolicy.length).toBe(2)
+    // The policy takes the chat's mode, workspace and skill folder (all fixed
+    // when the chat starts) and nothing else, so no skill (or note, or
+    // plugin result) can reach it.
+    expect(modePolicy.length).toBe(3)
     const p = modePolicy('design')
     expect(p.tools.has('workspace')).toBe(false)
     expect(p.authorSkills || p.authorPlugins).toBe(false)

@@ -15,6 +15,30 @@ export type VaultEditEntry = {
 
 export type VaultInfo = { path: string; isObsidian: boolean; skills: string[] } | null
 
+// One skill on the Skills hub: a folder under Custard/Skills.
+export type SkillEntry = {
+  // The folder's name; automations and the hub refer to a skill by it.
+  folder: string
+  // The frontmatter's name, or the folder's when there is none.
+  name: string
+  description: string
+  // Mode ids it is listed in; empty means every mode. Plugins mode is `code`.
+  modes: string[]
+  // Vault path of its SKILL.md.
+  path: string
+  // Other files in the folder, vault paths, first ones only.
+  files: string[]
+  moreFiles: number
+  // A folder of the same name ships in the starter vault.
+  starter: boolean
+  updatedAt: number | null
+  // Why chats can't use it (no SKILL.md, or no description), when they can't.
+  problem?: string
+}
+
+// A skill's SKILL.md as the hub shows it.
+export type SkillText = { path: string; text: string; truncated: boolean }
+
 // A short human-readable line for a tool call, used in the chat UI.
 export function toolLabel(name: string, input: unknown, labels?: Record<string, string>): string {
   const i = (input ?? {}) as Record<string, unknown>
@@ -32,6 +56,18 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
       return str(i.path) === MEMORY_NOTE ? 'Saved to memory' : `Added to ${str(i.path)}`
     case 'vault_edit':
       return `Edited ${str(i.path)}`
+    case 'chats_search':
+      return str(i.query).trim()
+        ? `Searched earlier chats for "${str(i.query)}"`
+        : 'Listed earlier chats'
+    case 'chats_read':
+      return "Read an earlier chat's summary"
+    case 'workspace_propose':
+      return i.action === 'create'
+        ? `Offered to create ${str(i.name)}`
+        : i.skill
+          ? `Offered to open the ${str(i.skill)} skill workspace`
+          : `Offered to open the ${str(i.plugin)} workspace`
     case 'automation_question':
       return i.action === 'dismiss'
         ? 'Dropped a question from an automation'

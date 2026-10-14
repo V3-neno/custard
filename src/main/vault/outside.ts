@@ -46,6 +46,6 @@ export function searchIsOutside(result: string): boolean {
 }
 
 // Records on the chat why it holds text Custard can't vouch for.
-export function noteOutside(c: Conversation, why: 'notes' | 'memory'): void {
+export function noteOutside(c: Conversation, why: 'notes' | 'memory' | 'chats'): void {
   if (!c.outside?.includes(why)) (c.outside ??= []).push(why)
 }

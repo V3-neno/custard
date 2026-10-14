@@ -3,7 +3,8 @@ import http from 'http'
 import fs from 'fs'
 const [, , OUT, PLUGIN_DIR] = process.argv
 const anth = [],
-  spotify = []
+  spotify = [],
+  chatNotes = []
 const save = () => {
   fs.writeFileSync(OUT + '/anthropic.json', JSON.stringify(anth, null, 1))
   fs.writeFileSync(OUT + '/spotify.json', JSON.stringify(spotify, null, 1))
@@ -46,6 +47,20 @@ http
         res.writeHead(status, { 'content-type': 'application/json' })
         res.end(data === undefined ? '' : JSON.stringify(data))
       }
+      // The key check on Save: Claude's model list, so the key counts as
+      // working and the chat's model can be used.
+      if (url.pathname === '/v1/models')
+        return j(200, {
+          data: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5'].map((id) => ({
+            type: 'model',
+            id,
+            display_name: id,
+            created_at: '2026-01-01T00:00:00Z'
+          })),
+          has_more: false,
+          first_id: 'claude-opus-5-5',
+          last_id: 'claude-haiku-4-5'
+        })
       if (url.pathname !== '/v1/messages') {
         spotify.push({
           method: req.method,
@@ -92,6 +107,38 @@ http
         return j(404, { error: { status: 404, message: 'nope' } })
       }
       const b = JSON.parse(body)
+      // A chat's summary note in Custard/Chats: no tools, JSON out. Recorded
+      // on its own so the chat's request list stays as the other tests expect.
+      if (typeof b.system === 'string' && b.system.startsWith('You summarize a chat for a note')) {
+        const evidence = String(b.messages[0].content)
+        chatNotes.push({ model: b.model, tools: b.tools ?? null, evidence })
+        fs.writeFileSync(OUT + '/chatnotes.json', JSON.stringify(chatNotes, null, 1))
+        if (/note fail test/.test(evidence))
+          return j(500, { type: 'error', error: { type: 'api_error', message: 'Internal error' } })
+        const n = chatNotes.length
+        return j(200, {
+          id: 'msg_chatnote',
+          type: 'message',
+          role: 'assistant',
+          model: b.model,
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 10 },
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                goal: 'Plan a calm evening playlist',
+                constraints: ['Ask before queueing anything'],
+                decisions: ['Keep it instrumental'],
+                // A link and markup the note must not keep.
+                open: ['Check [this](https://evil.example/x) **soon**'],
+                state: `Summary number ${n}: the playlist is half done.`
+              })
+            }
+          ]
+        })
+      }
       anth.push({
         tools: (b.tools ?? []).map((t) => t.name),
         system: typeof b.system === 'string' ? b.system : JSON.stringify(b.system),

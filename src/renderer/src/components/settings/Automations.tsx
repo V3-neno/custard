@@ -6,7 +6,10 @@ import {
   type PendingQuestion,
   type RunRecord
 } from '../../../../shared/automations'
-import { chatModels } from '../../../../shared/chat'
+import { chatModels, type ModelAvailability } from '../../../../shared/chat'
+import type { ListedModel } from '../../../../shared/adapter'
+import { providerIds, providerNames } from '../../../../shared/providers'
+import { REASONS } from '../chat/modelText'
 import type { PluginStatus } from '../../../../shared/plugins'
 import type { VaultGrant } from '../../../../shared/vaultGrants'
 import { cleanError, danger, input, primary, secondary } from './ui'
@@ -76,6 +79,12 @@ export default function Automations(): React.JSX.Element {
   const [form, setForm] = useState<Form | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<string | null>(null)
+  // The models a run can use: the adapters' list, and which of them can be
+  // used now (the same rules as the chat's picker; no provider is asked).
+  const [models, setModels] = useState<Pick<ListedModel, 'id' | 'label' | 'provider'>[]>(() => [
+    ...chatModels
+  ])
+  const [availability, setAvailability] = useState<ModelAvailability[]>([])
 
   const refresh = useCallback(() => {
     window.custard.automations.list().then(setViews)
@@ -83,7 +92,17 @@ export default function Automations(): React.JSX.Element {
     window.custard.vault.getGrants().then(setGrants)
     window.custard.vault.get().then((v) => setSkills(v?.skills ?? []))
     window.custard.plugins.list().then(setPlugins)
+    window.custard.models
+      .list()
+      .then((l) => setModels(l.filter((m) => m.source === 'profile')))
+      .catch(() => {})
+    window.custard.models
+      .availability()
+      .then(setAvailability)
+      .catch(() => {})
   }, [])
+  const offFor = (id: string): ModelAvailability | undefined =>
+    availability.find((a) => a.id === id && !a.available)
   useEffect(() => {
     refresh()
     return window.custard.automations.onChanged(refresh)
@@ -97,7 +116,13 @@ export default function Automations(): React.JSX.Element {
     setError(null)
     // Folders may have been allowed since this was last shown.
     refresh()
-    if (!a) return setForm(blank(chatModels[0].id, skills[0] ?? ''))
+    if (!a)
+      return setForm(
+        blank(
+          models.find((m) => !offFor(m.id))?.id ?? models[0]?.id ?? chatModels[0].id,
+          skills[0] ?? ''
+        )
+      )
     setForm({
       id: a.id,
       name: a.name,
@@ -348,10 +373,20 @@ export default function Automations(): React.JSX.Element {
               onChange={(e) => setForm({ ...form, model: e.target.value })}
               className="rounded-lg border border-forge-700 bg-forge-900 px-2 text-sm outline-none"
             >
-              {chatModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
+              {providerIds.map((p) => (
+                <optgroup key={p} label={providerNames[p]}>
+                  {models
+                    .filter((m) => m.provider === p)
+                    .map((m) => {
+                      const off = offFor(m.id)
+                      return (
+                        <option key={m.id} value={m.id} disabled={!!off && m.id !== form.model}>
+                          {m.label}
+                          {off?.reason ? ` · ${REASONS[off.reason](providerNames[p])}` : ''}
+                        </option>
+                      )
+                    })}
+                </optgroup>
               ))}
             </select>
           </div>

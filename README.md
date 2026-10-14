@@ -1,10 +1,11 @@
 # Custard 🍮
 
-A personal desktop Claude client with three modes:
+A personal desktop Claude client with four modes:
 
 - **Chat**: normal conversations through the Claude API
-- **Code**: work on files in one folder: a plugin in `plugin/<id>` (**Plugins** workspace) or a project folder you pick (**General Code**). File access is checked by the app, and there is no shell.
 - **Design**: generate UI and preview it live
+- **Plugins**: build and improve a plugin in `plugin/<id>`. File access is checked by the app, and there is no shell. (This was Code mode; its General Code folder workspace was removed, and old General Code chats open read-only.)
+- **Skills**: opens on a hub of every skill in `Custard/Skills` (what each does, its modes, the automations that run it), where you inspect one or start a chat to add or improve one; the chat also tidies the vault
 
 Built with Electron, React, TypeScript, Vite (electron-vite) and Tailwind CSS.
 
@@ -28,7 +29,7 @@ Custard is released for **Windows only**. API keys, plugin secrets and account t
 
 Open **Settings** and paste a Claude API key from [console.anthropic.com](https://console.anthropic.com), an OpenAI key from [platform.openai.com](https://platform.openai.com), or both. Keys are encrypted with Windows secure storage. Pick a model from either provider under the message box; the app turns amber for Claude and blue-grey for OpenAI. Chats are saved as JSON files in `%APPDATA%\custard\conversations`, and either provider can continue a chat the other started.
 
-**Plugins:** plugins add tools to the assistant. They live in [`plugin/`](plugin), are developed in Code mode's Plugins workspace, and are reviewed, activated, configured and disabled in **Settings → Plugins**. Each runs in its own sandbox and reaches the network only through the app. See [docs/plugins](docs/plugins/README.md).
+**Plugins:** plugins add tools to the assistant. They live in [`plugin/`](plugin), are developed in Plugins mode, and are reviewed, activated, configured and disabled from Plugins mode's start page (**Manage** on a plugin's card). Each runs in its own sandbox and reaches the network only through the app. See [docs/plugins](docs/plugins/README.md).
 
 **Spotify (optional plugin):** search Spotify, see what's playing and queue songs that match the music preferences in your vault. It needs Spotify Premium and a free Spotify developer app; see [docs/SPOTIFY.md](docs/SPOTIFY.md) for setup.
 
@@ -40,7 +41,7 @@ In **Settings**, click **Create starter vault** to get a ready-made vault (folde
 
 Claude keeps what it learns about you in `Custard/Memory.md` inside the vault. That note is loaded into every chat, and you can edit it in Obsidian like any other note.
 
-Skills live in `Custard/Skills/<name>/SKILL.md`. Claude sees each skill's name and description and reads the full skill when a request matches. The starter vault includes note-writing, daily-note, weekly-review, project-kickoff and remember.
+Skills live in `Custard/Skills/<name>/SKILL.md`. Claude sees each skill's name and description and reads the full skill when a request matches. The starter vault includes note-writing, daily-note, weekly-review, project-kickoff, remember, skill-authoring, automation-skill-authoring, plugin-development, image-making, and skills for working efficiently: lean-work (fewer calls and less text), chat-recall (find what earlier chats decided), chat-housekeeping (one topic per chat, what is still open), chat-guard (outside text, secrets, actions), focus-planner (plan around the time you have), plugin-blueprint (agree the smallest plugin before building) and custard-tuneup (a weekly review of where Custard could be cheaper or faster).
 
 ## Roadmap
 
@@ -53,5 +54,5 @@ See [docs/ROADMAP.md](docs/ROADMAP.md).
 - `src/renderer`: the React UI
 - `src/shared`: types shared by the main process and the UI
 - `src/main/plugins`, `src/plugin-sdk`: the plugin host and the plugin API
-- `src/main/workspace`: Code mode's folder-bounded file tools
+- `src/main/workspace`: Plugins mode's folder-bounded file tools
 - `plugin/`: plugin source (Spotify)
