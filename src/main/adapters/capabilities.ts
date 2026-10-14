@@ -62,21 +62,48 @@ function derive(m: ModelProfile): Record<Capability, Omit<CapabilityEntry, 'evid
   }
 }
 
+// The profile fields each capability is decided by. The others follow from
+// the provider and Custard's own rules.
+const FROM: Partial<Record<Capability, (keyof ModelProfile)[]>> = {
+  vision: ['files'],
+  pdf: ['files'],
+  reasoning: ['thinking'],
+  reasoning_summary: ['thinking'],
+  effort: ['effort'],
+  web_search: ['search'],
+  compaction: ['compaction'],
+  fallbacks: ['fallbacks']
+}
+export const FROM_FILE = 'From your models file.'
+
+// Whether a capability's answer comes from the user's models file: every
+// one for a model the file adds; for a built-in one it customises, those
+// decided by a field it changed.
+const fromFile = (m: ModelProfile, c: Capability): boolean =>
+  m.origin === 'file' ||
+  (m.origin === 'customised' && (FROM[c] ?? []).some((f) => m.changed?.includes(f)))
+
 // What a model can do. A model Custard has no profile for gets only plain
 // text, which is all Custard could promise for it. Evidence is `live` only
-// for what the profile records as tested live on that model.
+// for what the profile records as tested live on that model, and never for
+// an answer the models file decides: that is `docs`, noted as from the file.
 export function capabilitiesOf(id: string): ModelCapabilities {
   const m = profileOf(id)
   const live = new Set(m?.live ?? [])
   const base = m ? derive(m) : null
   return Object.fromEntries(
-    capabilities.map((c) => [
-      c,
-      {
-        ...(base?.[c] ?? { supported: c === 'text', note: m ? undefined : 'Unknown model.' }),
-        evidence: live.has(c) ? 'live' : 'docs'
-      } satisfies CapabilityEntry
-    ])
+    capabilities.map((c) => {
+      const entry = base?.[c] ?? { supported: c === 'text', note: m ? undefined : 'Unknown model.' }
+      const file = !!m && fromFile(m, c)
+      return [
+        c,
+        {
+          ...entry,
+          ...(file ? { note: entry.note ? `${entry.note} ${FROM_FILE}` : FROM_FILE } : {}),
+          evidence: live.has(c) && !file ? 'live' : 'docs'
+        } satisfies CapabilityEntry
+      ]
+    })
   ) as ModelCapabilities
 }
 

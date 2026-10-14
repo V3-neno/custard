@@ -68,6 +68,11 @@ export class Scheduler {
     return this.active.has(id)
   }
 
+  // Whether any run is going on now.
+  busy(): boolean {
+    return this.active.size > 0
+  }
+
   // Looks for slots that fell due since the last look.
   tick(): void {
     const now = this.d.now()

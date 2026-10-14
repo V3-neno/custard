@@ -1,18 +1,25 @@
 import { allProfiles, builtInProfiles, setProfiles, type ModelProfile } from '../shared/models'
 
-// Main's model registry: the profiles Custard offers while it runs. Built
-// once at startup, before any window opens; the renderer gets a copy over IPC
-// (models:profiles) and every request, price, limit and capability in main
-// reads it through shared/models.ts (profileOf, requireProfile).
+// Main's model registry: the profiles Custard offers while it runs. Built at
+// startup, before any window opens, and again on Reload in Settings; the
+// renderer gets a copy over IPC (models:profiles) and every request, price,
+// limit and capability in main reads it through shared/models.ts
+// (profileOf, requireProfile).
 //
-// Today the list is the built-in profiles. Profiles from the user's models
-// file (Workstream A, Phase A4) would be merged in here, by a source passed
-// to loadModelRegistry; nothing else needs to change for that.
+// The list is the built-in profiles plus each source's profiles (the user's
+// models file, main/modelsFile.ts). A source's profile with a built-in id
+// takes that built-in's place; any other is added after the built-ins.
 
 export type ProfileSource = () => readonly ModelProfile[]
 
-export function loadModelRegistry(...extra: ProfileSource[]): readonly ModelProfile[] {
-  setProfiles([...builtInProfiles, ...extra.flatMap((s) => s())])
+export function loadModelRegistry(...sources: ProfileSource[]): readonly ModelProfile[] {
+  const extra = sources.flatMap((s) => s())
+  const byId = new Map(extra.map((m) => [m.id, m]))
+  const builtIn = builtInProfiles as readonly ModelProfile[]
+  setProfiles([
+    ...builtIn.map((m) => byId.get(m.id) ?? m),
+    ...extra.filter((m) => !builtIn.some((b) => b.id === m.id))
+  ])
   return allProfiles()
 }
 

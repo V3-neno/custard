@@ -23,6 +23,7 @@ import DesignTab from './settings/DesignTab'
 import CapabilitiesTab from './settings/CapabilitiesTab'
 import EditableFolders from './settings/EditableFolders'
 import Automations from './settings/Automations'
+import ModelsFile from './settings/ModelsFile'
 import { cleanError, primary, secondary } from './settings/ui'
 
 type Props = {
@@ -392,6 +393,8 @@ function MemorySection(): React.JSX.Element {
 
 function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('general')
+  // Bumped by Reload of the models file, so the model lists read it again.
+  const [modelsVersion, setModelsVersion] = useState(0)
   const [vault, setVault] = useState<VaultInfo>(null)
 
   useEffect(() => {
@@ -466,7 +469,13 @@ function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Eleme
               Keys are encrypted with Windows secure storage and stay on this computer. Pick a model
               from any provider under the message box.
             </p>
-            <DefaultModelSection onChanged={onChanged} />
+            <DefaultModelSection key={modelsVersion} onChanged={onChanged} />
+            <ModelsFile
+              onReloaded={() => {
+                setModelsVersion((n) => n + 1)
+                onChanged()
+              }}
+            />
             {providerIds.map((p) => (
               <KeySection key={p} provider={p} onChanged={onChanged} />
             ))}

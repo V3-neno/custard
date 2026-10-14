@@ -22,7 +22,7 @@ import type { AutomationView, PendingQuestion } from '../shared/automations'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision, ModelAvailability } from '../shared/chat'
-import type { ModelProfile } from '../shared/models'
+import type { ModelProfile, ModelsFileReport } from '../shared/models'
 import type {
   Artifact,
   ArtifactSummary,
@@ -50,6 +50,14 @@ const custard = {
     list: (): Promise<ListedModel[]> => ipcRenderer.invoke('models:list'),
     // The model registry: the profiles Custard offers now (main/modelRegistry).
     profiles: (): Promise<ModelProfile[]> => ipcRenderer.invoke('models:profiles'),
+    // Settings → Models file: what the last read of models.json found.
+    file: (): Promise<ModelsFileReport> => ipcRenderer.invoke('models:file'),
+    // Reads models.json again into the registry (not while a chat or an
+    // automation is running).
+    reload: (): Promise<
+      | { ok: true; report: ModelsFileReport; profiles: ModelProfile[] }
+      | { ok: false; error: string }
+    > => ipcRenderer.invoke('models:reload'),
     // Asks the provider, with the saved key. Settings' Save and Refresh only.
     check: (p: Provider): Promise<ModelCheck | null> => ipcRenderer.invoke('models:check', p),
     // From saved keys and the last check only; asks no provider.

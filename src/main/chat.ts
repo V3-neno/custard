@@ -1038,6 +1038,9 @@ const continuing = new Set<string>()
 // A chat that is answering or being continued is still being saved, so it
 // can't be deleted until that ends (or the delete would be undone).
 export const chatBusy = (id: string): boolean => active.has(id) || continuing.has(id)
+// Whether any chat is answering or being continued (Reload of the models
+// file waits, so no turn sees its model change halfway).
+export const anyChatBusy = (): boolean => active.size > 0 || continuing.size > 0
 async function continueFrom(id: string, withoutSummary: boolean): Promise<ContinueResult> {
   if (active.has(id) || continuing.has(id))
     return {

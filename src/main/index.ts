@@ -1,4 +1,9 @@
-import { registerAutomationHandlers, startAutomations, stopAutomations } from './automations'
+import {
+  automationRunning,
+  registerAutomationHandlers,
+  startAutomations,
+  stopAutomations
+} from './automations'
 import { app, dialog, shell, BrowserWindow } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
@@ -8,11 +13,13 @@ import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { allModels } from './adapters/registry'
 import { loadModelRegistry, registeredProfiles } from './modelRegistry'
+import { MODELS_FILE, readModelsFile } from './modelsFile'
+import type { ModelsFileReport } from '../shared/models'
 import { checkProvider, forgetCheck, lastCheck, modelAvailability } from './adapters/checks'
 import { scanCapabilities, type ScanSources } from './adapters/scan'
 import { DISCOVERY_SKILL, gapFor, starterPrompt } from './plugins/discovery'
 import { isProvider } from '../shared/providers'
-import { chatBusy, openConversation, registerChatHandlers } from './chat'
+import { anyChatBusy, chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
 import { chatNotes, memory, registerMemoryHandlers } from './memory'
 import { allowOnlyAppPage, handle } from './ipc'
@@ -120,9 +127,18 @@ function createWindow(): void {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
+// The user's models file (main/modelsFile.ts), in the data folder next to
+// settings.json: read into the registry at startup and on Reload only.
+let modelsReport: ModelsFileReport
+function loadModels(): void {
+  const r = readModelsFile(join(app.getPath('userData'), MODELS_FILE))
+  modelsReport = r.report
+  loadModelRegistry(() => r.profiles)
+}
+
 app.whenReady().then(() => {
   // Before any window, so the first one gets the full list.
-  loadModelRegistry()
+  loadModels()
   // Packaged builds ignore ANTHROPIC_BASE_URL / OPENAI_BASE_URL (L13).
   pinProviderEndpoints(app.isPackaged)
   // Set app user model id for windows
@@ -150,6 +166,19 @@ app.whenReady().then(() => {
   // The model registry (main/modelRegistry.ts), which the renderer copies
   // before it draws anything.
   handle('models:profiles', () => registeredProfiles())
+  // Settings → Models file: what the last read found, and Reload. Reload
+  // waits while a chat or an automation is running, so no running turn
+  // sees its model change.
+  handle('models:file', () => modelsReport)
+  handle('models:reload', () => {
+    if (anyChatBusy() || automationRunning())
+      return {
+        ok: false as const,
+        error: 'A chat or an automation is running. Reload when it has finished.'
+      }
+    loadModels()
+    return { ok: true as const, report: modelsReport, profiles: registeredProfiles() }
+  })
   // Settings only: Save and Refresh check a key with its own provider.
   handle('models:check', (_, p: Provider) => checkProvider(p))
   // Which models can be picked now, from saved keys and the last check: no

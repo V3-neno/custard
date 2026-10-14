@@ -51,12 +51,12 @@ export const PRICES: Record<string, Price> = Object.fromEntries(
   (builtInProfiles as readonly ModelProfile[]).flatMap((m) => (m.prices ? [[m.id, m.prices]] : []))
 )
 
-// A model's prices, from its profile in the registry (shared/models.ts).
-// Claude's dated or suffixed ids (from a fallback, say) are priced as their
-// base model.
+// A model's prices, from its profile in the registry (shared/models.ts); a
+// profile without prices is unpriced. Claude's dated or suffixed ids (from a
+// fallback, say), which have no profile, are priced as their base model.
 function priceOf(model: string): Price | null {
-  const own = profileOf(model)?.prices
-  if (own) return own
+  const own = profileOf(model)
+  if (own) return own.prices
   const base = allProfiles().find((m) => m.prices && model.startsWith(`${m.id}-`))
   return base?.prices ?? null
 }
