@@ -9,7 +9,7 @@ import { availabilityFrom } from './checks'
 const check = (result: ModelCheck['result'], available: string[] = []): ModelCheck => ({
   result,
   checkedAt: 1,
-  models: chatModels.map((m) => ({
+  models: chatModels().map((m) => ({
     id: m.id,
     label: m.label,
     available: available.includes(m.id),
@@ -41,11 +41,11 @@ describe('model availability', () => {
 
   it('a key the provider rejected: every model says rejected', () => {
     const a = of(['openai'], { openai: check('auth') })
-    expect(chatModels.filter((m) => m.provider === 'openai').map((m) => a[m.id])).toEqual([
-      'rejected',
-      'rejected',
-      'rejected'
-    ])
+    expect(
+      chatModels()
+        .filter((m) => m.provider === 'openai')
+        .map((m) => a[m.id])
+    ).toEqual(['rejected', 'rejected', 'rejected'])
     expect(of(['openai'], { openai: check('permission') })['gpt-6-luna']).toBe('rejected')
   })
 

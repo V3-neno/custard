@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import {
   chatSettingsOf,
+  isChatModel,
   modes,
   providerNames,
   providerOf,
@@ -750,7 +751,10 @@ function ChatView(props: Props): React.JSX.Element {
   }
   const shownProvider = providerOf(chatSettings.model)
   const providerName = providerNames[shownProvider]
-  const shownStatus = availability?.find((a) => a.id === chatSettings.model)
+  // A model with no profile can't be used whatever the keys say.
+  const shownStatus: ModelAvailability | undefined = isChatModel(chatSettings.model)
+    ? availability?.find((a) => a.id === chatSettings.model)
+    : { id: chatSettings.model, available: false, reason: 'no-profile' }
   // Nothing can go to a model that can't be used now.
   const unavailable = shownStatus?.available === false ? shownStatus : null
   const noKeys = !!availability?.length && availability.every((a) => a.reason === 'no-key')

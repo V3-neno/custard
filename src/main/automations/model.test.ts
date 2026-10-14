@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OneShotRequest, OneShotResult } from '../adapters/types'
+import { builtInProfiles, setProfiles } from '../../shared/models'
 
 // An automation step is one adapter.sendMessage call; what the reply means
 // for the run must not depend on the provider (Phase 7).
@@ -80,5 +81,19 @@ describe('automation steps go through the adapter', () => {
 
   it('refuses a model Custard no longer offers', () => {
     expect(stepFor('gpt-4')).toMatch(/isn't one Custard offers/)
+  })
+
+  // Phase A3: a profile gone from the registry stops the run the same way,
+  // and nothing is sent.
+  it('refuses a model whose profile is gone from the registry', () => {
+    setProfiles(builtInProfiles.filter((m) => m.id !== 'deepseek-flash'))
+    try {
+      expect(stepFor('deepseek-flash')).toBe(
+        "The model deepseek-flash isn't one Custard offers any more. Pick another."
+      )
+      expect(sent).toHaveLength(0)
+    } finally {
+      setProfiles(builtInProfiles)
+    }
   })
 })

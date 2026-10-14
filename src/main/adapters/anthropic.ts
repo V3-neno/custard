@@ -5,7 +5,7 @@ import type {
   BetaMessageParam,
   MessageCreateParamsStreaming
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import { modelProfiles, profileOf, sentLevel, type ModelProfile } from '../../shared/models'
+import { requireProfile, sentLevel, type ModelProfile } from '../../shared/models'
 import { claudeFilesFrom } from '../attachments/request'
 import {
   claudeHistory,
@@ -56,7 +56,9 @@ const client = (apiKey: string, opts: { timeout?: number; maxRetries?: number } 
 
 async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
   const { requestId, emit, log, signal } = turn
-  const model: ModelProfile = profileOf(turn.model) ?? modelProfiles[0]
+  // A model with no profile fails here, loudly, rather than going to
+  // another model (chat.ts refuses it before this).
+  const model: ModelProfile = requireProfile(turn.model)
   const history = (): TurnRequest['conversation']['messages'] =>
     claudeHistory(turn.history(), model.id)
   const params: MessageCreateParamsStreaming = {

@@ -23,7 +23,7 @@ describe('providers', () => {
 
   it('has models, prices and context limits for every provider and its summary model', () => {
     for (const p of providerIds) {
-      const models = chatModels.filter((m) => m.provider === p)
+      const models = chatModels().filter((m) => m.provider === p)
       expect(models.length).toBeGreaterThan(0)
       for (const m of [...models.map((x) => x.id), providers[p].summaryModel]) {
         expect(PRICES[m], m).toBeDefined()

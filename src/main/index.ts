@@ -7,6 +7,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
 import { allModels } from './adapters/registry'
+import { loadModelRegistry, registeredProfiles } from './modelRegistry'
 import { checkProvider, forgetCheck, lastCheck, modelAvailability } from './adapters/checks'
 import { scanCapabilities, type ScanSources } from './adapters/scan'
 import { DISCOVERY_SKILL, gapFor, starterPrompt } from './plugins/discovery'
@@ -120,6 +121,8 @@ function createWindow(): void {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  // Before any window, so the first one gets the full list.
+  loadModelRegistry()
   // Packaged builds ignore ANTHROPIC_BASE_URL / OPENAI_BASE_URL (L13).
   pinProviderEndpoints(app.isPackaged)
   // Set app user model id for windows
@@ -144,6 +147,9 @@ app.whenReady().then(() => {
   })
   // The model picker's list, from the provider adapters.
   handle('models:list', () => allModels())
+  // The model registry (main/modelRegistry.ts), which the renderer copies
+  // before it draws anything.
+  handle('models:profiles', () => registeredProfiles())
   // Settings only: Save and Refresh check a key with its own provider.
   handle('models:check', (_, p: Provider) => checkProvider(p))
   // Which models can be picked now, from saved keys and the last check: no

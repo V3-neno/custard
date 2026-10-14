@@ -2,7 +2,7 @@ import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { providerOf, type Provider } from '../shared/chat'
-import { modelProfiles, type ModelProfile } from '../shared/models'
+import { builtInProfiles, profileOf, type ModelProfile } from '../shared/models'
 
 // How much of a model's context window a request may use, checked before
 // every model call so a long chat stops cleanly instead of failing at the
@@ -19,15 +19,22 @@ export type ContextLimits = {
   compaction: boolean
 }
 
-// Each model's limits, from its profile (shared/models.ts).
+const limitsOf = (m: ModelProfile): ContextLimits => ({
+  window: m.limits.window,
+  maxOutput: m.limits.maxOutput,
+  compaction: m.compaction
+})
+// The built-in models' limits, as the table they used to be (tests compare
+// them with it).
 export const CONTEXT_LIMITS: Record<string, ContextLimits> = Object.fromEntries(
-  (modelProfiles as readonly ModelProfile[]).map((m) => [
-    m.id,
-    { window: m.limits.window, maxOutput: m.limits.maxOutput, compaction: m.compaction }
-  ])
+  (builtInProfiles as readonly ModelProfile[]).map((m) => [m.id, limitsOf(m)])
 )
 const FALLBACK: ContextLimits = { window: 200_000, maxOutput: 64_000, compaction: false }
-export const limitsFor = (model: string): ContextLimits => CONTEXT_LIMITS[model] ?? FALLBACK
+// A model's limits, from its profile in the registry (shared/models.ts).
+export const limitsFor = (model: string): ContextLimits => {
+  const m = profileOf(model)
+  return m ? limitsOf(m) : FALLBACK
+}
 
 // What a reply may use (Custard's max_tokens), kept free in every request.
 export const OUTPUT_RESERVE = 64_000

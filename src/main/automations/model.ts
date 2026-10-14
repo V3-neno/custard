@@ -1,7 +1,8 @@
 import { getApiKey } from '../apiKey'
 import { adapterFor } from '../adapters/registry'
 import { describeError } from '../providerError'
-import { chatModels, providerNames } from '../../shared/chat'
+import { providerNames } from '../../shared/chat'
+import { profileOf } from '../../shared/models'
 import type { Step } from './run'
 import { charge } from '../store'
 
@@ -19,7 +20,7 @@ import { charge } from '../store'
 //   - the provider couldn't finish: the run ends with its reason
 
 export function stepFor(modelId: string): Step | string {
-  const model = chatModels.find((m) => m.id === modelId)
+  const model = profileOf(modelId)
   if (!model) return `The model ${modelId} isn't one Custard offers any more. Pick another.`
   const apiKey = getApiKey(model.provider)
   if (!apiKey)

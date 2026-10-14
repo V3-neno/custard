@@ -4,31 +4,46 @@ import type { Workspace } from './plugins'
 import type { Attachment, AttachmentKind } from './attachments'
 import { providers, type Provider, type ProviderApi } from './providers'
 import {
+  allProfiles,
   efforts,
-  modelProfiles,
+  hasProfile,
+  profileOf,
   providerEffort,
   shownLevel,
-  type Effort,
-  type ModelId
+  type BuiltInModelId,
+  type Effort
 } from './models'
 
 export { providerNames, type Provider } from './providers'
 
 // Picking a model picks its provider; the app's tint follows it. A view of
-// the model profiles (shared/models.ts), in picker order: `effort` is
-// whether the model takes effort levels, `fallbacks` whether Claude's
-// server-side fallback is on.
-export const chatModels = modelProfiles.map((m) => ({
-  id: m.id,
-  label: m.label,
-  provider: m.provider,
-  effort: m.effort !== null,
-  fallbacks: m.fallbacks
-}))
+// the registry (shared/models.ts), in picker order: `effort` is whether the
+// model takes effort levels, `fallbacks` whether Claude's server-side
+// fallback is on.
+export type ChatModelEntry = {
+  id: string
+  label: string
+  provider: Provider
+  effort: boolean
+  fallbacks: boolean
+}
+export const chatModels = (): ChatModelEntry[] =>
+  allProfiles().map((m) => ({
+    id: m.id,
+    label: m.label,
+    provider: m.provider,
+    effort: m.effort !== null,
+    fallbacks: m.fallbacks
+  }))
 
-export type ChatModel = ModelId
-export const providerOf = (model: string): Provider =>
-  chatModels.find((m) => m.id === model)?.provider ?? 'claude'
+// A model id, checked against the registry at run time (isChatModel): any
+// id can be stored on a chat or as the default model, and one with no
+// profile is never sent anywhere.
+export type ChatModel = string
+// The provider of a model, for the app's tint and labels. A model with no
+// profile shows as Claude's; nothing is sent for it (requests go through
+// requireProfile).
+export const providerOf = (model: string): Provider => profileOf(model)?.provider ?? 'claude'
 
 // The API a model is reached through (see providers.ts).
 export const apiOf = (model: string): ProviderApi => providers[providerOf(model)].api
@@ -44,17 +59,24 @@ export { efforts, type Effort }
 
 export type ChatSettings = { model: ChatModel; effort: Effort }
 
-export const defaultChatSettings: ChatSettings = { model: 'claude-opus-5-5', effort: 'medium' }
+export const defaultChatSettings: ChatSettings & { model: BuiltInModelId } = {
+  model: 'claude-opus-5-5',
+  effort: 'medium'
+}
 
-export const isChatModel = (id: unknown): id is ChatModel => chatModels.some((m) => m.id === id)
+// Whether Custard has a profile for this model id now.
+export const isChatModel = (id: unknown): id is ChatModel => hasProfile(id)
 export const isEffort = (e: unknown): e is Effort => efforts.includes(e as Effort)
 
 // The model and effort a chat is bound to: its own (picked in the chat, or
 // the one it last used), else the one its last request used, else the
 // default model from Settings. Chats from before Custard kept a model per
-// chat have only the last two.
+// chat have only the last two. A model with no profile stays the chat's
+// model, so the chat says so rather than moving to another model.
 export function chatSettingsOf(c: Conversation | null, fallback: ChatSettings): ChatSettings {
-  const model = [c?.model, c?.context?.model].find(isChatModel) ?? fallback.model
+  const model =
+    [c?.model, c?.context?.model].find((m): m is string => typeof m === 'string' && m !== '') ??
+    fallback.model
   const effort = isEffort(c?.effort) ? c.effort : fallback.effort
   return { model, effort }
 }
@@ -73,10 +95,12 @@ export const shownEffort = (provider: Provider, e: Effort): Effort =>
 //   no-key: the provider's key isn't saved.
 //   rejected: the last check said the provider rejected the key.
 //   removed: the last check's list didn't include this model.
+//   no-profile: Custard has no profile for the id (a chat or the default
+//   model names one that isn't in the registry).
 export type ModelAvailability = {
   id: ChatModel
   available: boolean
-  reason?: 'no-key' | 'rejected' | 'removed'
+  reason?: 'no-key' | 'rejected' | 'removed' | 'no-profile'
 }
 
 export const modes = [

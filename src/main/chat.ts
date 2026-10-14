@@ -78,13 +78,11 @@ import { createSkill, skillEntries, skillExists } from './skillsHub'
 import { isWebTool, runWebTool, webTools } from './web'
 import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
-  chatModels,
   isChatModel,
   isEffort,
   type ChatSettings,
   isMode,
   introduce,
-  providerOf,
   type ActionStatus,
   type ApprovalDecision,
   providerNames,
@@ -96,6 +94,7 @@ import {
   type Mode,
   type SendChatRequest
 } from '../shared/chat'
+import { noProfileMessage, profileOf, type ModelProfile } from '../shared/models'
 import { toolLabel } from '../shared/vault'
 import { setRequestLookup, widgets } from './widgets'
 import { modeName, modePolicy, refuseKind, toolKind } from './modes/policy'
@@ -165,7 +164,7 @@ const isCoreWrite = (name: string, input: unknown): boolean =>
   CORE_WRITES.test(name) ||
   (name === 'design_jobs' && (input as { action?: unknown } | null)?.action === 'cancel')
 
-const systemPrompt = (model: (typeof chatModels)[number]): string =>
+const systemPrompt = (model: ModelProfile): string =>
   `${introduce(model)}, ` +
   'working with the user through Custard, their personal desktop client. ' +
   'Format responses in Markdown when it helps readability.'
@@ -244,11 +243,15 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const emit = (e: ChatEvent): void => {
     if (!sender.isDestroyed()) sender.send('chat:event', e)
   }
-  const model = chatModels.find((m) => m.id === req.settings.model) ?? chatModels[0]
-  const provider = providerNames[model.provider]
-  const apiKey = getApiKey(model.provider)
   const refuse = (message: string): void =>
     emit({ requestId, type: 'error', message, conversation: null, kept: false })
+  // A model with no profile is never sent anywhere, and never swapped for
+  // another one: the chat says so and keeps its model until another is
+  // picked.
+  const model = profileOf(String(req.settings?.model))
+  if (!model) return refuse(noProfileMessage(String(req.settings?.model)))
+  const provider = providerNames[model.provider]
+  const apiKey = getApiKey(model.provider)
   if (!apiKey) return refuse(`Add your ${provider} API key in Settings first.`)
 
   const fileIds = req.attachments?.ids ?? []
@@ -1059,7 +1062,12 @@ async function continueFrom(id: string, withoutSummary: boolean): Promise<Contin
         },
         save: saveConversation,
         summarizer: (original) => {
-          const p = providerOf(original.context?.model ?? getChatSettings().model)
+          // The summary goes to the provider of the model the chat last used.
+          // One with no profile has no provider, so nothing is sent.
+          const id = original.context?.model ?? getChatSettings().model
+          const p = profileOf(id)?.provider
+          if (!p)
+            return `${noProfileMessage(id).replace(/ Pick a different model\.$/, '')} Custard doesn't know which provider to ask for the summary. Continue without one, or pick a different model in this chat first.`
           const key = getApiKey(p)
           // Charged to the chat being summarized.
           return key

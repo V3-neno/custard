@@ -20,7 +20,7 @@ export type Automation = {
   name: string
   // The skill's folder name under Custard/Skills.
   skill: string
-  // A model id from chatModels.
+  // A model id from chatModels().
   model: string
   // Local times of day, "HH:MM", ascending.
   times: string[]

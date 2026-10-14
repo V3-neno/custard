@@ -6,10 +6,9 @@ import {
   type ModelInfo
 } from '../../shared/adapter'
 import { hasHostedSearch, profileOf, type ModelProfile } from '../../shared/models'
-import { PRICES } from '../../shared/pricing'
 import { providers, responsesFeatures } from '../../shared/providers'
 import { kindRefusal } from '../attachments/request'
-import { CONTEXT_LIMITS, limitsFor } from '../context'
+import { limitsFor } from '../context'
 
 // What each model Custard offers can do: the rules below, applied to the
 // model's profile (shared/models.ts), the same profile a request is built
@@ -85,7 +84,7 @@ export function capabilitiesOf(id: string): ModelCapabilities {
 export function modelInfo(id: string): ModelInfo | null {
   const m = profileOf(id)
   if (!m) return null
-  const limits = CONTEXT_LIMITS[m.id] ?? limitsFor(m.id)
+  const limits = limitsFor(m.id)
   return {
     id: m.id,
     label: m.label,
@@ -93,7 +92,7 @@ export function modelInfo(id: string): ModelInfo | null {
     api: providers[m.provider].api,
     contextWindow: limits.window,
     maxOutput: limits.maxOutput,
-    priced: Object.hasOwn(PRICES, m.id),
+    priced: m.prices !== null,
     capabilities: capabilitiesOf(m.id),
     source: 'profile'
   }

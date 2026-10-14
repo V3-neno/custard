@@ -1,6 +1,6 @@
 # Providers
 
-Custard talks to each provider through one of two APIs: Anthropic's Messages API (Claude) or the OpenAI Responses API (OpenAI, DeepSeek). Each provider is one entry in `src/shared/providers.ts`; its adapter is in `src/main/adapters/registry.ts`, its key file in `src/main/providers.ts` and its address in `src/main/endpoints.ts`. Each of its models has one profile in `src/shared/models.ts`: label, context limits, prices, thinking, effort levels, fallbacks, files, hosted search and live evidence. `chatModels`, `CONTEXT_LIMITS` and `PRICES` are views of those profiles. TypeScript flags the other tables that need an entry: attachment rules (`attachments/request.ts`), Design's chat-output note (`design/capabilities.ts`), the orb colours (`Orb.tsx`) and the context minimum (`MIN_TRIGGER`). The theme is a `data-provider` block in `src/renderer/src/assets/main.css`, which TypeScript can't check.
+Custard talks to each provider through one of two APIs: Anthropic's Messages API (Claude) or the OpenAI Responses API (OpenAI, DeepSeek). Each provider is one entry in `src/shared/providers.ts`; its adapter is in `src/main/adapters/registry.ts`, its key file in `src/main/providers.ts` and its address in `src/main/endpoints.ts`. Each of its models has one profile in `src/shared/models.ts`: label, context limits, prices, thinking, effort levels, fallbacks, files, hosted search and live evidence. At run time main holds them in a registry (`src/main/modelRegistry.ts`), which the renderer copies over IPC before it draws; `chatModels()`, `limitsFor`, prices and capabilities read it. A model id with no profile in the registry is never sent anywhere: the chat, Settings → Default model and new chats show "can't be used right now. Its profile is missing" with Pick a different model, main refuses the send, and automations stop as before. TypeScript flags the other tables that need an entry: attachment rules (`attachments/request.ts`), Design's chat-output note (`design/capabilities.ts`), the orb colours (`Orb.tsx`) and the context minimum (`MIN_TRIGGER`). The theme is a `data-provider` block in `src/renderer/src/assets/main.css`, which TypeScript can't check.
 
 To add a provider, follow [adding-a-provider.md](adding-a-provider.md): the steps in order, a template adapter (`src/main/adapters/template.ts`) and walkthroughs for Qwen and Claude on Amazon Bedrock.
 
@@ -73,14 +73,14 @@ A provider-neutral stored format was kept as a possible cleanup if the round-tri
 There is no discovery at runtime. A provider exists because it has an entry in `providers` (`src/shared/providers.ts`); `Provider` is that object's keys, and `providerIds` its order (the picker's and Settings' order). Every table keyed by provider is a `Record<Provider, …>`, so a new entry fails the typecheck until it has an adapter (`registry.ts`), a key file, an address, attachment rules, Design's note, orb colours and a context minimum.
 
 - `adapterFor(provider)`: the adapter for a provider.
-- `adapterForModel(model)`: looks the model up in `chatModels` by id; an unknown id falls back to Claude.
+- `adapterForModel(model)`: the adapter of the model's provider, from its profile; an id with no profile throws (`NoProfileError`) rather than going to Claude.
 - `allModels()`: every provider's own models, from `listModels(null)`. No request, no key.
 
 Plugins can't add providers, and Settings can't add an address.
 
 ### How availability is worked out
 
-`availabilityFrom` in `adapters/checks.ts`, for each model in `chatModels`, from two local facts only (no request):
+`availabilityFrom` in `adapters/checks.ts`, for each model in `chatModels()`, from two local facts only (no request):
 
 1. Is a key saved for its provider? No: `no-key`.
 2. What did the last Save/Refresh check say (`model-checks.json`)? Key rejected (401/403): `rejected`. A successful list without this model: `removed`. Couldn't reach the provider, or never checked: available.

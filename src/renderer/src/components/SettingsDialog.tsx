@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   providerIds,
   providerInfo,
@@ -197,10 +197,14 @@ function KeySection({
 // with (or switched to); changing this changes no existing chat.
 function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JSX.Element {
   const [s, setS] = useState<ChatSettings | null>(null)
+  const modelBox = useRef<HTMLSelectElement>(null)
   useEffect(() => {
     window.custard.settings.get().then(setS)
   }, [])
   if (!s) return <section className="mb-6" />
+  // A stored default with no profile is kept, not replaced: Settings and
+  // every new chat say so until another model is picked.
+  const known = isChatModel(s.model)
   // The default model's effort levels, labelled as Settings always has
   // them (see settingsLabel in shared/models.ts).
   const levels = profileOf(s.model)?.effort ?? null
@@ -216,8 +220,25 @@ function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JS
       <p className="mb-3 text-sm text-ash-300">
         New chats start on it. Each chat keeps its own model; pick another under the message box.
       </p>
+      {!known && (
+        <p
+          role="status"
+          data-default-model-notice="no-profile"
+          className="mb-3 rounded-2xl border border-forge-700 bg-forge-900 px-4 py-2.5 text-sm text-ash-300"
+        >
+          {s.model} can&apos;t be used right now. Its profile is missing, so new chats can&apos;t be
+          sent until you pick a different model.{' '}
+          <button
+            onClick={() => modelBox.current?.focus()}
+            className="text-molten-300 hover:underline"
+          >
+            Pick a different model
+          </button>
+        </p>
+      )}
       <div className="flex gap-2">
         <select
+          ref={modelBox}
           title="Default model"
           className={`${select} flex-1`}
           value={s.model}
@@ -227,9 +248,14 @@ function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JS
             save({ model: id, effort: shownLevel(profileOf(id)?.effort ?? null, s.effort) })
           }}
         >
+          {!known && (
+            <option value={s.model} disabled>
+              {s.model} (no profile)
+            </option>
+          )}
           {providerIds.map((p) => (
             <optgroup key={p} label={providerNames[p]}>
-              {chatModels
+              {chatModels()
                 .filter((m) => m.provider === p)
                 .map((m) => (
                   <option key={m.id} value={m.id}>

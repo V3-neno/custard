@@ -43,7 +43,7 @@ function golden(name: string, actual: unknown): void {
   expect(json).toEqual(JSON.parse(fs.readFileSync(fixture(name), 'utf8')))
 }
 
-const ids = chatModels.map((m) => m.id)
+const ids = chatModels().map((m) => m.id)
 // A model a provider lists that Custard has no profile for.
 const UNKNOWN = 'deepseek-v5-preview'
 
@@ -101,7 +101,7 @@ describe('model tables, before and after profiles', () => {
 
   it('every per-model table gives the same values', () => {
     golden('tables.json', {
-      chatModels,
+      chatModels: chatModels(),
       defaultChatSettings,
       summaryModels: SUMMARY_MODELS,
       handoffModels: HANDOFF_MODELS,
@@ -116,7 +116,7 @@ describe('model tables, before and after profiles', () => {
       ),
       models: Object.fromEntries(
         [...ids, UNKNOWN].map((id) => {
-          const m = chatModels.find((x) => x.id === id) ?? {
+          const m = chatModels().find((x) => x.id === id) ?? {
             id,
             label: id,
             provider: 'deepseek' as const

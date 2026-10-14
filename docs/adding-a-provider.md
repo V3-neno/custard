@@ -62,7 +62,7 @@ TypeScript requires it once the profile exists. Nothing else finds providers: th
 
 Each model id must be unique across all providers: `adapterForModel` and `capabilitiesOf` look models up by id alone.
 
-- `src/shared/models.ts` → one entry in `modelProfiles` per model: `id`, `provider`, `label`, `limits` (`window`, `maxOutput`), `compaction`, `prices` (put the source URL in the comment at the top of `pricing.ts`), `thinking`, `effort` (levels, or `null` for none: no effort is sent and the picker greys its buttons), `fallbacks`, `files` (`images`, `pdf`, `imageTokens`), `search` and `live`. Order is picker order. `chatModels`, `PRICES` and `CONTEXT_LIMITS` are built from it. Without prices, the usage meter counts the model's calls as unpriced, and `capabilities.test.ts` fails (it requires every model to be priced).
+- `src/shared/models.ts` → one entry in `builtInProfiles` per model: `id`, `provider`, `label`, `limits` (`window`, `maxOutput`), `compaction`, `prices` (put the source URL in the comment at the top of `pricing.ts`), `thinking`, `effort` (levels, or `null` for none: no effort is sent and the picker greys its buttons), `fallbacks`, `files` (`images`, `pdf`, `imageTokens`), `search` and `live`. Order is picker order. Main's model registry (`src/main/modelRegistry.ts`) starts from this list and the renderer copies it over IPC (`models:profiles`); `chatModels()`, `limitsFor`, prices and capabilities all read the registry. `modelRegistry.test.ts` checks that every model id the app's code names has a profile. Without prices, the usage meter counts the model's calls as unpriced, and `capabilities.test.ts` fails (it requires every model to be priced).
 - `src/main/context.ts` → `MIN_TRIGGER` (TypeScript asks for it).
 - `discoverModels` (step 1): the key check (step 9) then lists the provider's other models in Settings as "not yet supported". Unknown models never reach the picker.
 
@@ -108,7 +108,7 @@ The key check is the provider's model list, run only on Save or Refresh in Setti
 
 Unit (vitest):
 
-- `src/main/adapters/registry.test.ts` iterates `providerIds` and `capabilities.test.ts` iterates `chatModels`, so both cover a new provider without edits. Run them.
+- `src/main/adapters/registry.test.ts` iterates `providerIds` and `capabilities.test.ts` iterates `chatModels()`, so both cover a new provider without edits. Run them.
 - Add the provider's stop mapping to `src/main/adapters/effort.test.ts` (refusal, cut-off, effort on the wire) and its model list parsing to `discovery.test.ts`.
 
 End-to-end (built app, local stand-ins, no provider called; see `test/e2e/`):

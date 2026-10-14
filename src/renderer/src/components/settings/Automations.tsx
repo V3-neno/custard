@@ -82,7 +82,7 @@ export default function Automations(): React.JSX.Element {
   // The models a run can use: the adapters' list, and which of them can be
   // used now (the same rules as the chat's picker; no provider is asked).
   const [models, setModels] = useState<Pick<ListedModel, 'id' | 'label' | 'provider'>[]>(() => [
-    ...chatModels
+    ...chatModels()
   ])
   const [availability, setAvailability] = useState<ModelAvailability[]>([])
 
@@ -119,7 +119,7 @@ export default function Automations(): React.JSX.Element {
     if (!a)
       return setForm(
         blank(
-          models.find((m) => !offFor(m.id))?.id ?? models[0]?.id ?? chatModels[0].id,
+          models.find((m) => !offFor(m.id))?.id ?? models[0]?.id ?? chatModels()[0].id,
           skills[0] ?? ''
         )
       )

@@ -4,10 +4,12 @@ import type { Provider } from './providers'
 
 // One profile per model Custard offers: every fixed fact about the model in
 // one place. Facts about a provider (its API, key, address, Responses flags,
-// summary model) stay in providers.ts. The old per-model tables are views of
-// these profiles: chatModels (chat.ts), CONTEXT_LIMITS (main/context.ts) and
-// PRICES (pricing.ts). Adding a model of an existing provider is one entry
-// here.
+// summary model) stay in providers.ts. The built-in profiles are below; the
+// list Custard offers at run time is the registry at the end of this file,
+// which main fills and the renderer copies (see main/modelRegistry.ts). The
+// old per-model tables are views of the profiles: chatModels() (chat.ts),
+// CONTEXT_LIMITS (main/context.ts) and PRICES (pricing.ts). Adding a model of
+// an existing provider is one entry here.
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -95,7 +97,7 @@ const DEEPSEEK_LEVELS: EffortSpec = {
 // Limits checked against the providers' docs on 2026-10-07 (see
 // docs/long-chats.md), prices on 2026-10-12 (sources at the top of
 // pricing.ts). Neither is looked up at run time. In picker order.
-export const modelProfiles = [
+export const builtInProfiles = [
   // Claude: the full 1M context at standard rates; cache reads at 0.05x on
   // Opus 5.5 and Sonnet 5.5, 0.1x on Haiku 4.5.
   {
@@ -237,18 +239,54 @@ export const modelProfiles = [
   }
 ] as const satisfies readonly ModelProfile[]
 
-export type ModelId = (typeof modelProfiles)[number]['id']
+export type BuiltInModelId = (typeof builtInProfiles)[number]['id']
+
+// The registry: the profiles Custard offers now, in picker order. Main owns
+// it (main/modelRegistry.ts builds it at startup; today that is the built-in
+// profiles) and the renderer replaces its copy with main's list over IPC
+// (models:profiles) before it draws anything. A model id with no profile here
+// is never sent anywhere: the chat shows "its profile is missing" instead.
+let registry: readonly ModelProfile[] = builtInProfiles
+
+export const allProfiles = (): readonly ModelProfile[] => registry
+
+// Replaces the registry. Main calls it once at startup, the renderer with
+// main's list.
+export function setProfiles(list: readonly ModelProfile[]): void {
+  registry = list
+}
 
 // The profile of a model id, or undefined for one Custard has no profile for.
-export const profileOf = (id: string): ModelProfile | undefined =>
-  (modelProfiles as readonly ModelProfile[]).find((m) => m.id === id)
+export const profileOf = (id: string): ModelProfile | undefined => registry.find((m) => m.id === id)
+
+export const hasProfile = (id: unknown): id is string =>
+  typeof id === 'string' && profileOf(id) !== undefined
+
+// Thrown where a model id with no profile reaches code that would otherwise
+// have to guess (a request, its provider, its effort).
+export class NoProfileError extends Error {
+  constructor(readonly model: string) {
+    super(noProfileMessage(model))
+    this.name = 'NoProfileError'
+  }
+}
+
+// What the user is told when a chat or automation names such a model.
+export const noProfileMessage = (model: string): string =>
+  `${model} can't be used right now: its profile is missing. Pick a different model.`
+
+// The profile of a model id, or a NoProfileError.
+export function requireProfile(id: string): ModelProfile {
+  const p = profileOf(id)
+  if (!p) throw new NoProfileError(id)
+  return p
+}
 
 // A provider's effort levels, for what the picker shows on that provider's
 // tab: the first of its models that takes effort (a provider's models share
 // their levels; a test checks it).
 export const providerEffort = (provider: Provider): EffortSpec | null =>
-  (modelProfiles as readonly ModelProfile[]).find((m) => m.provider === provider && m.effort)
-    ?.effort ?? null
+  registry.find((m) => m.provider === provider && m.effort)?.effort ?? null
 
 // The level a stored effort shows as under these levels.
 export const shownLevel = (spec: EffortSpec | null, e: Effort): Effort =>

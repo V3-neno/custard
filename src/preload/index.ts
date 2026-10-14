@@ -22,6 +22,7 @@ import type { AutomationView, PendingQuestion } from '../shared/automations'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision, ModelAvailability } from '../shared/chat'
+import type { ModelProfile } from '../shared/models'
 import type {
   Artifact,
   ArtifactSummary,
@@ -47,6 +48,8 @@ const custard = {
   models: {
     // Every provider's models, from its adapter.
     list: (): Promise<ListedModel[]> => ipcRenderer.invoke('models:list'),
+    // The model registry: the profiles Custard offers now (main/modelRegistry).
+    profiles: (): Promise<ModelProfile[]> => ipcRenderer.invoke('models:profiles'),
     // Asks the provider, with the saved key. Settings' Save and Refresh only.
     check: (p: Provider): Promise<ModelCheck | null> => ipcRenderer.invoke('models:check', p),
     // From saved keys and the last check only; asks no provider.

@@ -5,7 +5,7 @@ import { capabilities } from '../shared/adapter'
 import { chatModels, defaultChatSettings, effortChoices, shownEffort } from '../shared/chat'
 import {
   efforts,
-  modelProfiles,
+  builtInProfiles,
   profileOf,
   providerEffort,
   sentLevel,
@@ -23,7 +23,7 @@ import { SUMMARY_MODELS } from './memory/summarize'
 // Workstream A, Phase A2: one profile per built-in model, and the old tables
 // as views of it.
 
-const profiles = modelProfiles as readonly ModelProfile[]
+const profiles = builtInProfiles as readonly ModelProfile[]
 const ids = profiles.map((m) => m.id)
 
 // The tables as they were written before the profiles (a8ec2e7).
@@ -118,7 +118,7 @@ describe('model profiles', () => {
   it('every built-in model has exactly one profile', () => {
     expect(ids.length).toBe(8)
     expect(new Set(ids).size).toBe(ids.length)
-    expect(chatModels.map((m) => m.id)).toEqual(ids)
+    expect(chatModels().map((m) => m.id)).toEqual(ids)
     for (const id of ids) expect(profiles.filter((m) => m.id === id)).toHaveLength(1)
   })
 
@@ -129,15 +129,15 @@ describe('model profiles', () => {
       expect(HANDOFF_MODELS[p]).toBe(providers[p].summaryModel)
     }
     expect(profileOf(defaultChatSettings.model)).toBeDefined()
-    // What an unknown id falls back to today (chat.ts, the Claude adapter).
-    expect(profileOf(chatModels[0].id)).toBe(profiles[0])
+    // The first model: what a new automation starts on (Settings → Automations).
+    expect(profileOf(chatModels()[0].id)).toBe(profiles[0])
     // Each provider has at least one model, and every live capability is real.
     for (const p of providerIds) expect(profiles.some((m) => m.provider === p)).toBe(true)
     for (const m of profiles) for (const c of m.live ?? []) expect(capabilities, m.id).toContain(c)
   })
 
-  it('chatModels, CONTEXT_LIMITS and PRICES equal the old tables for all 8 models', () => {
-    expect(chatModels).toEqual(OLD_CHAT_MODELS)
+  it('chatModels(), CONTEXT_LIMITS and PRICES equal the old tables for all 8 models', () => {
+    expect(chatModels()).toEqual(OLD_CHAT_MODELS)
     expect(CONTEXT_LIMITS).toEqual(OLD_CONTEXT_LIMITS)
     expect(PRICES).toEqual(OLD_PRICES)
   })
