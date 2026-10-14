@@ -1,12 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk'
 import type { ActionRecord, Continuation, Conversation } from '../shared/chat'
 import { providerIds, providers, type Provider } from '../shared/providers'
 import { redact } from './memory/evidence'
 import { filesNote } from '../shared/attachments'
-import { anthropicEndpoint } from './endpoints'
-import { responsesClient } from './providers'
+import { adapterFor } from './adapters/registry'
 import type { OnUsage } from '../shared/pricing'
-import { fromClaude, fromOpenAI } from './usage'
 
 // "Continue in a new chat": a bounded handoff from a chat that is too long
 // to go on. It is built from the saved chat in code, so it works however
@@ -299,45 +296,26 @@ export function handoffSummarizer(
 ): HandoffSummarizer {
   const instructions = (strict?: boolean): string =>
     strict ? `${system}\n${STRICT_LANGUAGE}` : system
-  const opts = { timeout: HANDOFF_LIMITS.timeoutMs, maxRetries: HANDOFF_LIMITS.retries }
-  if (providers[provider].api === 'responses') {
-    const client = responsesClient(provider, apiKey, opts)
-    return async (evidence, signal, strict) => {
-      const r = await client.responses.create(
-        {
-          model: HANDOFF_MODELS[provider],
-          instructions: instructions(strict),
-          input: evidence,
-          max_output_tokens: HANDOFF_LIMITS.maxTokens,
-          reasoning: { effort: 'low' },
-          store: false,
-          text: {
-            format: { type: 'json_schema', name: 'handoff', strict: true, schema }
-          }
-        },
-        { signal }
-      )
-      onUsage?.(HANDOFF_MODELS[provider], fromOpenAI(r.usage))
-      if (r.status === 'incomplete') throw new Error('The summary was cut off.')
-      return parseHandoff(r.output_text)
-    }
-  }
-  const client = new Anthropic({ apiKey, ...opts, ...anthropicEndpoint() })
+  const adapter = adapterFor(provider)
   return async (evidence, signal, strict) => {
-    const m = await client.messages.create(
-      {
-        model: HANDOFF_MODELS[provider],
-        max_tokens: HANDOFF_LIMITS.maxTokens,
-        system: instructions(strict),
-        messages: [{ role: 'user', content: evidence }],
-        output_config: { format: { type: 'json_schema', schema } }
-      },
-      { signal }
-    )
-    onUsage?.(m.model || HANDOFF_MODELS[provider], fromClaude(m.usage))
-    if (m.stop_reason === 'refusal') throw new Error('The summary was declined.')
-    if (m.stop_reason === 'max_tokens') throw new Error('The summary was cut off.')
-    return parseHandoff(m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))
+    const r = await adapter.sendMessage({
+      model: HANDOFF_MODELS[provider],
+      apiKey,
+      system: instructions(strict),
+      messages: evidence,
+      schema: { name: 'handoff', schema },
+      maxTokens: HANDOFF_LIMITS.maxTokens,
+      effort: 'low',
+      timeoutMs: HANDOFF_LIMITS.timeoutMs,
+      retries: HANDOFF_LIMITS.retries,
+      signal
+    })
+    for (const u of r.usage) onUsage?.(u.model, u.usage)
+    if (r.stop === 'refused') throw new Error('The summary was declined.')
+    if (r.stop === 'cut-off') throw new Error('The summary was cut off.')
+    if (r.stop === 'too-long') throw new Error('The chat was too long to summarize.')
+    if (r.stop === 'failed') throw new Error(`The summary failed: ${r.error ?? 'no reason given'}`)
+    return parseHandoff(r.text)
   }
 }
 

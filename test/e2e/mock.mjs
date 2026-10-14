@@ -47,6 +47,20 @@ http
         res.writeHead(status, { 'content-type': 'application/json' })
         res.end(data === undefined ? '' : JSON.stringify(data))
       }
+      // The key check on Save: Claude's model list, so the key counts as
+      // working and the chat's model can be used.
+      if (url.pathname === '/v1/models')
+        return j(200, {
+          data: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5'].map((id) => ({
+            type: 'model',
+            id,
+            display_name: id,
+            created_at: '2026-01-01T00:00:00Z'
+          })),
+          has_more: false,
+          first_id: 'claude-opus-5-5',
+          last_id: 'claude-haiku-4-5'
+        })
       if (url.pathname !== '/v1/messages') {
         spotify.push({
           method: req.method,

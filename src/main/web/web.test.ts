@@ -327,6 +327,9 @@ describe('running the web tools', () => {
     signal: new AbortController().signal,
     turn: 0,
     injected: [],
+    search: async () => {
+      throw new Error('no search in this test')
+    },
     approve: async (label, _input, warning) => {
       approvals.push(label)
       warnings.push(warning)

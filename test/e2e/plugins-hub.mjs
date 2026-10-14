@@ -70,7 +70,10 @@ try {
   await w.click('button:has-text("Use an existing vault")')
   await w.waitForSelector('text=· connected')
   const tabs = await w.locator('[role=tab]').allInnerTexts()
-  check(tabs.join(',') === 'General,Design', `Settings tabs are General and Design (${tabs})`)
+  check(
+    tabs.join(',') === 'General,Design,Capabilities',
+    `Settings tabs are General, Design and Capabilities, with no Plugins tab (${tabs})`
+  )
   check(
     (await w.locator('text=Ask before plugin actions').count()) === 0,
     'the plugin-action setting is not in Settings'

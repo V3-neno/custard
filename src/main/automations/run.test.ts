@@ -17,6 +17,7 @@ import { slotsBetween } from './schedule'
 import { listEdits } from '../vault/edit'
 import { extensionRefusal, extensionTarget } from '../modes/extensions'
 import {
+  CUT_OFF_REASON,
   effectiveGrants,
   runAutomation,
   WRITE_BUDGET,
@@ -173,6 +174,24 @@ describe('what a run does', () => {
       'completed',
       expect.stringMatching(/not-run|failed/)
     ])
+  })
+})
+
+describe('a reply cut off at the output limit (Phase 8)', () => {
+  it('keeps its text, and the record says the run ended early', async () => {
+    const m = script([
+      { text: '', calls: [call('vault_read', { path: 'Notes/a.md' })] },
+      { text: 'Half a sum', calls: [], cutOff: true }
+    ])
+    const r = await run(auto(), deps(m.step))
+    expect(r.status).toBe('completed')
+    expect(r.summary).toBe('Half a sum')
+    expect(r.reason).toBe(CUT_OFF_REASON)
+  })
+
+  it('a whole reply says nothing of the kind', async () => {
+    const r = await run(auto(), deps(script([{ text: 'Done.', calls: [] }]).step))
+    expect(r.reason).toBeUndefined()
   })
 })
 

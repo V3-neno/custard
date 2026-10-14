@@ -1,117 +1,54 @@
-import Anthropic from '@anthropic-ai/sdk'
-import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import type { FunctionTool } from 'openai/resources/responses/responses'
 import { getApiKey } from '../apiKey'
-import { anthropicEndpoint } from '../endpoints'
-import { responsesClient } from '../providers'
-import { toBlocks, toInput } from '../openai'
+import { adapterFor } from '../adapters/registry'
 import { describeError } from '../providerError'
 import { chatModels, providerNames } from '../../shared/chat'
-import { providers, type Provider } from '../../shared/providers'
-import type { Step, StepResult } from './run'
+import type { Step } from './run'
 import { charge } from '../store'
-import { claudeParts, fromOpenAI } from '../usage'
 
-// One model call per step, not streamed to anyone, with no retry of its own:
+// One model call per step, through the model's provider adapter
+// (adapter.sendMessage), not streamed to anyone, with no retry of its own:
 // a rate limit or a rejected key ends the run with the reason, and the
-// schedule decides what happens next. The other provider's SDK retries are
-// off for the same reason.
+// schedule decides what happens next. Claude waits for its reply over a
+// stream, as long replies need; a Responses provider sends one plain request
+// with no output limit. What a reply means for the run is the same for every
+// provider:
+//   - declined, or the context window filled: the run ends with the reason
+//   - cut off while calling a tool: the run ends and the call is not run
+//   - cut off with text only: the text is the step's answer, and the run's
+//     record says it ended early at the output limit (CUT_OFF_REASON)
+//   - the provider couldn't finish: the run ends with its reason
 
-const fail = (err: unknown, provider: string): never => {
-  throw new Error(describeError(err, provider))
-}
-
-function claudeStep(modelId: string, apiKey: string): Step {
-  const provider = providerNames.claude
-  return async ({ system, messages, tools, signal }) => {
-    const client = new Anthropic({ apiKey, maxRetries: 0, ...anthropicEndpoint() })
-    let message
-    try {
-      message = await client.beta.messages
-        .stream(
-          {
-            model: modelId,
-            max_tokens: 16000,
-            system,
-            messages,
-            ...(tools.length ? { tools } : {})
-          },
-          { signal }
-        )
-        .finalMessage()
-    } catch (err) {
-      return fail(err, provider)
-    }
-    // Automations belong to no chat: counted for the month only.
-    for (const part of claudeParts(message.usage, message.model || modelId))
-      charge(null, part.model, part.usage)
-    if (message.stop_reason === 'refusal') throw new Error('Claude declined this request.')
-    const calls = message.content.flatMap((b) =>
-      b.type === 'tool_use' ? [{ id: b.id, name: b.name, input: b.input }] : []
-    )
-    if (message.stop_reason === 'max_tokens' && calls.length)
-      throw new Error('The answer was cut off while it was calling a tool, so nothing was run.')
-    if (message.stop_reason === 'model_context_window_exceeded')
-      throw new Error('The run got too long for the model.')
-    return {
-      text: message.content.map((b) => (b.type === 'text' ? b.text : '')).join(''),
-      calls
-    } satisfies StepResult
-  }
-}
-
-const toFunctionTool = (t: BetaTool): FunctionTool => ({
-  type: 'function',
-  name: t.name,
-  description: t.description ?? null,
-  parameters: t.input_schema as Record<string, unknown>,
-  strict: false
-})
-
-// For a Responses API provider (see shared/providers.ts).
-function openaiStep(id: Provider, modelId: string, apiKey: string): Step {
-  const provider = providerNames[id]
-  return async ({ system, messages, tools, signal }) => {
-    const client = responsesClient(id, apiKey, { maxRetries: 0 })
-    let response
-    try {
-      response = await client.responses.create(
-        {
-          model: modelId,
-          instructions: system,
-          input: toInput(messages),
-          store: false,
-          ...(tools.length ? { tools: tools.map(toFunctionTool) } : {})
-        },
-        { signal }
-      )
-    } catch (err) {
-      return fail(err, provider)
-    }
-    charge(null, modelId, fromOpenAI(response.usage))
-    if (response.status === 'incomplete')
-      throw new Error('The answer was cut off, so nothing more was run.')
-    if (response.status === 'failed')
-      throw new Error(
-        `${provider} could not finish this: ${response.error?.message ?? 'unknown error'}`
-      )
-    const blocks = toBlocks(response.output)
-    return {
-      text: blocks.map((b) => (b.type === 'text' ? b.text : '')).join(''),
-      calls: blocks.flatMap((b) =>
-        b.type === 'tool_use' ? [{ id: b.id, name: b.name, input: b.input }] : []
-      )
-    }
-  }
-}
-
-// The step for a model id, or why there can't be one.
 export function stepFor(modelId: string): Step | string {
   const model = chatModels.find((m) => m.id === modelId)
   if (!model) return `The model ${modelId} isn't one Custard offers any more. Pick another.`
-  const key = getApiKey(model.provider)
-  if (!key) return `There is no ${providerNames[model.provider]} API key saved. Add it in Settings.`
-  return providers[model.provider].api === 'anthropic'
-    ? claudeStep(model.id, key)
-    : openaiStep(model.provider, model.id, key)
+  const apiKey = getApiKey(model.provider)
+  if (!apiKey)
+    return `There is no ${providerNames[model.provider]} API key saved. Add it in Settings.`
+  const adapter = adapterFor(model.provider)
+  const provider = providerNames[model.provider]
+  return async ({ system, messages, tools, signal }) => {
+    let r
+    try {
+      r = await adapter.sendMessage({
+        model: model.id,
+        apiKey,
+        system,
+        messages,
+        tools,
+        stream: true,
+        retries: 0,
+        signal
+      })
+    } catch (err) {
+      throw new Error(describeError(err, provider))
+    }
+    // Automations belong to no chat: counted for the month only.
+    for (const part of r.usage) charge(null, part.model, part.usage)
+    if (r.stop === 'refused') throw new Error(`${provider} declined this request.`)
+    if (r.stop === 'too-long') throw new Error('The run got too long for the model.')
+    if (r.stop === 'failed') throw new Error(`${provider} could not finish this: ${r.error}`)
+    if (r.stop === 'cut-off' && r.calls.length)
+      throw new Error('The answer was cut off while it was calling a tool, so nothing was run.')
+    return { text: r.text, calls: r.calls, ...(r.stop === 'cut-off' ? { cutOff: true } : {}) }
+  }
 }

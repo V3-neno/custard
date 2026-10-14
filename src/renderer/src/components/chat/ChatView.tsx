@@ -1,10 +1,13 @@
+import { clearPluginWorkspace, peekPluginWorkspace } from './workspaceEntry'
 import { chatHasOutsideText } from '../../../../shared/outsideText'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import {
+  chatSettingsOf,
   modes,
   providerNames,
   providerOf,
+  type ModelAvailability,
   type ActionRecord,
   type ChatLink,
   type WebSource,
@@ -17,6 +20,7 @@ import HistoryDrawer from '../HistoryDrawer'
 import ModeBubbles from '../ModeBubbles'
 import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
+import ModelNotice from './ModelNotice'
 import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
 import { SentReferences } from './References'
 import { SentFiles } from './Attachments'
@@ -98,9 +102,12 @@ const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState 
 type Props = {
   mode: Mode
   onModeChange: (mode: Mode) => void
-  hasKey: boolean
+  // The default model (Settings → General): new chats start on it.
   settings: ChatSettings
-  onSettings: (s: ChatSettings) => void
+  // The model of the chat on screen (or the next new one), for the colours.
+  onShownModel: (model: ChatSettings['model']) => void
+  // Bumped when keys or their checks may have changed (Settings closed).
+  statusTick: number
   onOpenSettings: () => void
   historyOpen: boolean
   onCloseHistory: () => void
@@ -159,15 +166,59 @@ function SideSwitch({
 }
 
 function ChatView(props: Props): React.JSX.Element {
-  const { mode, onModeChange, hasKey, settings, onSettings, onOpenSettings } = props
+  const { mode, onModeChange, settings, onShownModel, statusTick, onOpenSettings } = props
   const { historyOpen, onCloseHistory, temporary, onTemporary, newChat, home, onBusy } = props
   const { onOutsideText } = props
   const [list, setList] = useState<ConversationSummary[]>([])
   const [filter, setFilter] = useState<Mode | null>(historyFilter)
   const [current, setCurrent] = useState<Conversation | null>(null)
-  const restoring = useRef(openChats.has(mode))
+  // A model picked here: for the next new chat (chat null), or for the open
+  // chat, whose next message uses it. Picking never asks a provider.
+  const [picked, setPicked] = useState<{ chat: string | null; s: ChatSettings } | null>(null)
+  const chatSettings: ChatSettings =
+    picked && picked.chat === (current?.id ?? null)
+      ? picked.s
+      : current
+        ? chatSettingsOf(current, settings)
+        : settings
+  useEffect(() => onShownModel(chatSettings.model), [chatSettings.model, onShownModel])
+  // Which models can be used now, from the saved keys and the last check;
+  // read when the view opens, when the chat changes and after Settings.
+  const [availability, setAvailability] = useState<ModelAvailability[] | null>(null)
+  const availabilityChat = current?.id ?? null
   useEffect(() => {
-    const id = openChats.get(mode)
+    let gone = false
+    window.custard.models
+      .availability()
+      .then((a) => !gone && setAvailability(a))
+      .catch(() => {})
+    return () => {
+      gone = true
+    }
+  }, [statusTick, availabilityChat])
+  const [pickerSignal, setPickerSignal] = useState(0)
+  const pickModel = (s: ChatSettings): void => {
+    const chat = current?.id ?? null
+    setPicked({ chat, s })
+    // Saved on the chat now, so reopening it keeps the pick; while it is
+    // answering, the next message saves it instead.
+    if (chat && !live)
+      window.custard.conversations
+        .setModel(chat, s)
+        .then((c) =>
+          setCurrent((x) => (x && x.id === c.id ? { ...x, model: c.model, effort: c.effort } : x))
+        )
+        .catch((e) => setError(cleanError(e)))
+  }
+  // Start building (Settings → Capabilities): a new chat in that plugin's
+  // workspace instead of the chat that was open here.
+  const [entered] = useState(() => (mode === 'code' ? peekPluginWorkspace() : null))
+  useEffect(() => {
+    if (entered) clearPluginWorkspace(entered)
+  }, [entered])
+  const restoring = useRef(!entered && openChats.has(mode))
+  useEffect(() => {
+    const id = entered ? undefined : openChats.get(mode)
     if (!id) return
     window.custard.conversations
       .get(id)
@@ -180,7 +231,7 @@ function ChatView(props: Props): React.JSX.Element {
         restoring.current = false
         openChats.delete(mode)
       })
-  }, [mode])
+  }, [mode, entered])
   useEffect(() => {
     if (restoring.current) return
     if (current) openChats.set(mode, current.id)
@@ -191,11 +242,11 @@ function ChatView(props: Props): React.JSX.Element {
   // The unsent message (and its files) of each mode, kept when switching
   // mode, which mounts a new view.
   const saved = unsent.get(mode)
-  const [draft, setDraft] = useState(saved?.text ?? '')
+  const [draft, setDraft] = useState(entered?.request ?? saved?.text ?? '')
   // Chat mode: files for the next message. They live in a draft folder in
   // app data until sent (see main/attachments).
   const [draftId, setDraftId] = useState<string>(() => saved?.draftId ?? crypto.randomUUID())
-  const [files, setFiles] = useState<DraftAttachment[]>(saved?.files ?? [])
+  const [files, setFiles] = useState<DraftAttachment[]>(entered ? [] : (saved?.files ?? []))
   useEffect(() => {
     unsent.set(mode, { text: draft, draftId, files })
   }, [mode, draft, draftId, files])
@@ -210,7 +261,11 @@ function ChatView(props: Props): React.JSX.Element {
   // hub). An open chat's own workspace decides it, so going back from a chat
   // lands in its workspace.
   const [workspace, setWorkspace] = useState<Workspace | null>(() =>
-    mode === 'code' ? openWorkspace : null
+    entered
+      ? { kind: 'internal', pluginId: entered.pluginId }
+      : mode === 'code'
+        ? openWorkspace
+        : null
   )
   useEffect(() => {
     if (mode === 'code') openWorkspace = workspace
@@ -390,6 +445,7 @@ function ChatView(props: Props): React.JSX.Element {
   useEffect(() => {
     if (newChat === firstNewChat.current) return
     setCurrent(null)
+    setPicked(null)
     setError(null)
   }, [newChat])
   const firstHome = useRef(home)
@@ -498,7 +554,7 @@ function ChatView(props: Props): React.JSX.Element {
       conversationId: current?.id ?? null,
       mode,
       text,
-      settings,
+      settings: chatSettings,
       ...(mode === 'code' && !current && workspace ? { workspace } : {}),
       ...(mode === 'skills' && !current && skill ? { skill } : {}),
       ...(!current && temporary ? { temporary: true } : {}),
@@ -511,6 +567,7 @@ function ChatView(props: Props): React.JSX.Element {
     setError(null)
     setOverflow(false)
     setCurrent(await window.custard.conversations.get(id))
+    setPicked(null)
     onCloseHistory()
   }
 
@@ -530,6 +587,7 @@ function ChatView(props: Props): React.JSX.Element {
     if (live) return
     onTemporary(false)
     setCurrent(null)
+    setPicked(null)
     setError(null)
     setOverflow(false)
     onCloseHistory()
@@ -690,7 +748,15 @@ function ChatView(props: Props): React.JSX.Element {
       box?.setSelectionRange(text.length, text.length)
     })
   }
-  const providerName = providerNames[providerOf(settings.model)]
+  const shownProvider = providerOf(chatSettings.model)
+  const providerName = providerNames[shownProvider]
+  const shownStatus = availability?.find((a) => a.id === chatSettings.model)
+  // Nothing can go to a model that can't be used now.
+  const unavailable = shownStatus?.available === false ? shownStatus : null
+  const noKeys = !!availability?.length && availability.every((a) => a.reason === 'no-key')
+  const providerOut =
+    !!availability &&
+    availability.filter((a) => providerOf(a.id) === shownProvider).every((a) => !a.available)
   // Plugins mode's path: the hub, then the workspace, then the chat.
   const toHub = (): void => {
     if (live) return
@@ -802,7 +868,7 @@ function ChatView(props: Props): React.JSX.Element {
                   {copy[mode].headline}
                 </h1>
                 <p className="mt-2 text-sm text-ash-400">
-                  {hasKey ? (
+                  {unavailable?.reason !== 'no-key' ? (
                     modes.find((m) => m.id === mode)?.hint
                   ) : (
                     <button onClick={onOpenSettings} className="text-molten-300 hover:underline">
@@ -910,9 +976,19 @@ function ChatView(props: Props): React.JSX.Element {
           <WidgetSlot
             conversationId={current?.id ?? null}
             requestId={live?.requestId ?? null}
-            provider={providerOf(settings.model)}
+            provider={shownProvider}
           />
           <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
+          {unavailable && (
+            <ModelNotice
+              model={chatSettings.model}
+              status={unavailable}
+              noKeys={noKeys}
+              providerOut={providerOut}
+              onPick={() => setPickerSignal((n) => n + 1)}
+              onOpenSettings={onOpenSettings}
+            />
+          )}
           {month?.budget && month.cost >= month.budget * 0.8 && (
             <p
               className={`mb-2 text-center text-xs ${month.cost >= month.budget ? 'text-molten-300' : 'text-ash-400'}`}
@@ -927,8 +1003,11 @@ function ChatView(props: Props): React.JSX.Element {
             meter={<UsageMeter usage={current?.usage} context={current?.context} />}
             busy={!!live}
             placeholder={placeholder}
-            settings={settings}
-            onSettings={onSettings}
+            settings={chatSettings}
+            onSettings={pickModel}
+            availability={availability}
+            pickerSignal={pickerSignal}
+            blocked={!!unavailable}
             onSend={send}
             onStop={() => live && window.custard.chat.stop(live.requestId)}
             draft={draft}

@@ -2,11 +2,13 @@ import {
   SUPPORTED_API_VERSIONS,
   type ConfigField,
   type OAuthSpec,
+  type PluginFill,
   type PluginManifest,
   type ToolSpec
 } from '../../shared/plugins'
 import { checkSchema } from './schema'
 import type { PluginMediaSpec } from '../../shared/design'
+import { fillableCapabilities, type FillableCapability } from '../../shared/capabilityScan'
 import { validateCapabilities } from '../design/media'
 import {
   SUPPORTED_WIDGET_API_VERSIONS,
@@ -509,6 +511,63 @@ function checkMedia(
   return out
 }
 
+// `fills`: which gaps a plugin's tools can fill, each naming a tool of its
+// own that isn't a media tool. Only a recommendation in Settings.
+function checkFills(
+  fills: unknown,
+  tools: ToolSpec[],
+  media: PluginMediaSpec[],
+  errors: string[]
+): PluginFill[] {
+  if (fills === undefined) return []
+  if (!Array.isArray(fills) || !fills.length || fills.length > fillableCapabilities.length * 2) {
+    errors.push(`fills must be a list of 1 to ${fillableCapabilities.length * 2} entries`)
+    return []
+  }
+  const names = new Set(tools.filter((t) => t && typeof t === 'object').map((t) => t.name))
+  const mediaNames = new Set(
+    media.flatMap((p) =>
+      p.capabilities.flatMap(({ tools: t }) => [
+        t.submit,
+        t.status,
+        t.result,
+        ...(t.cancel ? [t.cancel] : [])
+      ])
+    )
+  )
+  const out: PluginFill[] = []
+  const seen = new Set<string>()
+  for (const [i, f] of fills.entries()) {
+    const e = (f ?? {}) as Record<string, unknown>
+    if (!f || typeof f !== 'object' || Array.isArray(f)) {
+      errors.push(`fills[${i}] must be an object with capability and tool`)
+      continue
+    }
+    for (const k of Object.keys(e))
+      if (k !== 'capability' && k !== 'tool') errors.push(`fills[${i}].${k} is not a field`)
+    if (!(fillableCapabilities as readonly unknown[]).includes(e.capability)) {
+      errors.push(`fills[${i}].capability must be one of ${fillableCapabilities.join(', ')}`)
+      continue
+    }
+    if (typeof e.tool !== 'string' || !names.has(e.tool)) {
+      errors.push(`fills[${i}].tool must name one of this plugin's tools`)
+      continue
+    }
+    if (mediaNames.has(e.tool)) {
+      errors.push(`fills[${i}].tool "${e.tool}" is a media tool, which chats never get`)
+      continue
+    }
+    const key = `${e.capability}:${e.tool}`
+    if (seen.has(key)) {
+      errors.push(`fills[${i}] repeats ${e.capability} with ${e.tool}`)
+      continue
+    }
+    seen.add(key)
+    out.push({ capability: e.capability as FillableCapability, tool: e.tool })
+  }
+  return out
+}
+
 export type ManifestResult =
   | { ok: true; manifest: PluginManifest; errors: [] }
   | { ok: false; manifest: null; errors: string[] }
@@ -533,7 +592,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
     'auth',
     'instructions',
     'widgets',
-    'media'
+    'media',
+    'fills'
   ])
   for (const k of Object.keys(m)) if (!allowed.has(k)) errors.push(`"${k}" is not a manifest field`)
   if (m.manifestVersion !== 1) errors.push('manifestVersion must be 1')
@@ -590,6 +650,7 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
   const auth = checkAuth(m.auth, network as string[], config, errors)
   const widgets = checkWidgets(m.widgets, tools, errors)
   const media = checkMedia(m.media, tools, widgets, errors)
+  const fills = checkFills(m.fills, tools, media, errors)
 
   if (errors.length) return { ok: false, manifest: null, errors }
   return {
@@ -613,7 +674,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
       ...(auth ? { auth } : {}),
       ...(m.instructions ? { instructions: m.instructions as string } : {}),
       ...(widgets.length ? { widgets } : {}),
-      ...(media.length ? { media } : {})
+      ...(media.length ? { media } : {}),
+      ...(fills.length ? { fills } : {})
     }
   }
 }

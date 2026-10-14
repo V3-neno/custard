@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { MemorySettings } from '../shared/memory'
+import type { Capability, ListedModel, ModelCheck } from '../shared/adapter'
+import type { CapabilityScan } from '../shared/capabilityScan'
 import type {
   ChatLink,
   ChatEvent,
@@ -19,7 +21,7 @@ import type { VaultGrant } from '../shared/vaultGrants'
 import type { AutomationView, PendingQuestion } from '../shared/automations'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
-import type { ApprovalDecision } from '../shared/chat'
+import type { ApprovalDecision, ModelAvailability } from '../shared/chat'
 import type {
   Artifact,
   ArtifactSummary,
@@ -41,6 +43,28 @@ const custard = {
     has: (p: Provider): Promise<boolean> => ipcRenderer.invoke('apiKey:has', p),
     set: (p: Provider, key: string): Promise<void> => ipcRenderer.invoke('apiKey:set', p, key),
     clear: (p: Provider): Promise<void> => ipcRenderer.invoke('apiKey:clear', p)
+  },
+  models: {
+    // Every provider's models, from its adapter.
+    list: (): Promise<ListedModel[]> => ipcRenderer.invoke('models:list'),
+    // Asks the provider, with the saved key. Settings' Save and Refresh only.
+    check: (p: Provider): Promise<ModelCheck | null> => ipcRenderer.invoke('models:check', p),
+    // From saved keys and the last check only; asks no provider.
+    availability: (): Promise<ModelAvailability[]> => ipcRenderer.invoke('models:availability'),
+    lastCheck: (p: Provider): Promise<ModelCheck | null> =>
+      ipcRenderer.invoke('models:lastCheck', p)
+  },
+  // Settings → Capabilities. Read from Custard's own rules and files; asks no
+  // provider.
+  capabilities: {
+    scan: (): Promise<CapabilityScan> => ipcRenderer.invoke('capabilities:scan'),
+    // Start building: makes a new plugin for a gap and returns the starter
+    // prompt for its workspace's message box.
+    startPlugin: (
+      provider: Provider,
+      capability: Capability
+    ): Promise<{ pluginId: string; name: string; request: string }> =>
+      ipcRenderer.invoke('capabilities:startPlugin', provider, capability)
   },
   settings: {
     get: (): Promise<ChatSettings> => ipcRenderer.invoke('settings:get'),
@@ -211,7 +235,10 @@ const custard = {
     get: (id: string): Promise<Conversation | null> => ipcRenderer.invoke('conversations:get', id),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id),
     continuations: (id: string): Promise<ChatLink[]> =>
-      ipcRenderer.invoke('conversations:continuations', id)
+      ipcRenderer.invoke('conversations:continuations', id),
+    // Another model or effort for this chat's next message. No request.
+    setModel: (id: string, settings: ChatSettings): Promise<Conversation> =>
+      ipcRenderer.invoke('conversations:setModel', id, settings)
   },
   // Files for a Chat-mode message (see main/attachments). A draft is one
   // message's files before it is sent.

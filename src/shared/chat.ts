@@ -26,8 +26,7 @@ export const chatModels = [
   { id: 'gpt-6-astra', label: 'GPT-6 Astra', provider: 'openai', effort: true, fallbacks: false },
   { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', provider: 'openai', effort: true, fallbacks: false },
   { id: 'gpt-6-luna', label: 'GPT-6 Luna', provider: 'openai', effort: true, fallbacks: false },
-  // DeepSeek maps Custard's efforts onto its own: low, high (medium, xhigh)
-  // and max.
+  // DeepSeek takes low, high and max (see deepseekEffort).
   {
     id: 'deepseek-v4-pro',
     label: 'DeepSeek V4 Pro',
@@ -65,6 +64,61 @@ export const efforts: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 export type ChatSettings = { model: ChatModel; effort: Effort }
 
 export const defaultChatSettings: ChatSettings = { model: 'claude-opus-5-5', effort: 'medium' }
+
+export const isChatModel = (id: unknown): id is ChatModel => chatModels.some((m) => m.id === id)
+export const isEffort = (e: unknown): e is Effort => efforts.includes(e as Effort)
+
+// The model and effort a chat is bound to: its own (picked in the chat, or
+// the one it last used), else the one its last request used, else the
+// default model from Settings. Chats from before Custard kept a model per
+// chat have only the last two.
+export function chatSettingsOf(c: Conversation | null, fallback: ChatSettings): ChatSettings {
+  const model = [c?.model, c?.context?.model].find(isChatModel) ?? fallback.model
+  const effort = isEffort(c?.effort) ? c.effort : fallback.effort
+  return { model, effort }
+}
+
+// DeepSeek's effort levels as its model list names them, shown as three
+// buttons. Each is stored and sent as the value DeepSeek's Create Response
+// docs list for reasoning.effort (Neno's call, 2026-10-13): Fast sends low,
+// Balanced high, Thorough max. The names themselves are never sent.
+export const deepseekEfforts: { effort: Effort; label: string }[] = [
+  { effort: 'low', label: 'Fast' },
+  { effort: 'high', label: 'Balanced' },
+  { effort: 'max', label: 'Thorough' }
+]
+// Balanced is the default, and stands in for any other level (medium and
+// xhigh are DeepSeek aliases of high anyway).
+export const deepseekEffort = (e: Effort): Effort => (e === 'low' || e === 'max' ? e : 'high')
+
+// The effort buttons the model picker shows for a provider, and the value
+// each one stores and sends. Claude and OpenAI take every level as it is;
+// DeepSeek has its own three (above).
+const EFFORT_LABELS: Record<Effort, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'X-High',
+  max: 'Max'
+}
+export const effortChoices = (provider: Provider): { effort: Effort; label: string }[] =>
+  provider === 'deepseek'
+    ? deepseekEfforts
+    : efforts.map((effort) => ({ effort, label: EFFORT_LABELS[effort] }))
+// The level a provider's buttons show as picked for a stored effort.
+export const shownEffort = (provider: Provider, e: Effort): Effort =>
+  provider === 'deepseek' ? deepseekEffort(e) : e
+
+// Whether a model can be picked now, from what Custard already knows (the
+// saved keys and the last Save/Refresh check). Asking costs no request.
+//   no-key: the provider's key isn't saved.
+//   rejected: the last check said the provider rejected the key.
+//   removed: the last check's list didn't include this model.
+export type ModelAvailability = {
+  id: ChatModel
+  available: boolean
+  reason?: 'no-key' | 'rejected' | 'removed'
+}
 
 export const modes = [
   { id: 'chat', label: 'Chat', hint: 'Talk anything through' },
@@ -241,6 +295,11 @@ export type Continuation = {
 
 export type Conversation = ConversationSummary & {
   createdAt: number
+  // The model and effort this chat uses: picked in the chat (or set by the
+  // message that started it), and changed only by picking another. The next
+  // message goes to it. See chatSettingsOf.
+  model?: ChatModel
+  effort?: Effort
   // Plugins mode only: which plugin's folder the file tools may touch. Fixed
   // when the conversation starts.
   workspace?: Workspace

@@ -1,11 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk'
 import type {
-  BetaContentBlock,
-  BetaContentBlockParam,
   BetaTextBlockParam,
   BetaTool,
-  BetaToolResultBlockParam,
-  MessageCreateParamsStreaming
+  BetaToolResultBlockParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { type WebContents } from 'electron'
 import { randomUUID } from 'crypto'
@@ -28,10 +24,9 @@ import {
   saveConversation,
   vaultEditsDir
 } from './store'
-import { claudeParts } from './usage'
 import { allPluginInfo, chatNotes, memory } from './memory'
 import { pluginContext } from './memory/plugins'
-import { runOpenAI } from './openai'
+import { adapterFor } from './adapters/registry'
 import { carriedContext, handoffSummarizer } from './handoff'
 import {
   chatTools,
@@ -42,25 +37,7 @@ import {
   runChatTool
 } from './earlierChats'
 import { continueChat } from './continue'
-import {
-  claudeCounter,
-  capResult,
-  maxResultChars,
-  compactTrigger,
-  COMPACTION_INSTRUCTIONS,
-  estimateTokens,
-  fromLastCompaction,
-  isContextError,
-  measure
-} from './context'
-import {
-  claudeHistory,
-  compactionRefused,
-  isCompactionRejected,
-  openaiStart,
-  recordClaudeCompaction,
-  usesCompaction
-} from './compaction'
+import { capResult, maxResultChars, isContextError, measure } from './context'
 import {
   previewNote,
   runVaultTool,
@@ -84,7 +61,7 @@ import { chatHasOutsideText, isOutsideTool } from '../shared/outsideText'
 import { anyGrantAllows } from '../shared/vaultGrants'
 import { withoutUnavailableTools } from './history'
 import { attachments } from './attachments'
-import { claudeFilesFrom, prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
+import { prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
 import { acceptsAttachments, type Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
 import { createPluginNamed, pluginHost, protectedRoots, verifyWorkspace } from './plugins'
@@ -102,6 +79,9 @@ import { isWebTool, runWebTool, webTools } from './web'
 import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
   chatModels,
+  isChatModel,
+  isEffort,
+  type ChatSettings,
   isMode,
   introduce,
   providerOf,
@@ -117,9 +97,7 @@ import {
   type SendChatRequest
 } from '../shared/chat'
 import { toolLabel } from '../shared/vault'
-import { providers } from '../shared/providers'
 import { setRequestLookup, widgets } from './widgets'
-import { anthropicEndpoint } from './endpoints'
 import { modeName, modePolicy, refuseKind, toolKind } from './modes/policy'
 import { extensionRefusal, extensionTarget, aboveRoot, writesInside } from './modes/extensions'
 import { resolveInVault } from './memory/paths'
@@ -261,17 +239,6 @@ const pluginName = (id: string): string => {
 const approvals = new Map<string, { requestId: string; resolve: (d: ApprovalDecision) => void }>()
 const allowedInChat = new Set<string>()
 
-// After a mid-answer fallback, blocks the declining model produced before the
-// last `fallback` marker (other than text) must not be sent back to the API.
-function echoableContent(content: BetaContentBlock[]): BetaContentBlockParam[] {
-  const boundary = content.map((b) => b.type).lastIndexOf('fallback')
-  return content.filter(
-    (b, i) =>
-      i >= boundary ||
-      !(b.type === 'thinking' || b.type === 'redacted_thinking' || b.type === 'tool_use')
-  ) as BetaContentBlockParam[]
-}
-
 async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const { requestId } = req
   const emit = (e: ChatEvent): void => {
@@ -298,6 +265,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   if (fileIds.length && !acceptsAttachments(existing?.mode ?? req.mode))
     return refuse('Files can be attached in Chat and Design modes only.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
+  // The chat is bound to the model and effort this message was sent with.
+  conversation.model = model.id
+  conversation.effort = isEffort(req.settings.effort) ? req.settings.effort : 'medium'
   // Earlier chats picked in the message box, checked before anything changes.
   let references: ChatReference[] = []
   try {
@@ -525,13 +495,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   // Attached files, read once the turn starts (see attachments/request).
   let files: PreparedFiles | null = null
   // Calls in the history to tools that aren't offered now go in as text.
-  // Claude models that don't compact get the history without compaction blocks.
+  // The adapter drops what its provider can't read.
   const history = (): Conversation['messages'] => {
-    const h = withoutUnavailableTools(
+    return withoutUnavailableTools(
       withFiles(conversation.messages, files?.blocks ?? new Map()),
       available
     )
-    return providers[model.provider].api === 'anthropic' ? claudeHistory(h, model.id) : h
   }
 
   // Checks the next request against the model's budget (see context.ts) and
@@ -711,6 +680,13 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         apiKey,
         onUsage: (m, u) => charge(conversation, m, u),
         signal: controller.signal,
+        search: (query) =>
+          adapterFor(model.provider).webSearch({
+            model: model.id,
+            apiKey,
+            query,
+            signal: controller.signal
+          }),
         turn: log.startLength,
         approve: (label, input, warning) =>
           approve(
@@ -904,44 +880,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     )
   }
 
-  const params: MessageCreateParamsStreaming = {
-    model: model.id,
-    max_tokens: 64000,
-    system,
-    messages: history(),
-    cache_control: { type: 'ephemeral' },
-    stream: true
-  }
-  if (tools.length) params.tools = tools
-  if (model.effort) {
-    params.thinking = { type: 'adaptive', display: 'summarized' }
-    params.output_config = { effort: req.settings.effort }
-  }
-  if (model.fallbacks) {
-    // If a safety classifier declines, the API retries on Anthropic's
-    // recommended fallback model instead of returning a refusal.
-    params.betas = ['server-side-fallback-2026-07-01']
-    params.fallbacks = 'default'
-  }
-  // Claude summarizes earlier messages itself once the input passes the
-  // trigger, and returns a compaction block that is kept in the history.
-  const compact = (on: boolean): void => {
-    params.betas = (params.betas ?? []).filter((b) => b !== 'compact-2026-01-12')
-    if (on) {
-      params.betas.push('compact-2026-01-12')
-      params.context_management = {
-        edits: [
-          {
-            type: 'compact_20260112',
-            trigger: { type: 'input_tokens', value: compactTrigger(model.id) },
-            instructions: COMPACTION_INSTRUCTIONS
-          }
-        ]
-      }
-    } else delete params.context_management
-    if (!params.betas.length) delete params.betas
-  }
-  if (providers[model.provider].api === 'anthropic') compact(usesCompaction(model.id))
+  const adapter = adapterFor(model.provider)
 
   running.set(requestId, controller)
   requestConversation.set(requestId, conversation.id)
@@ -1035,12 +974,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         conversation,
         model,
         current,
-        from:
-          providers[model.provider].api === 'responses'
-            ? openaiStart(conversation, model.id).from
-            : usesCompaction(model.id)
-              ? claudeFilesFrom(conversation.messages)
-              : 0,
+        from: adapter.historyStart(conversation, model.id),
         store: attachments()
       })
       if (!prepared.ok)
@@ -1048,111 +982,31 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       files = prepared.files
       for (const a of files.missing) a.missing = true
     }
-    if (providers[model.provider].api === 'responses') {
-      const end = await runOpenAI({
-        requestId,
-        provider: model.provider,
-        maxSteps: MAX_STEPS,
-        apiKey,
-        model: model.id,
-        effort: req.settings.effort,
-        instructions: system.map((b) => b.text).join('\n\n'),
-        history: history(),
-        conversation,
-        fits,
-        tools,
-        onUsage: (m, u) => charge(conversation, m, u),
-        signal: controller.signal,
-        emit,
-        log,
-        runRound
-      })
-      if (controller.signal.aborted) return await stopEarly('stopped', 'Stopped by you.')
-      if (end === 'cut-off-tool') return await stopEarly('cut-off', CUT_OFF_TOOL)
-      if (end === 'too-long') return await stopEarly('too-long', TOO_LONG)
-      if (end === 'cut-off') log.notice('cut-off', CUT_OFF)
-      if (end === 'step-limit') log.notice('step-limit', STEP_LIMIT)
-      return finish()
-    }
-    const client = new Anthropic({ apiKey, ...anthropicEndpoint() })
-    for (let step = 0; ; step++) {
-      if (step === MAX_STEPS) {
-        log.notice('step-limit', STEP_LIMIT)
-        break
-      }
-      params.messages = history()
-      const { messages, system: sys, tools: offered, thinking, betas } = params
-      const count = claudeCounter(client, {
-        model: params.model,
-        system: sys,
-        ...(offered ? { tools: offered } : {}),
-        ...(thinking ? { thinking } : {}),
-        ...(betas ? { betas } : {}),
-        ...(params.context_management ? { context_management: params.context_management } : {})
-      })
-      const estimate = estimateTokens(sys, offered, fromLastCompaction(messages))
-      if (!(await fits(estimate, () => count(messages))))
-        return await stopEarly('too-long', TOO_LONG)
-      const stream = client.beta.messages.stream(params, { signal: controller.signal })
-      let streamed = false
-      let message: Awaited<ReturnType<typeof stream.finalMessage>>
-      try {
-        for await (const event of stream) {
-          streamed = true
-          if (event.type === 'content_block_start' && event.content_block.type === 'compaction') {
-            emit({ requestId, type: 'compacting' })
-          } else if (
-            event.type === 'content_block_start' &&
-            event.content_block.type === 'fallback'
-          ) {
-            const { from, to } = event.content_block
-            emit({ requestId, type: 'fallback', from: from.model, to: to.model })
-          } else if (event.type === 'content_block_delta') {
-            if (event.delta.type === 'thinking_delta') {
-              emit({ requestId, type: 'thinking', text: event.delta.thinking })
-            } else if (event.delta.type === 'text_delta') {
-              log.text(event.delta.text)
-              emit({ requestId, type: 'text', text: event.delta.text })
-            }
-          }
-        }
-        message = await stream.finalMessage()
-        for (const part of claudeParts(message.usage, message.model || model.id))
-          charge(conversation, part.model, part.usage)
-      } catch (err) {
-        // The model doesn't take compaction: send without it from now on.
-        if (streamed || !params.context_management || !isCompactionRejected(err)) throw err
-        compactionRefused(model.id)
-        compact(false)
-        step--
-        continue
-      }
-      if (message.stop_reason === 'refusal') {
-        const category = message.stop_details?.category
-        return await stopEarly(
-          'error',
-          `Claude declined this request${category ? ` (${category})` : ''}.`
-        )
-      }
-      const toolUses = message.content.filter((b) => b.type === 'tool_use')
-      const full = message.stop_reason === 'model_context_window_exceeded'
-      if (toolUses.length > 0 && (message.stop_reason === 'max_tokens' || full))
-        return await stopEarly(full ? 'too-long' : 'cut-off', full ? FULL_WINDOW : CUT_OFF_TOOL)
-      // Before the message goes in, so the record points at it.
-      recordClaudeCompaction(conversation, message.content, model.id)
-      log.addAssistant(echoableContent(message.content))
-      if (full) {
-        log.notice('too-long', FULL_WINDOW)
-        break
-      }
-      if (message.stop_reason === 'max_tokens') {
-        log.notice('cut-off', CUT_OFF)
-        break
-      }
-      if (message.stop_reason !== 'tool_use') break
-      await runRound(toolUses)
-      if (controller.signal.aborted) return await stopEarly('stopped', 'Stopped by you.')
-    }
+    const end = await adapter.streamMessage({
+      requestId,
+      model: model.id,
+      apiKey,
+      effort: req.settings.effort,
+      system,
+      history,
+      conversation,
+      tools,
+      maxSteps: MAX_STEPS,
+      fits,
+      onUsage: (m, u) => charge(conversation, m, u),
+      signal: controller.signal,
+      emit,
+      log,
+      runRound
+    })
+    if (end === 'stopped') return await stopEarly('stopped', 'Stopped by you.')
+    if (typeof end === 'object') return await stopEarly('error', end.refused)
+    if (end === 'cut-off-tool') return await stopEarly('cut-off', CUT_OFF_TOOL)
+    if (end === 'too-long') return await stopEarly('too-long', TOO_LONG)
+    if (end === 'full-window-tool') return await stopEarly('too-long', FULL_WINDOW)
+    if (end === 'cut-off') log.notice('cut-off', CUT_OFF)
+    if (end === 'full-window') log.notice('too-long', FULL_WINDOW)
+    if (end === 'step-limit') log.notice('step-limit', STEP_LIMIT)
     finish()
   } catch (err) {
     if (controller.signal.aborted) await stopEarly('stopped', 'Stopped by you.')
@@ -1193,7 +1047,16 @@ async function continueFrom(id: string, withoutSummary: boolean): Promise<Contin
     return await continueChat(
       {
         load: getConversation,
-        create: (mode, title) => ({ ...newConversation(mode, title), title }),
+        // The new chat keeps the model and effort of the one it continues.
+        create: (mode, title) => {
+          const from = getConversation(id)
+          return {
+            ...newConversation(mode, title),
+            title,
+            ...(from?.model ? { model: from.model } : {}),
+            ...(from?.effort ? { effort: from.effort } : {})
+          }
+        },
         save: saveConversation,
         summarizer: (original) => {
           const p = providerOf(original.context?.model ?? getChatSettings().model)
@@ -1216,6 +1079,19 @@ export function registerChatHandlers(): void {
   handle('chat:continue', (_, id: string, withoutSummary?: boolean) =>
     continueFrom(id, !!withoutSummary)
   )
+  // Picking another model (or effort) in an open chat: saved on the chat, so
+  // its next message goes there. No provider is asked.
+  handle('conversations:setModel', (_, id: string, settings: ChatSettings) => {
+    const c = openConversation(String(id))
+    if (!c) throw new Error('That chat is gone.')
+    if (active.has(c.id)) throw new Error('Wait for this chat to finish answering first.')
+    if (!isChatModel(settings?.model) || !isEffort(settings?.effort))
+      throw new Error('Unknown model or effort.')
+    c.model = settings.model
+    c.effort = settings.effort
+    saveConversation(c)
+    return c
+  })
   // The chats that continue this one, for "Continued in".
   handle('conversations:continuations', (_, id: string) =>
     allConversations()

@@ -32,7 +32,17 @@ import {
 import { localParts, slotLabel, systemTimezone } from './schedule'
 
 // What one model call produced: its text, and the tool calls it asked for.
-export type StepResult = { text: string; calls: { id: string; name: string; input: unknown }[] }
+export type StepResult = {
+  text: string
+  calls: { id: string; name: string; input: unknown }[]
+  // The reply stopped at the model's output limit (text only: a cut-off
+  // tool call ends the run in the step itself).
+  cutOff?: boolean
+}
+
+// In the run's record when its last reply was cut off but its text kept.
+export const CUT_OFF_REASON =
+  "Ended early: the model's last reply was cut off at its output limit, so it may be incomplete."
 export type Step = (a: {
   system: string
   messages: BetaMessageParam[]
@@ -388,6 +398,7 @@ async function execute(
     if (!r.calls.length)
       return {
         status: 'completed',
+        ...(r.cutOff ? { reason: CUT_OFF_REASON } : {}),
         calls,
         changes,
         ...asked(),

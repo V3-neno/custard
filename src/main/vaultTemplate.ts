@@ -65,3 +65,6 @@ export function starterSkillFolders(): Set<string> {
   }
   return names
 }
+
+// One file of the starter vault as bundled, by its path inside the vault.
+export const starterFile = (rel: string): string | null => templateFiles[PREFIX + rel] ?? null

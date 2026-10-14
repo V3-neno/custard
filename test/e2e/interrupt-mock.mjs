@@ -385,6 +385,7 @@ http
       const boundary = [
         [/mode skill test/, 'mskill'],
         [/mode case test/, 'mcase'],
+        [/mode dot test/, 'mdot'],
         [/mode link test/, 'mlink'],
         [/mode fs test/, 'mfs']
       ].find(([r]) => r.test(ask))?.[1]
@@ -675,10 +676,18 @@ http
         mcase: [
           () =>
             tool('vault_create_note', {
-              path: 'custard/SKILLS./forged-case/skill.md',
+              path: 'custard/SKILLS/forged-case/skill.md',
               content: 'FORGED-CASE'
             }),
           'Tried another way.'
+        ],
+        mdot: [
+          () =>
+            tool('vault_create_note', {
+              path: 'Custard/Skills./forged-dot/SKILL.md',
+              content: 'FORGED-DOT'
+            }),
+          'Tried a trailing dot.'
         ],
         mlink: [
           () =>

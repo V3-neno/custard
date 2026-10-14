@@ -2,16 +2,48 @@ import { useCallback, useEffect, useState } from 'react'
 import { providerIds, providers, providerNames, type Provider } from '../../../shared/providers'
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
-import type { UsageMonth } from '../../../shared/chat'
+import {
+  chatModels,
+  deepseekEffort,
+  deepseekEfforts,
+  efforts,
+  isChatModel,
+  isEffort,
+  type ChatSettings,
+  type UsageMonth
+} from '../../../shared/chat'
+import type { Capability, ModelCheck } from '../../../shared/adapter'
 import { formatCost } from '../../../shared/pricing'
 
 import DesignTab from './settings/DesignTab'
+import CapabilitiesTab from './settings/CapabilitiesTab'
 import EditableFolders from './settings/EditableFolders'
 import Automations from './settings/Automations'
 import { cleanError, primary, secondary } from './settings/ui'
 
-type Props = { onClose: () => void; onChanged: () => void }
-type Tab = 'general' | 'design'
+type Props = {
+  onClose: () => void
+  onChanged: () => void
+  // Capabilities → Start building (see App).
+  onBuild: (provider: Provider, capability: Capability) => Promise<void>
+}
+type Tab = 'general' | 'design' | 'capabilities'
+
+const checkedAt = (t: number): string =>
+  new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+
+// What the last check found, in a sentence.
+function checkLine(provider: Provider, c: ModelCheck): { text: string; ok: boolean } {
+  const name = providerNames[provider]
+  const at = checkedAt(c.checkedAt)
+  if (c.result === 'ok') return { text: `Checked ${at}: the key works.`, ok: true }
+  if (c.result === 'auth')
+    return { text: `Checked ${at}: ${name} rejected this key. Paste a new one above.`, ok: false }
+  return {
+    text: `Couldn't check at ${at}. ${c.message ?? ''} Your saved key wasn't changed.`,
+    ok: false
+  }
+}
 
 function KeySection({
   provider,
@@ -23,11 +55,28 @@ function KeySection({
   const [key, setKey] = useState('')
   const [hasKey, setHasKey] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The last check with the provider (Save or Refresh only), and whether one
+  // is running.
+  const [check, setCheck] = useState<ModelCheck | null>(null)
+  const [checking, setChecking] = useState(false)
+  const name = providerNames[provider]
 
   const refresh = useCallback(() => window.custard.apiKey.has(provider).then(setHasKey), [provider])
   useEffect(() => {
     refresh()
-  }, [refresh])
+    window.custard.models.lastCheck(provider).then(setCheck)
+  }, [refresh, provider])
+
+  const runCheck = async (): Promise<void> => {
+    setChecking(true)
+    try {
+      setCheck(await window.custard.models.check(provider))
+    } catch (e) {
+      setError(cleanError(e))
+    } finally {
+      setChecking(false)
+    }
+  }
 
   const save = async (): Promise<void> => {
     try {
@@ -38,26 +87,31 @@ function KeySection({
       onChanged()
     } catch (e) {
       setError(cleanError(e))
+      return
     }
+    await runCheck()
   }
 
   const clear = async (): Promise<void> => {
     await window.custard.apiKey.clear(provider)
+    setCheck(null)
     refresh()
     onChanged()
   }
 
+  const line = check && checkLine(provider, check)
+  const known = check?.models.filter((m) => m.source === 'profile') ?? []
+  const unsupported = check?.models.filter((m) => m.source === 'discovered') ?? []
   return (
-    <section className="mb-6">
+    <section className="mb-6" data-provider-key={provider}>
       <h3 className="mb-1 text-sm font-medium">
-        {providerNames[provider]} API key{' '}
-        {hasKey && <span className="text-molten-300">· saved</span>}
+        {name} API key {hasKey && <span className="text-molten-300">· saved</span>}
       </h3>
       <p className="mb-3 text-sm text-ash-300">Get one at {providers[provider].keyWhere}.</p>
       <div className="flex gap-2">
         <input
           type="password"
-          aria-label={`${providerNames[provider]} API key`}
+          aria-label={`${name} API key`}
           value={key}
           onChange={(e) => setKey(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && key.trim() && save()}
@@ -66,16 +120,143 @@ function KeySection({
           }
           className="flex-1 rounded-lg border border-forge-700 bg-forge-900 px-3 py-2 text-sm outline-none focus:border-molten-500/60"
         />
-        <button onClick={save} disabled={!key.trim()} className={primary}>
+        <button onClick={save} disabled={!key.trim() || checking} className={primary}>
           Save
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
       {hasKey && (
-        <button onClick={clear} className="mt-2 text-xs text-ash-500 hover:text-ember-600">
-          Remove key
-        </button>
+        <div className="mt-2 flex items-start gap-3 text-xs" aria-live="polite">
+          <p
+            className={`flex-1 ${checking ? 'text-ash-400' : line ? (line.ok ? 'text-molten-300' : 'text-ember-600') : 'text-ash-400'}`}
+            data-check-status
+          >
+            {checking
+              ? `Checking the key with ${name}…`
+              : (line?.text ??
+                `Not checked yet. Refresh asks ${name} which models this key can use.`)}
+          </p>
+          <button
+            onClick={runCheck}
+            disabled={checking}
+            className="shrink-0 whitespace-nowrap text-ash-400 hover:text-molten-200 disabled:opacity-40"
+            title={`Check the key with ${name} and see which models it can use`}
+          >
+            Refresh
+          </button>
+          <button
+            onClick={clear}
+            className="shrink-0 whitespace-nowrap text-ash-500 hover:text-ember-600"
+          >
+            Remove key
+          </button>
+        </div>
       )}
+      {hasKey && !checking && check?.result === 'ok' && (
+        <div className="mt-2 text-xs text-ash-400" data-check-models>
+          <p className="text-ash-300">Available models</p>
+          <ul className="mt-0.5">
+            {known.map((m) => (
+              <li key={m.id} data-model-row={m.id} data-available={m.available}>
+                <span className={m.available ? 'text-ash-200' : 'text-ash-500 line-through'}>
+                  {m.label}
+                </span>
+                {!m.available && (
+                  <span className="text-ash-500"> · Your key can&apos;t use this model</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {provider === 'deepseek' && (
+            <p className="mt-1 text-ash-500" data-effort-note>
+              DeepSeek&apos;s model list also names effort levels (fast, balanced, thorough).
+              Custard doesn&apos;t read them yet: the picker&apos;s Fast, Balanced and Thorough send
+              low, high and max, the values DeepSeek documents for its Responses API.
+            </p>
+          )}
+          {unsupported.length > 0 && (
+            <div className="mt-2" data-unsupported>
+              <p className="text-ash-300">
+                Not yet supported: {unsupported.map((m) => m.label).join(', ')}
+              </p>
+              <p className="mt-0.5 text-ash-500">
+                {name} offers these, but Custard has no prices, context limits or file rules for
+                them yet, so they can&apos;t be picked. They&apos;re shown so you know they exist.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// The model new chats start on. Each chat keeps the model it was started
+// with (or switched to); changing this changes no existing chat.
+function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JSX.Element {
+  const [s, setS] = useState<ChatSettings | null>(null)
+  useEffect(() => {
+    window.custard.settings.get().then(setS)
+  }, [])
+  if (!s) return <section className="mb-6" />
+  const model = chatModels.find((m) => m.id === s.model)
+  const save = (next: ChatSettings): void => {
+    setS(next)
+    window.custard.settings.set(next).then(onChanged)
+  }
+  const select =
+    'rounded-lg border border-forge-700 bg-forge-900 px-2 py-1.5 text-sm outline-none focus:border-molten-500/60'
+  return (
+    <section className="mb-6" data-default-model>
+      <h3 className="mb-1 text-sm font-medium">Default model</h3>
+      <p className="mb-3 text-sm text-ash-300">
+        New chats start on it. Each chat keeps its own model; pick another under the message box.
+      </p>
+      <div className="flex gap-2">
+        <select
+          title="Default model"
+          className={`${select} flex-1`}
+          value={s.model}
+          onChange={(e) => {
+            const id = e.target.value
+            if (!isChatModel(id)) return
+            const deepseek = chatModels.find((m) => m.id === id)?.provider === 'deepseek'
+            save({ model: id, effort: deepseek ? deepseekEffort(s.effort) : s.effort })
+          }}
+        >
+          {providerIds.map((p) => (
+            <optgroup key={p} label={providerNames[p]}>
+              {chatModels
+                .filter((m) => m.provider === p)
+                .map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </select>
+        {model?.effort && (
+          <select
+            title="Default effort"
+            className={select}
+            value={model.provider === 'deepseek' ? deepseekEffort(s.effort) : s.effort}
+            onChange={(e) => isEffort(e.target.value) && save({ ...s, effort: e.target.value })}
+          >
+            {model.provider === 'deepseek'
+              ? deepseekEfforts.map((e) => (
+                  <option key={e.effort} value={e.effort}>
+                    {e.label}
+                  </option>
+                ))
+              : efforts.map((e) => (
+                  <option key={e} value={e}>
+                    {e} effort
+                  </option>
+                ))}
+          </select>
+        )}
+      </div>
     </section>
   )
 }
@@ -186,7 +367,7 @@ function MemorySection(): React.JSX.Element {
   )
 }
 
-function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
+function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('general')
   const [vault, setVault] = useState<VaultInfo>(null)
 
@@ -229,7 +410,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
       onClick={onClose}
     >
       <div
-        className={`max-h-[90vh] overflow-y-auto rounded-3xl border border-forge-700 bg-forge-850 p-6 w-[480px]`}
+        className={`max-h-[90vh] overflow-y-auto rounded-3xl border border-forge-700 bg-forge-850 p-6 ${tab === 'capabilities' ? 'w-[760px] max-w-[95vw]' : 'w-[480px]'}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center gap-4">
@@ -238,7 +419,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
             className="flex gap-1 rounded-full border border-forge-700 p-0.5 text-sm"
             role="tablist"
           >
-            {(['general', 'design'] as Tab[]).map((t) => (
+            {(['general', 'design', 'capabilities'] as Tab[]).map((t) => (
               <button
                 key={t}
                 role="tab"
@@ -246,7 +427,7 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
                 onClick={() => setTab(t)}
                 className={`rounded-full px-3 py-1 ${tab === t ? 'bg-forge-700 text-ash-100' : 'text-ash-400 hover:text-ash-100'}`}
               >
-                {t === 'general' ? 'General' : 'Design'}
+                {t === 'general' ? 'General' : t === 'design' ? 'Design' : 'Capabilities'}
               </button>
             ))}
           </div>
@@ -254,12 +435,15 @@ function SettingsDialog({ onClose, onChanged }: Props): React.JSX.Element {
 
         {tab === 'design' ? (
           <DesignTab />
+        ) : tab === 'capabilities' ? (
+          <CapabilitiesTab onBuild={onBuild} />
         ) : (
           <>
             <p className="mb-5 -mt-1 text-sm text-ash-400">
               Keys are encrypted with Windows secure storage and stay on this computer. Pick a model
               from any provider under the message box.
             </p>
+            <DefaultModelSection onChanged={onChanged} />
             {providerIds.map((p) => (
               <KeySection key={p} provider={p} onChanged={onChanged} />
             ))}

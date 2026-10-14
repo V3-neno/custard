@@ -161,14 +161,22 @@ try {
   await w.click('button:text-is("Done")')
 
   step('Picking a DeepSeek model turns the app deep blue')
+  await w.click('button[title=Model]')
+  await w.click('[aria-label="Pick a model"] [role=tab]:text-is("DeepSeek")')
   const options = await w
-    .locator('select[title=Model] optgroup[label=DeepSeek] option')
-    .allInnerTexts()
+    .locator('[data-picker-models=deepseek] [data-pick]')
+    .evaluateAll((bs) => bs.map((b) => b.childNodes[0].textContent))
   check(
     JSON.stringify(options) === JSON.stringify(['DeepSeek V4 Pro', 'DeepSeek Flash']),
     `the model picker lists DeepSeek's models (${options.join(', ')})`
   )
-  await w.selectOption('select[title=Model]', 'deepseek-flash')
+  await w.click('[data-pick=deepseek-flash]')
+  // The tint follows on the next render, so wait for it rather than read once.
+  await w
+    .waitForFunction(() => document.documentElement.dataset.provider === 'deepseek', null, {
+      timeout: 5000
+    })
+    .catch(() => {})
   check(
     (await w.evaluate(() => document.documentElement.dataset.provider)) === 'deepseek',
     'the app follows the DeepSeek tint'
