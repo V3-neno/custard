@@ -34,7 +34,7 @@ function LevelPicker({
               aria-pressed={on}
               data-mode={m.id}
               onClick={() => !on && onPick(m.id)}
-              className={`flex-1 rounded-full border px-1.5 py-1 text-xs ${
+              className={`focus-ring flex-1 rounded-full border px-1.5 py-1 text-xs ${
                 on
                   ? 'border-molten-500/60 text-molten-200'
                   : 'border-forge-700 text-ash-300 hover:text-molten-200'

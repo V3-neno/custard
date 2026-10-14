@@ -15,6 +15,8 @@ import { REASONS } from '../chat/modelText'
 import type { PluginStatus } from '../../../../shared/plugins'
 import { grantLabel, type VaultGrant } from '../../../../shared/vaultGrants'
 import { cleanError, danger, input, primary, secondary } from './ui'
+import Select from '../ui/Select'
+import PillGroup from '../ui/PillGroup'
 
 const when = (t: number): string =>
   new Date(t).toLocaleString(undefined, {
@@ -368,11 +370,11 @@ export default function Automations(): React.JSX.Element {
             className={input}
           />
           <div className="flex gap-2">
-            <select
+            <Select
               aria-label="Skill to run"
               value={form.skill}
               onChange={(e) => setForm({ ...form, skill: e.target.value })}
-              className="min-w-0 flex-1 rounded-lg border border-forge-700 bg-forge-900 px-2 py-2 text-sm outline-none"
+              className="flex-1"
             >
               {!skills.includes(form.skill) && (
                 <option value={form.skill}>{form.skill || 'Pick a skill'}</option>
@@ -382,8 +384,8 @@ export default function Automations(): React.JSX.Element {
                   {s}
                 </option>
               ))}
-            </select>
-            <select
+            </Select>
+            <Select
               aria-label="Model for the automation"
               value={form.model}
               onChange={(e) => {
@@ -392,7 +394,6 @@ export default function Automations(): React.JSX.Element {
                 const effort = formEffort(e.target.value, form.effort)
                 setForm({ ...f, model: e.target.value, ...(effort ? { effort } : {}) })
               }}
-              className="rounded-lg border border-forge-700 bg-forge-900 px-2 text-sm outline-none"
             >
               {!models.some((m) => m.id === form.model) && (
                 <option value={form.model}>
@@ -414,7 +415,7 @@ export default function Automations(): React.JSX.Element {
                     })}
                 </optgroup>
               ))}
-            </select>
+            </Select>
           </div>
           {(() => {
             // The model's effort levels, as the model picker shows them:
@@ -434,28 +435,13 @@ export default function Automations(): React.JSX.Element {
                   {c.kind === 'levels' ? `Effort for ${name}` : c.note}
                 </legend>
                 {c.kind !== 'no-profile' && (
-                  <div className="flex gap-1">
-                    {c.levels.map((l) => {
-                      const on = c.kind === 'levels' && c.picked === l.value
-                      return (
-                        <button
-                          key={l.value}
-                          type="button"
-                          aria-pressed={on}
-                          data-level={l.value}
-                          disabled={c.kind !== 'levels'}
-                          onClick={() => setForm({ ...form, effort: l.value })}
-                          className={`flex-1 rounded-full border px-1.5 py-1 text-xs disabled:opacity-40 ${
-                            on
-                              ? 'border-molten-500/60 text-molten-200'
-                              : 'border-forge-700 text-ash-300 hover:text-molten-200'
-                          }`}
-                        >
-                          {l.label}
-                        </button>
-                      )
-                    })}
-                  </div>
+                  <PillGroup
+                    label={c.kind === 'levels' ? `Effort for ${name}` : 'Effort'}
+                    options={c.levels.map((l) => ({ value: l.value, label: l.label }))}
+                    value={c.kind === 'levels' ? c.picked : undefined}
+                    disabled={c.kind !== 'levels'}
+                    onChange={(effort) => setForm({ ...form, effort })}
+                  />
                 )}
                 {c.kind === 'levels' && (
                   <p className="mt-1 text-xs text-ash-500" data-effort-cost>
