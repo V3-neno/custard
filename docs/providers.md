@@ -64,7 +64,7 @@ When the history goes to a provider other than the one that wrote it:
 - A tool call to a tool this chat isn't offered now is sent as plain text (`history.ts`).
 - Attached files are sent again in the new provider's form, or refused with a note when it can't take them (a PDF to DeepSeek, say).
 
-A provider-neutral stored format was kept as a possible cleanup if the round-trip test showed problems. The test (`test/e2e/round-trip.mjs`: Claude, then DeepSeek, then OpenAI, then Claude, with tool calls) showed none against stand-ins, so it isn't built. Claude's thinking being accepted back after other providers' turns is untested live.
+The round-trip test (`test/e2e/round-trip.mjs`: Claude, then DeepSeek, then OpenAI, then Claude, with tool calls) pins what each provider is sent, against stand-ins. Workstream B moves stored chats to a provider-neutral format: its types are in `src/shared/neutralChat.ts`, and each adapter's converter sits next to it (`adapters/anthropicNeutral.ts`, `adapters/responsesNeutral.ts`). A provider's own blocks (`raw`) go back only to that provider, and every other provider gets the neutral parts. Claude's thinking being accepted back after other providers' turns is untested live.
 
 ## Registry design
 

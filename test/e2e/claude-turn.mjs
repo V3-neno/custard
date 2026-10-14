@@ -394,6 +394,9 @@ try {
   step('Compare with the golden record')
   const got = JSON.stringify(record, null, 1)
   fs.writeFileSync(`${OUT}/claude-turn.json`, got)
+
+  // Every request body, for the neutral-format check (test/neutral/README.md).
+  fs.writeFileSync(`${OUT}/requests.json`, JSON.stringify(seen))
   if (FLAG === '--update' || !fs.existsSync(GOLDEN)) {
     fs.writeFileSync(GOLDEN, got + '\n')
     console.log('golden record written')

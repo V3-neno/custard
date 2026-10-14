@@ -80,7 +80,7 @@ const textOf = (content: string | BetaToolResultBlockParam['content']): string =
 // base64 data URLs with detail "high" (at most 2,500 patches, so never
 // rejected for size), PDFs as base64 file data with the file's name, and
 // text files as text, so both providers get exactly the same characters.
-function filePart(b: BetaContentBlockParam): ResponseInputContent | null {
+export function filePart(b: BetaContentBlockParam): ResponseInputContent | null {
   if (b.type === 'image' && b.source.type === 'base64')
     return {
       type: 'input_image',

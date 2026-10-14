@@ -533,6 +533,9 @@ try {
     )
   )
   await w.screenshot({ path: `${SHOTS}/round-trip.png`, fullPage: true })
+
+  // Every request body, for the neutral-format check (test/neutral/README.md).
+  fs.writeFileSync(`${OUT}/requests.json`, JSON.stringify(seen))
 } finally {
   await app.close()
   server.close()
