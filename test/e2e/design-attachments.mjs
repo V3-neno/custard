@@ -236,7 +236,7 @@ try {
   check(await until(() => !jobsHad()), 'its job records are gone')
 
   step('Other modes still refuse attachments')
-  for (const mode of ['Code', 'Skills']) {
+  for (const mode of ['Plugins', 'Skills']) {
     await w.click(`button:text-is("${mode}")`)
     await w.waitForTimeout(300)
     const button = w.locator('button[aria-label="Attach files"]')

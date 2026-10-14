@@ -31,7 +31,8 @@ A new automation starts turned off.
 - Runs go one at a time, in the order their slots fell due.
 - DST: local times stay local. A time that doesn't exist (clocks jump
   forward) runs when the jump ends. A time that happens twice runs the first
-  time. A day the month doesn't have (the 31st in June) is skipped that month.
+  time; its `local` value carries the offset, so the first and second pass are
+  different values. A day the month doesn't have (the 31st in June) is skipped that month.
 - **Run now** starts one at once, even when paused or turned off. It is not
   counted against the runs-per-day limit. Only one Run now can be waiting per
   automation.
@@ -65,14 +66,15 @@ the last one. Slots more than 10 minutes late are missed slots:
 confirmed), and the instructions say what the fields mean. The skill decides
 what a window means and can record "data unavailable".
 
-| Field                        | Meaning                                                                                       |
-| ---------------------------- | --------------------------------------------------------------------------------------------- |
-| `scheduled_for`              | `{local, utc}` of the slot (for Run now: the moment it was started).                          |
-| `window_start`, `window_end` | `{local, utc}`: the slot before this one (null if none in the last 100 days) and this one.    |
-| `last_successful_run`        | `{slot, finished_at}` of the newest completed run, or null.                                   |
-| `missed_slots`               | `[{local, utc}]` older slots folded into this run (empty for all but the first catch-up run). |
-| `catch_up`                   | true for a late run of a missed slot.                                                         |
-| `time_zone`                  | The automation's zone.                                                                        |
+| Field                        | Meaning                                                                                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `scheduled_for`              | `{local, utc}` of the slot (for Run now: the moment it was started). `local` is ISO 8601 with the offset then, `2026-10-25T02:30+02:00`. |
+| `window_start`, `window_end` | `{local, utc}`: the slot before this one (null if none in the last 100 days) and this one.                                               |
+| `last_successful_run`        | `{slot, finished_at}` of the newest completed run, or null. `slot` has its offset too.                                                   |
+| `missed_slots`               | `[{local, utc}]` older slots folded into this run (empty for all but the first catch-up run).                                            |
+| `catch_up`                   | true for a late run of a missed slot.                                                                                                    |
+| `time_zone`                  | The automation's zone.                                                                                                                   |
+| `configured_local_time`      | Only when the configured time didn't exist that day: that time, with the offset in force just before the clocks jumped.                  |
 
 ## Questions from a run (Step 4)
 

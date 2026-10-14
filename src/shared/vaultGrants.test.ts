@@ -82,6 +82,7 @@ describe('protected places', () => {
     expect(protectedDepth('Custard/Memory.md')).toBe(2)
     expect(protectedDepth('Custard/Skills/x/SKILL.md')).toBe(2)
     expect(protectedDepth('Custard/Captures/a.md')).toBe(2)
+    expect(protectedDepth('Custard/Chats/a.md')).toBe(2)
     expect(protectedDepth('Custard/Plugins/Spotify/Activity/a.md')).toBe(4)
     expect(protectedDepth('Custard/Plugins/Spotify/Overview.md')).toBe(4)
     expect(protectedDepth('Custard/Plugins/Spotify/Listening/Overview.md')).toBe(0)
@@ -92,6 +93,7 @@ describe('protected places', () => {
     for (const parent of ['Custard', 'Custard/Plugins', 'Custard/Plugins/Spotify']) {
       expect(grantFor([g(parent)], 'Custard/Skills/x/SKILL.md')).toBeNull()
       expect(grantFor([g(parent)], 'Custard/Captures/a.md')).toBeNull()
+      expect(grantFor([g(parent)], 'Custard/Chats/a.md')).toBeNull()
       expect(grantFor([g(parent)], 'Custard/Plugins/Spotify/Activity/a.md')).toBeNull()
     }
     expect(grantFor([g('Custard')], 'Custard/Memory.md')).toBeNull()
@@ -144,6 +146,7 @@ describe('separators and case', () => {
     expect(placeKind('Custard/Memory.md')).toBe('own')
     expect(placeKind('custard/skills/x/SKILL.md')).toBe('own')
     expect(placeKind('Custard/Captures/a.md')).toBe('derived')
+    expect(placeKind('Custard/Chats/a.md')).toBe('derived')
     expect(placeKind('Custard/Plugins/Spotify/Activity/a.md')).toBe('derived')
     expect(placeKind('Custard/Plugins/Spotify/Overview.md')).toBe('own')
     expect(placeKind('Custard/Plugins/Spotify/Listening/a.md')).toBeNull()

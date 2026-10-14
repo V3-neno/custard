@@ -60,6 +60,8 @@ export type ToolOutcome = {
   outcome?: 'completed' | 'failed' | 'not-run' | 'unknown'
   // Structured data for the plugin's widgets. Never sent to the model.
   data?: unknown
+  // Why `data` was left out (too large, a credential, not JSON), when it was.
+  dataDropped?: string
 }
 
 export type RuntimeHandle = {
@@ -83,8 +85,8 @@ export type RuntimeFactory = (o: {
 
 export type TestRunner = (
   code: string,
-  o?: { signal?: AbortSignal; timeoutMs?: number }
-) => Promise<{ name: string; ok: boolean; error?: string }[]>
+  o?: { signal?: AbortSignal; timeoutMs?: number; name?: string }
+) => Promise<{ name: string; ok: boolean; error?: string; ms?: number; skipped?: boolean }[]>
 
 export type CapResult = { ok: true; value: unknown } | { ok: false; error: string }
 
@@ -94,6 +96,8 @@ export type HostDeps = {
   store: PluginStore
   runtime: RuntimeFactory
   testRunner: TestRunner
+  // Type errors in the plugin's files; throws when the check can't run.
+  typecheck?: (dir: string, sdkDir: string, widgetEntries: string[]) => Promise<string[]>
   openExternal: (url: string) => Promise<void>
   openBrowser: (url: string) => Promise<void>
   askByDefault: () => boolean
@@ -244,18 +248,27 @@ function submitDiffers(operation: string, input: unknown, r: MediaRequest): stri
 }
 
 // A tool's `data` for widgets: plain JSON, bounded, and dropped if it holds a
-// secret value (redaction would garble it, so it isn't attempted).
-function widgetData(data: unknown, secrets: string[], limit = WIDGET_LIMITS.dataBytes): unknown {
-  if (data === undefined) return undefined
+// secret value (redaction would garble it, so it isn't attempted). A drop
+// comes back with the reason, never silently; the reason never repeats the data.
+export function widgetData(
+  data: unknown,
+  secrets: string[],
+  limit = WIDGET_LIMITS.dataBytes
+): { data?: unknown; dropped?: string } {
+  if (data === undefined) return {}
   let json: string | undefined
   try {
     json = JSON.stringify(data)
   } catch {
-    return undefined
+    return { dropped: "it can't be written as JSON" }
   }
-  if (json === undefined || json.length > limit) return undefined
-  if (redact(json, secrets) !== json) return undefined
-  return JSON.parse(json)
+  if (json === undefined) return { dropped: "it can't be written as JSON" }
+  if (json.length > limit)
+    return {
+      dropped: `it is ${Math.ceil(json.length / 1024)} KB and the limit is ${Math.floor(limit / 1024)} KB`
+    }
+  if (redact(json, secrets) !== json) return { dropped: 'it contained a saved credential' }
+  return { data: JSON.parse(json) }
 }
 
 export class PluginHost {
@@ -453,6 +466,7 @@ export class PluginHost {
         effect: t.effect,
         askEveryTime: t.effect === 'write' && (st.askEveryTime[t.name] ?? this.d.askByDefault())
       })),
+      ...(m?.fills?.length ? { fills: m.fills } : {}),
       chatDesign: active ? chatDesignState(active, st.chatDesign) : 'off',
       ...(m?.widgets?.length
         ? { widgets: m.widgets.map((w) => ({ id: w.id, title: w.title })) }
@@ -464,10 +478,14 @@ export class PluginHost {
 
   // Validate, review, test
 
-  async validate(id: string): Promise<{
+  async validate(
+    id: string,
+    o: { typeCheck?: boolean } = {}
+  ): Promise<{
     ok: boolean
     errors: string[]
     warnings: string[]
+    typeErrors?: string[]
     manifest: PluginManifest | null
     buildId: string | null
   }> {
@@ -543,7 +561,27 @@ export class PluginHost {
       .map((t) => fullToolName(id, t.name))
       .filter((n) => names.has(n))
       .map((n) => `Tool name ${n} is already used`)
-    return { ok: errors.length === 0, errors, warnings, manifest: m, buildId }
+    // Reported apart from errors: the build works without types, and review
+    // and activation are not held up by them. plugin_validate asks for them.
+    let typeErrors: string[] | undefined
+    if (o.typeCheck && this.d.typecheck)
+      try {
+        typeErrors = await this.d.typecheck(
+          this.sourceDir(id),
+          this.d.sdkDir,
+          (m.widgets ?? []).map((w) => w.entry)
+        )
+      } catch (err) {
+        warnings.push(`Types were not checked: ${message(err)}`)
+      }
+    return {
+      ok: errors.length === 0,
+      errors,
+      warnings,
+      ...(typeErrors ? { typeErrors } : {}),
+      manifest: m,
+      buildId
+    }
   }
 
   async review(id: string): Promise<PluginReview> {
@@ -574,35 +612,51 @@ export class PluginHost {
   }
 
   // Runs the plugin's tests, and a load check of the plugin itself, in fresh
-  // sandboxes with no capabilities.
-  async test(id: string, signal?: AbortSignal): Promise<TestReport> {
+  // sandboxes with no capabilities. `file` (a path in tests/) and `name` (part
+  // of a test's name) run less; the load check is left out then.
+  async test(
+    id: string,
+    signal?: AbortSignal,
+    o: { file?: string; name?: string } = {}
+  ): Promise<TestReport> {
     const v = await this.validate(id)
     if (!v.ok || !v.buildId) return { ok: false, results: [], error: v.errors.join('\n') }
     const results: TestReport['results'] = []
-    try {
-      const { handle, tools } = await this.d.runtime({
-        pluginId: id,
-        code: this.build(id, v.buildId).code,
-        onCap: async () => ({ ok: false, error: 'No capabilities during the load check.' }),
-        onExit: () => {}
-      })
-      handle.dispose('load check done')
-      const missing = v.manifest!.tools.filter((t) => !tools.includes(t.name)).map((t) => t.name)
-      results.push({
-        name: 'Plugin loads and handles every tool in plugin.json',
-        ok: !missing.length,
-        error: missing.length ? `No handler for ${missing.join(', ')}` : undefined
-      })
-    } catch (err) {
-      results.push({
-        name: 'Plugin loads and handles every tool in plugin.json',
-        ok: false,
-        error: message(err)
-      })
-    }
-    const testFiles = readSources(this.sourceDir(id))
+    const filtered = Boolean(o.file || o.name)
+    const allTests = readSources(this.sourceDir(id))
       .map((f) => f.path)
       .filter((p) => /^tests\/.+\.test\.(ts|js)$/.test(p))
+    const file = o.file?.replace(/\\/g, '/').replace(/^\.?\//, '')
+    if (file && !allTests.includes(file))
+      return {
+        ok: false,
+        results,
+        error: `There is no test file ${file}. Test files: ${allTests.join(', ') || 'none'}.`
+      }
+    if (!filtered)
+      try {
+        const { handle, tools } = await this.d.runtime({
+          pluginId: id,
+          code: this.build(id, v.buildId).code,
+          onCap: async () => ({ ok: false, error: 'No capabilities during the load check.' }),
+          onExit: () => {}
+        })
+        handle.dispose('load check done')
+        const missing = v.manifest!.tools.filter((t) => !tools.includes(t.name)).map((t) => t.name)
+        results.push({
+          name: 'Plugin loads and handles every tool in plugin.json',
+          ok: !missing.length,
+          error: missing.length ? `No handler for ${missing.join(', ')}` : undefined
+        })
+      } catch (err) {
+        results.push({
+          name: 'Plugin loads and handles every tool in plugin.json',
+          ok: false,
+          error: message(err)
+        })
+      }
+    const testFiles = file ? [file] : allTests
+    let skipped = 0
     if (testFiles.length) {
       const b = await bundle(this.sourceDir(id), this.d.sdkDir, { kind: 'tests', files: testFiles })
       if (!b.ok) return { ok: false, results, error: b.errors.join('\n') }
@@ -614,12 +668,28 @@ export class PluginHost {
           error: "The plugin's files changed while the tests were being built. Run them again."
         }
       try {
-        results.push(...(await this.d.testRunner(b.code, { signal })))
+        for (const r of await this.d.testRunner(b.code, { signal, name: o.name }))
+          if (r.skipped) skipped++
+          else results.push(r)
       } catch (err) {
-        return { ok: false, results, error: message(err) }
+        // A stopped run keeps the results of the tests that had finished.
+        const partial = (err as { partial?: TestReport['results'] }).partial
+        if (Array.isArray(partial)) results.push(...partial.filter((r) => !('skipped' in r)))
+        return { ok: false, results, error: message(err), ran: results.length, skipped }
       }
     }
-    return { ok: results.every((r) => r.ok), results }
+    // Nothing ran is not a pass: a filter that matched nothing, or a plugin
+    // with no tests, says so.
+    const ran = results.length
+    if (o.name && ran === 0)
+      return {
+        ok: false,
+        results,
+        error: `No test name contains "${o.name}".`,
+        ran,
+        skipped
+      }
+    return { ok: results.every((r) => r.ok), results, ran, skipped }
   }
 
   // Lifecycle
@@ -1359,7 +1429,14 @@ export class PluginHost {
         controller.signal
       )
       const content = cutResult(redact(String(r.content), secrets))
-      const data = widgetData(r.data, secrets, o.dataLimit)
+      const { data, dropped } = widgetData(r.data, secrets, o.dataLimit)
+      // Said in the plugin's log, to the model and to a calling widget, so a
+      // widget that stops updating has a visible reason.
+      if (dropped)
+        this.log(id, `${tool.name}: the data for widgets was left out because ${dropped}`)
+      const shown = dropped
+        ? `${content}\n[The data for widgets from this call was left out because ${dropped}, so a widget showing it will not update.]`
+        : content
       if (r.isError) this.log(id, `${tool.name}: ${content.slice(0, 200)}`)
       const outcome = r.notSent
         ? 'not-run'
@@ -1370,7 +1447,13 @@ export class PluginHost {
           : r.isError
             ? 'failed'
             : 'completed'
-      return { content, isError: !!r.isError, outcome, ...(data !== undefined ? { data } : {}) }
+      return {
+        content: shown,
+        isError: !!r.isError,
+        outcome,
+        ...(data !== undefined ? { data } : {}),
+        ...(dropped ? { dataDropped: dropped } : {})
+      }
     } catch (err) {
       const msg = redact(message(err), secrets)
       this.d.store.addError(id, `${tool.name}: ${msg}`)
@@ -1526,7 +1609,10 @@ export class PluginHost {
     force: boolean
   ): Promise<string> {
     const raw = this.d.store.secrets(id)[OAUTH_KEY]
-    if (!raw) throw new AuthError('Not signed in. Connect the account in Settings → Plugins.')
+    if (!raw)
+      throw new AuthError(
+        'Not signed in. Connect the account with Manage on its card in Plugins mode.'
+      )
     const tokens = JSON.parse(raw) as Tokens
     if (!force && tokens.expiresAt - Date.now() > 60_000) return tokens.accessToken
     let p = this.refreshing.get(id)
@@ -1541,7 +1627,9 @@ export class PluginHost {
           })
           // Signed out while this was running: the new tokens are dropped.
           if (this.generation(id) !== started)
-            throw new AuthError('Not signed in. Connect the account in Settings → Plugins.')
+            throw new AuthError(
+              'Not signed in. Connect the account with Manage on its card in Plugins mode.'
+            )
           this.d.store.setSecret(id, OAUTH_KEY, JSON.stringify(next))
           return next.accessToken
         } catch (err) {

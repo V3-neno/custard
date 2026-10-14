@@ -1,25 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  chatModels,
-  efforts,
-  providerNames,
-  type ChatSettings,
-  type Effort,
-  type Provider
-} from '../../../../shared/chat'
+import type { ChatSettings, ModelAvailability } from '../../../../shared/chat'
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from '../icons'
 import type { DraftAttachment } from '../../../../shared/attachments'
 import { DraftFiles } from './Attachments'
+import { DraftReferences, ReferenceButton } from './References'
+import type { ChatLink } from '../../../../shared/chat'
+import ModelPicker from './ModelPicker'
 
 type Props = {
   busy: boolean
   placeholder: string
   settings: ChatSettings
   onSettings: (s: ChatSettings) => void
+  // Which models can be used now (null until known).
+  availability: ModelAvailability[] | null
+  // Bumped to open the model picker (Pick a different model).
+  pickerSignal?: number
+  // The chat's model can't be used now: nothing can be sent.
+  blocked?: boolean
   onSend: (text: string) => void
   onStop: () => void
   draft: string
   setDraft: (text: string) => void
+  // The chat's context and cost meter, beside the model pills.
+  meter?: React.ReactNode
   // Chat and Design only: files to send with the message.
   files?: {
     items: DraftAttachment[]
@@ -30,6 +34,13 @@ type Props = {
     onRemove: (id: string) => void
     onDismiss: () => void
   }
+  // Earlier chats whose summary notes go with the message.
+  references?: {
+    current: string | null
+    items: ChatLink[]
+    onAdd: (c: ChatLink) => void
+    onRemove: (id: string) => void
+  }
 }
 
 const chip =
@@ -37,12 +48,12 @@ const chip =
 
 function Composer(props: Props): React.JSX.Element {
   const { busy, placeholder, settings, onSettings, onSend, onStop, draft, setDraft, files } = props
+  const { meter, references, availability, pickerSignal, blocked } = props
   const [focused, setFocused] = useState(false)
   const [dragging, setDragging] = useState(false)
   const hasFiles = !!files?.items.length
-  const canSend = !busy && !files?.adding && (!!draft.trim() || hasFiles)
+  const canSend = !busy && !blocked && !files?.adding && (!!draft.trim() || hasFiles)
   const input = useRef<HTMLTextAreaElement>(null)
-  const model = chatModels.find((m) => m.id === settings.model)
   const submit = (): void => {
     if (canSend) onSend(draft)
   }
@@ -86,6 +97,9 @@ function Composer(props: Props): React.JSX.Element {
           disabled={busy}
         />
       )}
+      {references && (
+        <DraftReferences items={references.items} onRemove={references.onRemove} disabled={busy} />
+      )}
       <textarea
         ref={input}
         onPaste={(e) => {
@@ -122,40 +136,22 @@ function Composer(props: Props): React.JSX.Element {
             <PaperclipIcon />
           </button>
         )}
-        <select
-          className={chip}
-          title="Model"
-          value={settings.model}
-          onChange={(e) =>
-            onSettings({ ...settings, model: e.target.value as ChatSettings['model'] })
-          }
-        >
-          {(['claude', 'openai'] as Provider[]).map((p) => (
-            <optgroup key={p} label={providerNames[p]}>
-              {chatModels
-                .filter((m) => m.provider === p)
-                .map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-            </optgroup>
-          ))}
-        </select>
-        {model?.effort && (
-          <select
-            className={chip}
-            value={settings.effort}
-            onChange={(e) => onSettings({ ...settings, effort: e.target.value as Effort })}
-            title="Effort: how hard the model thinks"
-          >
-            {efforts.map((e) => (
-              <option key={e} value={e}>
-                {e} effort
-              </option>
-            ))}
-          </select>
+        {references && (
+          <ReferenceButton
+            current={references.current}
+            picked={references.items}
+            onAdd={references.onAdd}
+            disabled={busy}
+          />
         )}
+        <ModelPicker
+          className={chip}
+          settings={settings}
+          availability={availability}
+          onPick={onSettings}
+          openSignal={pickerSignal}
+        />
+        {meter}
         <div className="ml-auto">
           {busy ? (
             <button

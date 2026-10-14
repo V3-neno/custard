@@ -43,3 +43,46 @@ describe('withoutUnavailableTools', () => {
     )
   })
 })
+
+// Phase 6: switching a chat from Opus 5.5 to DeepSeek Flash mid-chat. Opus
+// searched the web; DeepSeek has no web search in Custard, so that call goes
+// to DeepSeek as text while web_read, which both have, stays a call.
+describe('switching model mid-chat', () => {
+  it("turns the new model's missing tools into text", async () => {
+    const { webTools } = await import('./web')
+    const names = (id: string, provider: 'claude' | 'deepseek'): Set<string> =>
+      new Set(webTools({ id, provider }).tools.map((t) => t.name))
+    expect(names('claude-opus-5-5', 'claude').has('web_search')).toBe(true)
+    const deepseek = names('deepseek-flash', 'deepseek')
+    expect(deepseek.has('web_search')).toBe(false)
+    const chat: BetaMessageParam[] = [
+      { role: 'user', content: 'news?' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 's', name: 'web_search', input: { query: 'news' } },
+          { type: 'tool_use', id: 'r', name: 'web_read', input: { url: 'https://a.example' } }
+        ]
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 's', content: 'Results.' },
+          { type: 'tool_result', tool_use_id: 'r', content: 'Page.' }
+        ]
+      }
+    ]
+    const sent = withoutUnavailableTools(chat, deepseek)
+    expect(sent[1].content).toEqual([
+      {
+        type: 'text',
+        text: '[Earlier call to web_search, which is not available now: {"query":"news"}]'
+      },
+      { type: 'tool_use', id: 'r', name: 'web_read', input: { url: 'https://a.example' } }
+    ])
+    expect(sent[2].content).toEqual([
+      { type: 'text', text: '[Result of that earlier call: Results.]' },
+      { type: 'tool_result', tool_use_id: 'r', content: 'Page.' }
+    ])
+  })
+})

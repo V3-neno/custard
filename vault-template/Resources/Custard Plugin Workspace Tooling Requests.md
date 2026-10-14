@@ -1,8 +1,42 @@
 # Plugins workspace tooling requests: feasibility
 
-Commit: 4261aed0b97fde28aed1be3cd22cc815a7c5f845 (branch hostile-text), verified with `git rev-parse HEAD`. [C]
+Original commit: 4261aed0b97fde28aed1be3cd22cc815a7c5f845 (branch hostile-text), verified with `git rev-parse HEAD`. Re-checked at 7a23d19 (branch refresh-docs). [C]
 
-Nothing in this document is implemented. Every item below is a feasibility note. Anything labelled PROPOSAL is not built.
+Describes Custard code at commit 7a23d19. Written against 4261aed; see 'Changes since 4261aed' below.
+
+## Changes since 4261aed
+
+Status of the six requests, checked against the code at 7a23d19:
+
+- Request 1, patch / replace-text tool: still open. There is no `fs_edit` or `fs_replace`; `FILE_WRITES` is still `fs_write`, `fs_delete`, `fs_rename`.
+- Request 2, diff card: still open. The card is still a whole-file diff in one grey `<pre>`, and the two diff modules still order `-` and `+` differently.
+- Request 3, type check: done, but inside `plugin_validate`, not as a separate `plugin_typecheck` tool. Code: `src/main/plugins/typecheck.ts`, run in `typecheck.worker.ts`, started from `typecheckInWorker` in `src/main/plugins/index.ts`, called by `validate(id, { typeCheck: true })` in `host.ts`.
+- Request 4, single test file or name, timings: done. Report format in `src/main/workspace/report.ts`, runner in `src/plugin-sdk/testing.ts`, sandbox in `runtime.ts`, filter logic in `PluginHost.test()`.
+- Request 5, diff against the active build: still open. `devTools` is still only `plugin_validate` and `plugin_test`.
+- Request 6, enabling a plugin in the same chat: unchanged behaviour. Still true as described; the code lines quoted from `chat.ts` moved and the line numbers were dropped.
+
+Detail:
+
+- `plugin_validate` now type-checks the plugin with the TypeScript compiler in strict mode, in a worker thread so the app stays responsive. Type errors are listed apart from validation errors under "Type errors (the build works, but fix these):", or "Types: no errors." when clean. [C]
+- Type errors make the tool result `isError`, but they do not make `validate()` fail: the build, `review()` and activation do not wait on them. `review()` and `plugin_test` call `validate` without the type check. [C]
+- If the check cannot run (compiler files missing, 60 s limit hit), validation adds a warning "Types were not checked: ..." and carries on. [C]
+- The compiler host reads only the plugin folder, the SDK folder and the compiler's own lib folder; any other path is refused. A test reads a file outside those and gets nothing. [C] [T typecheck.test.ts]
+- Plugin code is checked without the DOM lib (a small declared set of globals instead: timers, console, `AbortController`, `URL`, `TextEncoder`). Widget entries, their folders and `tests/` are checked with the DOM. This answers the old "does the SDK compile without the DOM lib" question for the SDK paths the checker uses. [C]
+- At most 30 type errors are listed, then a marker with the count. Lines look like `src/index.ts:12: TS2322: message`. [C]
+- `typescript` moved from `devDependencies` to `dependencies`. electron-builder drops `.d.ts` files from `node_modules`, so `electron-builder.yml` copies `node_modules/typescript/lib` (`lib*.d.ts`) to the `typescript-lib` resource, which the packaged app passes as `libDir`. [C]
+- `plugin_test` takes `file` (exact path of a file in `tests/`) and `name` (text contained in a test name, case-insensitive). The load check is skipped when either is given. An unknown `file` is an error that lists the test files. [C]
+- `plugin_test` times every test (`[12 ms]`), stops a test that never settles after 10 s and runs the rest, and keeps the finished tests when the run is stopped (30 s limit or Stop), naming the test that was running. [C] [T]
+- `plugin_test` no longer says "All checks passed." for nothing: a name that matches no test is an error, and a run that checked nothing says "No tests ran". The summary is "All N checks passed." or "K of N checks failed.". [C] [T report.test.ts]
+- The `plugin_test` report puts failures first, cuts an error at 400 characters with a marker, and lists at most 80 result lines, then "[... N more results left out ...]". [C]
+- `fs_write` is now atomic: it uses `writeReplaceSync` (temp file beside the target, rename over it, keeps the file's mode, replaces a link at the name). The hard-link refusal in `resolveInside` still applies. [C]
+- A leftover `.<name>.<12 hex>.tmp` file is now skipped by `readSources` (so it no longer changes the build hash), `fs_list` and `fs_search`, via `isAtomicTemp`. The `readSources` probe result in request 1 is out of date. [C]
+- `fs_list`, `fs_search` and plugin results now say when they cut something: `fs_search` ends with a note at 30 matches or 5,000 files searched, `fs_list` with "[N more not shown]", and a plugin result over 50,000 characters ends with a "characters are left out" note (redacted first, then cut). [C]
+- A widget tool's `data` that is dropped (over 64 KB, not JSON, holds a saved credential) now adds a line to the tool's content, a plugin log entry, and `dataDropped` on the widget call result. [C host.ts]
+- Corrected below: the `plugin_test` timeout is for the whole run, 30 s, and 10 s per test; line numbers into `chat.ts` were stale (`CORE_WRITES` is now at line 160) and were dropped or updated.
+
+---
+
+Every item below was first written as a feasibility note. Anything labelled PROPOSAL is not built unless the Changes section above says it is.
 
 Tag legend (every statement carries one):
 
@@ -13,7 +47,7 @@ Tag legend (every statement carries one):
 - [H] built but only a heuristic
 - [U] unverified (needs a real model, Windows, macOS or a live provider)
 
-Probe: `probes/zzws/zzws.test.ts` (copied beside this file; removed from the repo after running). Run with `npx vitest run src/main/plugins/zzws.test.ts`. 10 tests, all passed. Lines in this document that quote output marked "probe" come from that run. It runs on Linux in Node/vitest, not in Electron, so it proves nothing about the real sandbox window. [T]
+Probe: `probes/zzws/zzws.test.ts` (copied beside this file; removed from the repo after running). Run with `npx vitest run src/main/plugins/zzws.test.ts`. 10 tests, all passed. Lines in this document that quote output marked "probe" come from that run at 4261aed; it was not re-run at 7a23d19, so a probe line is marked as out of date where the code has changed. It runs on Linux in Node/vitest, not in Electron, so it proves nothing about the real sandbox window. [T]
 
 Effort sizes used here (no time estimates): small = one or two source files plus a test; medium = three to six files, a shared type or a renderer change; large = a new subsystem or a packaging change.
 
@@ -27,15 +61,17 @@ Background that every item needs. The Plugins workspace is `Workspace = { kind: 
 
 ### What exists today
 
-- There is no edit-in-place tool for workspace files. `fs_write` takes `path` and the full `content`, "Create or replace a text file in the workspace with the full new content. Missing folders are created." `runFileTool` answers `fs_edit` with `Unknown tool fs_edit` (probe). [C src/main/workspace/tools.ts] [T]
-- `fs_write` writes with plain `writeFileSync(full, content)` after path checks. It is not atomic: no temp file, no rename, no fsync. [C tools.ts `write()`]
+- There is no edit-in-place tool for workspace files. `fs_write` takes `path` and the full `content`, "Create or replace a text file in the workspace with the full new content. Missing folders are created." `runFileTool` answers `fs_edit` with `Unknown tool fs_edit` (probe at 4261aed; the default case is unchanged). [C src/main/workspace/tools.ts] [T]
+- `fs_write` now writes with `writeReplaceSync(full, content)` after path checks, so it is atomic (temp file beside the target, rename over it, the file's mode kept). At 4261aed it was a plain `writeFileSync`. [C tools.ts `write()`]
 - Limits: content over 500,000 characters is refused with `Files are limited to 500 KB.` (it counts characters, not bytes). [C tools.ts `MAX_WRITE`]
 - Path safety on write comes from `resolveInside(b, rel, { forWrite: true })` in `src/main/workspace/paths.ts`: no absolute paths, no `..`, no symlinks or junctions, hard-linked existing files refused (`This file is hard-linked elsewhere, so it is not changed.`), names matching `DENIED_NAME` refused (`.git`, `node_modules`, `.env*`, `*.pem`, `*.key`, and so on), Windows 8.3 names refused. The race between check and write is a documented, accepted limitation. [C paths.ts header]
 - `vault_edit` is the model for what is wanted. `src/main/vault/edit.ts` exports `applyEdits(text, edits)`. Its `replace` case is exactly-once: it finds `old_text` with `indexOf`, then looks for a second match. Verbatim messages (probe): `Edit 1: old_text matches more than once. Include more of the surrounding text so it matches once.`, `Edit 1: old_text was not found in the note. It must match the note's text exactly.`, `Edit 1: old_text can't be empty.` [T] [C]
 - `applyEdits` also does: up to 20 edits per call, 20,000 characters per edit string, all edits matched against the original text (not sequentially), overlapping edits refused, all-or-nothing. It also has `insert_after_heading` and `append`, which are Markdown-specific. [C edit.ts `EDIT_LIMITS`, `applyEdits`]
 - `vault_edit` additionally requires a `version` from `vault_read` (a hash of the text) and refuses if the note changed since, then re-checks the version immediately before writing, then writes through `writeReplaceSync` (temp file in the same folder, fsync, rename), then keeps an undo record. The frontmatter check there is a heuristic ([H] per its own comment) and is irrelevant to code files. [C edit.ts `planChange`, `changeNote`]
 - `writeReplaceSync` is in `src/main/fsafe/index.ts`. It creates `.<name>.<12 hex>.tmp` next to the target with O_EXCL, renames it over the target, and removes the temp file on failure. It takes a `guard(realTarget)` callback. Residual races are listed in that file's header; none of it has run on Windows or macOS. [C] [U]
-- Approval for `fs_write` already exists and is per call (see item 2). The tool is classified a write in `CORE_WRITES` in `src/main/chat.ts` line 157 and in `FILE_WRITES` in tools.ts. [C]
+- Approval for `fs_write` already exists and is per call (see item 2). The tool is classified a write in `CORE_WRITES` in `src/main/chat.ts` (line 160 at 7a23d19) and in `FILE_WRITES` in tools.ts. [C]
+
+### Status: still open (not built at 7a23d19)
 
 ### Feasibility
 
@@ -47,7 +83,7 @@ Files touched (exhaustive list, because a new write tool is named in several pla
 
 1. `src/main/workspace/tools.ts`: add the tool definition to `fileTools`; add its name to `FILE_WRITES`; add a case in `previewFileChange` and `runFileTool`; add a shared "plan" function (read file, apply, check size, return before/after). [C]
 2. `src/main/vault/edit.ts` or a new small helper: the error strings say "the note". Reusing `applyEdits` unchanged would tell the model "not found in the note" while it is editing a code file. Either parameterise the noun or copy the replace case (about 15 lines). [C]
-3. `src/main/chat.ts` line 157: add the new name to `CORE_WRITES`. If it is missed, `c.write` is false for the call, and the "repeat of an action whose outcome is unknown" warning (`log.unknownRepeat`) and other write handling would not apply to it. [C] [I]
+3. `src/main/chat.ts` (`CORE_WRITES`, line 160): add the new name to `CORE_WRITES`. If it is missed, `c.write` is false for the call, and the "repeat of an action whose outcome is unknown" warning (`log.unknownRepeat`) and other write handling would not apply to it. [C] [I]
 4. `src/shared/vault.ts` (the label switch around lines 39-50): add a label, otherwise the activity line falls to the default branch. [C]
 5. `src/main/workspace/preview.test.ts`: has `expect([...FILE_WRITES].sort()).toEqual(['fs_delete', 'fs_rename', 'fs_write'])`, which must be updated. [T] [C]
 6. `src/main/workspace/index.ts`: nothing for the tool list, because `names` is derived from `fileTools`; the prompt text could mention the new tool. [C]
@@ -56,20 +92,22 @@ Files touched (exhaustive list, because a new write tool is named in several pla
 ### What exactly would change (PROPOSAL, not built)
 
 - New tool `fs_replace` (name is a choice): `{ path, old_text, new_text }`, optionally `edits: [...]` as in `vault_edit`. Behaviour: read the file (same binary and size checks as `read()`), apply `applyEdits`, refuse if result equals the original, refuse over `MAX_WRITE`. [NB]
-- Write path: use `writeReplaceSync` instead of `writeFileSync`, so the change is one atomic rename. The guard would be `() => null` or a re-run of `resolveInside`. Hard-link and `nlink` check must stay, because rename over a hard-linked file breaks the link instead of refusing (this differs from `writeFileSync`, which writes through). [I]
+- Write path: `fs_write` already uses `writeReplaceSync`, so a replace tool would reuse the same `write()` helper and get the atomic rename. The hard-link and `nlink` check in `resolveInside` must stay, because rename over a hard-linked file breaks the link instead of writing through it. [C] [I]
 - The approval card shows a diff of exactly what will be written (see item 2).
 - Add a version check: the preview should record a hash of the file it diffed, and the run step should re-read and refuse if the hash differs (`... changed since ...`). Without it, the user approves a diff computed from the file at preview time while the write happens at run time against a file the user could have edited in between. For `fs_write` this gap is harmless because the whole new content is what is approved; for a replace it is not, because the result depends on the current file. [I]
 
 ### Risks and security consequences
 
 - Same boundary as `fs_write` (`resolveInside`), so no new reach. [C]
-- Atomic rename leaves `.<name>.<hex>.tmp` files if the process dies between create and rename. `readSources()` in `src/main/plugins/build.ts` skips only `isDeniedName` names and symlinks, so a stray temp file in the plugin folder is read as a source file and goes into the build hash and the review diff. Probe: `readSources` of a folder with `.index.ts.a1b2c3d4e5f6.tmp` and `plugin.json` returned `[".index.ts.a1b2c3d4e5f6.tmp","plugin.json"]`. [T] The fix would be to make `isDeniedName` or `readSources` skip `*.tmp` dotfiles, or to put temp files outside the plugin folder. Cleanly finishing writes never leave one. [I]
+- Atomic rename leaves `.<name>.<hex>.tmp` files if the process dies between create and rename. At 4261aed `readSources()` read such a file as plugin source (probe returned `[".index.ts.a1b2c3d4e5f6.tmp","plugin.json"]`). This is fixed: `readSources` in `src/main/plugins/build.ts`, `fs_list` and `fs_search` now skip names matching `isAtomicTemp` (`src/main/fsafe/index.ts`). The temp file can still sit on disk after a crash, but it no longer changes the build hash. Cleanly finishing writes never leave one. [C] [T]
 - Edit tool results are not "outside text" and nothing about them changes the "outside text makes edits ask first" logic, which is for the vault (`roundOutside` in chat.ts). The workspace path does not use it. [C]
 - `old_text` containing CRLF vs LF: `indexOf` is exact, so a file with CRLF line endings will not match a model-written LF `old_text`. The model gets "not found". No normalisation exists. [I]
 
 ---
 
 ## 2. Showing a diff instead of a full-file card for `fs_write`
+
+### Status: still open at 7a23d19 (checked: `workspace/diff.ts`, `tools.ts`, `plugins/diff.ts` and the approval card are unchanged in behaviour)
 
 ### What exists today (this is already partly built)
 
@@ -83,7 +121,7 @@ Files touched (exhaustive list, because a new write tool is named in several pla
 - Rendering: the card is `ApprovalCard` in `src/renderer/src/components/chat/Working.tsx`. It shows `<plugin> wants to: <label>` (for file changes the plugin name is `Custard`), then `detail` in a single `<pre>` with classes `max-h-72 overflow-auto ... text-[11px] whitespace-pre-wrap break-words text-ash-400`, aria-label "Everything this action will do". There is no per-line colouring, no hunks, no side-by-side, and the same grey colour for `+`, `-` and context lines. Buttons: Allow, Don't allow. "Allow for this chat" is hidden because file changes pass `individual: true`. [C Working.tsx; chat.ts approve call]
 - The event carries `detail: string` ("Everything the user approves, never shortened") in `src/shared/chat.ts`. [C]
 - The settings review screen shows `f.diff` raw in a `<pre>` as well (`PluginsTab.tsx` line 312), so the app has no coloured diff component anywhere. [C]
-- `fs_write` is approved on every call; the preview is computed in the main process in `chat.ts` right before the write, from the file on disk at that moment. [C chat.ts around line 581]
+- `fs_write` is approved on every call; the preview is computed in the main process in `chat.ts` right before the write, from the file on disk at that moment (the `workspace.preview(c.name, c.input)` call in `chat.ts`). [C]
 
 ### Feasibility
 
@@ -113,107 +151,64 @@ Option B, rendered diff (medium): change the approval event's shape so the rende
 
 ## 3. A tsc type-check tool (`plugin_typecheck`)
 
-### Does `plugin_validate` type-check today? No.
+### Status: done, as part of `plugin_validate` (no separate tool)
 
-- `plugin_validate` calls `pluginHost().validate(pluginId)`. That reads `plugin.json` through `readSource` (manifest, schema and permission checks), hashes the sources, and runs `bundle()` (esbuild). `bundle()` states: "esbuild only parses and transforms files; it never runs plugin code" and passes `tsconfigRaw: '{}'` with a comment "Ignore any tsconfig in the plugin folder." esbuild strips types without checking them. [C src/main/plugins/host.ts `validate`, build.ts]
-- Probe: a plugin containing `const n: number = 'not a number'` and `name.nope` on a string bundled successfully (`bundle ok => true`), and tsc reported `TS2322 Type 'string' is not assignable to type 'number'.` and `TS2339 Property 'nope' does not exist on type 'string'.` So type errors pass `plugin_validate` and `plugin_test` today. [T]
-- In the Custard repository, `npm run typecheck:node` (`tsc --noEmit -p tsconfig.node.json --composite false`) includes `plugin/**/*.ts` and maps `custard-plugin-sdk` paths to `src/plugin-sdk`. So the repo's own plugin (spotify) is type-checked by the developer's `npm run build`, but that is outside the app and unavailable to the model (there is no shell). [C package.json, tsconfig.node.json]
-- Nothing in the app imports the `typescript` package. [C: grep of src found no `from 'typescript'` outside my probe] [I] `package.json` lists `"typescript": "^5.9.3"` under `devDependencies`; `esbuild` is under `dependencies`. Installed version in this checkout: 5.9.3. [C]
+`plugin_validate` now type-checks. Code: `src/main/plugins/typecheck.ts` (the check), `typecheck.worker.ts` (runs it in a worker thread), `typecheckInWorker` in `src/main/plugins/index.ts` (starts the worker, 60 s limit, terminates it), `PluginHost.validate(id, { typeCheck: true })` in `host.ts`, report lines in `src/main/workspace/index.ts`. Tests: `src/main/plugins/typecheck.test.ts`. A separate `plugin_typecheck` tool was not built, and the proposal's other points are answered below. [C] [T]
 
-### Where tsc would come from
+### What the answer was at 4261aed
 
-- Dev checkout: `node_modules/typescript` is present (5.9.3), `lib` folder is 23 MB (`du -sh`). [C]
-- Packaged build: `typescript` is a devDependency, and electron-builder does not package devDependencies [I, standard electron-builder behaviour; not checked against a packaged build] [U]. `electron-builder.yml` also excludes `src/*`, `plugin/**` and the tsconfig files from the asar, and puts plugin sources, `src/plugin-sdk/*.ts` (minus tests) and `docs/plugins` in `extraResources` (`resources/plugin`, `resources/plugin-sdk`, `resources/docs/plugins`). [C]
-- Offline: `typescript`'s compiler API needs only its own `lib.*.d.ts` files, read from disk next to the package. No network call is made. [I] Inside an asar archive the `lib` files would be read through Electron's patched `fs`; whether `ts.createProgram` works that way has not been tested. [U] The esbuild precedent: esbuild needed `asarUnpack` because it spawns a binary (`electron-builder.yml`, `build.ts` `unpackedBinary`); typescript spawns nothing, so it probably does not. [C] [I]
-- Alternatives: `@typescript/native-preview` (a native binary, would also need `asarUnpack`); a check bundled by esbuild into the app. Neither is installed. [NB]
+`plugin_validate` did not type-check: esbuild only strips types (`tsconfigRaw: '{}'`), so a wrong type passed validate, test and activation. Probe at 4261aed: `const n: number = 'not a number'` bundled fine and tsc reported `TS2322`. Nothing in the app imported `typescript`, and it was a devDependency. Probe timings (Node under vitest, not Electron): fresh scaffold 756 ms, `plugin/spotify` 1,687 ms, two-error plugin 417 ms. [T]
 
-### Does the plugin type-check cleanly with a plausible config?
+### As built
 
-- Probe config: `strict`, `target ES2022`, `module ESNext`, `moduleResolution Bundler`, `lib: ['lib.es2023.d.ts','lib.dom.d.ts']`, `types: []`, `skipLibCheck`, `paths` for the three SDK entry points mapped to the SDK folder. All `.ts` files under the plugin folder (sources, widget, tests).
-  - Fresh scaffold plugin: 0 diagnostics, 756 ms. [T]
-  - `plugin/spotify` (src, widget and tests, 11 test files): 0 diagnostics, 1,687 ms. [T]
-  - Two-error plugin: 2 diagnostics, 417 ms (after the first program had warmed the module). [T]
-  - Timings are in Node under vitest on this machine; Electron's main process would add its own cost. [U]
-- The probe includes the DOM lib. Plugin code runs in a sandbox "with no Node.js and no direct network" (workspace prompt), and the DOM lib would let `document` or `window` type-check even though they would fail at run time. Whether the SDK's own types compile without the DOM lib (e.g. `AbortSignal`, `URL`) was not tested. [U]
+- Strict mode, target ES2022, `moduleResolution: Bundler`, `types: []`, `skipLibCheck`, and `paths` for the three SDK entry points (`custard-plugin-sdk`, `/testing`, `/widget`) mapped to the SDK folder. The plugin's own tsconfig is ignored, as esbuild ignores it. [C]
+- Files: every `.ts` file in the plugin folder except hidden names, `node_modules`, symlinks and `.d.ts` files (at most about 500). [C]
+- Two programs: plugin code with `lib.es2022` only plus a small declared set of sandbox globals (timers, `console`, `AbortController`/`AbortSignal`, `URL`, `URLSearchParams`, `TextEncoder`/`TextDecoder`), so `document`, `window` and `fetch` do not type-check in plugin code; widget entries, their folders and `tests/` with `lib.dom`. [C]
+- A custom compiler host refuses every path that is not in the plugin folder, the SDK folder or the compiler's lib folder, so `../../secret/x` and absolute paths resolve to nothing and nothing from outside is quoted in a diagnostic. Tested with an outside file. [C] [T typecheck.test.ts]
+- At most 30 errors are listed, each as `path:line: TS<code>: first line of the message`, then a marker with the count of the rest. [C]
+- The worker keeps the main process responsive. A missing lib folder gives "the TypeScript library files aren't installed", which `validate` turns into a "Types were not checked" warning. [C]
+- Result: `plugin_validate` lists type errors under "Type errors (the build works, but fix these):" and the tool result is `isError`; `validate()` itself stays `ok`, so `review()`, `plugin_test` and activation do not depend on type errors. Making them block activation was not done. [C]
+- Packaging: `typescript` is now in `dependencies`; `electron-builder.yml` ships `node_modules/typescript/lib` (`lib*.d.ts`) as the `typescript-lib` resource because electron-builder drops `.d.ts` files from `node_modules`; the packaged app passes it as `libDir`. The compiler runs from `app.asar` with the lib files outside it. [C]
+- Checked: Spotify type-checks clean in a dev build and in the packaged Linux worker (about 2.7 s). Not checked: the whole packaged-app UI path for `plugin_validate`, Windows and macOS packaging of the lib resource, and other plugins than Spotify, which may now show type errors. [U]
 
-### Effort: medium (large if tsc must be packaged and unpacked)
+### Still open for this item
 
-Files touched: `src/main/plugins/host.ts` (new `typecheck(id)` method, or a separate `typecheck.ts` module), `src/main/workspace/index.ts` (tool def in `devTools`, run branch, prompt line), `src/shared/vault.ts` (label), `package.json` (move `typescript` to `dependencies`), `electron-builder.yml` (decide on `asarUnpack` for the compiler's lib folder), tests. [I]
-
-### What exactly would change (PROPOSAL, not built)
-
-- New tool `plugin_typecheck`, no input, read-only, no side effects, result format like `plugin_validate`: lines `- src/index.ts:2 TS2322 Type 'string' is not assignable to type 'number'.`, capped (say 50 diagnostics) with a count of the rest. `isError` true when any error. [NB]
-- Program built from `readSources()` file list (so it sees exactly the files that are hashed), `paths` mapped to `sdkDir()`, `types: []`, config fixed in code and not read from a plugin tsconfig (esbuild already ignores tsconfig on purpose). [NB]
-- Run it off the main thread (utility process or worker), because `ts.createProgram` is synchronous and CPU-heavy: 0.4 to 1.7 s measured blocks the main process event loop, including IPC, the chat stream and plugin runtime messages. [T for the timing] [I for the consequence]
-- Decide whether `plugin_validate` should run it and fail on type errors. That would change behaviour for plugins that bundle and activate fine today. [NB]
-
-### Risks and security consequences
-
-- The type checker reads files only; it never runs plugin code. Module resolution must not follow `import` out of the plugin folder: `moduleResolution: Bundler` with `paths` could resolve `../../x` or a symlink to anywhere on disk. The existing esbuild guard in `build.ts` refuses symlinks and imports outside the plugin folder and SDK. A tsc program would need an equivalent `CompilerHost` (custom `fileExists`/`readFile`) that applies `isInside`/`isDeniedName`, or it could read `.env`-named files into diagnostics text. Without that guard, diagnostics can quote lines from files the model must not read (error messages quote source text). [I]
-- A malicious or pathological plugin source can make type-checking very slow (deep conditional types). Needs a timeout and abort signal like `runTestsInSandbox` has (30 s, Stop button). [I]
-- Adds ~23 MB (lib folder) plus the compiler to the packaged app, if packaged. [I]
+- No separate `plugin_typecheck` tool, and no option to fail validation on type errors. [NB]
+- The host checks path text, not real paths: it does not call `realpath` or `isDeniedName`. The source walk skips symlinks, but an import of a symlink inside the plugin folder is not covered by a test. [C] [U]
+- The 30-error cap hides the rest until the first ones are fixed (by design, the marker says so). [C]
 
 ---
 
 ## 4. Running a single test file or test name, with timings
 
-### What exists today
+### Status: done (with two small leftovers below)
 
-`plugin_test` takes no input (`input_schema: { type: 'object', properties: {} }`). Flow in `PluginHost.test()` (`src/main/plugins/host.ts`): [C]
+Code: input schema and `testReport` call in `src/main/workspace/index.ts`; report format in `src/main/workspace/report.ts` (tests in `report.test.ts`); filter, file choice, partial results and the "nothing ran" rule in `PluginHost.test()` (`src/main/plugins/host.ts`); per-test timing, 10 s limit and skipped tests in `runRegisteredTests` (`src/plugin-sdk/testing.ts`); progress lines, partial results and the 30 s limit in `runTestsInSandbox` (`src/main/plugins/runtime.ts`); `TestReport` in `src/shared/plugins.ts` now has `ms`, `ran` and `skipped`. [C]
 
-1. `validate(id)` (bundles, stages a build). If it fails, returns `{ ok: false, results: [], error: v.errors.join('\n') }`.
-2. A load check: starts the built bundle in a fresh runtime with no capabilities (`onCap` returns `No capabilities during the load check.`) and checks every tool in `plugin.json` has a handler. It is reported as a result named `Plugin loads and handles every tool in plugin.json`.
-3. Finds all files matching `/^tests\/.+\.test\.(ts|js)$/`, bundles them all into one script (`bundle(..., { kind: 'tests', files })`), checks the source hash did not change meanwhile, then runs the script with `runTestsInSandbox`.
-4. `runTestsInSandbox` (`src/main/plugins/runtime.ts`) loads the code in a hidden window in the session `custard-plugin-tests` with no preload bridge, calls `globalThis.__custardRunTests()`, and maps each result to `{ name, ok, error }`. Timeout: 30,000 ms for the whole run (`TEST_TIMEOUT_MS`); Stop aborts it.
+### As built
 
-Runner: `runRegisteredTests()` in `src/plugin-sdk/testing.ts` runs the registered cases one after another, each in try/catch, so one failing test does not stop the rest. Result per case is `{ name, ok }` plus `error` (the error's `message`) on failure. No stack, no file, no duration. [C] Probe (vm stand-in, all 11 spotify test files): 114 cases, 0 failed, first result `{"name":"native Previous explicitly excludes listening-history Back and retains approval","ok":true}`, keys `["name","ok"]`, bundle 72 ms, run 62 ms, 0 duplicate test names. [T] (vm timing, not the Electron sandbox) [U]
+- Input: `{ file?, name? }`. `file` must equal a path in `tests/*.test.ts|js` from `readSources` (so the model's string is never used as a path; `\` and a leading `./` are normalised), and only that file is bundled. An unknown file is an error listing the real test files. `name` is a case-insensitive substring of the test name (the proposal said case-sensitive), applied inside `runRegisteredTests`; other tests come back as skipped and are counted in the "did not match the filter" line. [C]
+- The load check runs only on an unfiltered run. [C]
+- Timings: each result carries `ms` from `Date.now()` and prints as `[12 ms]`. [C]
+- A test that never settles fails after 10 s (`Took longer than 10 seconds.`) and the rest still run. [C]
+- Partial results: the runner prints a line as each test starts and finishes; the sandbox host reads them. When the 30 s limit or Stop ends the run, the finished tests are kept and the error names the test that was running. [C] [T real sandbox suite per the PR notes]
+- A name that matches nothing is an error (`No test name contains "x".`). A run with no results says "No tests ran. Add tests in tests/*.test.ts; nothing was checked." instead of "All checks passed." [C] [T report.test.ts]
+- Output is capped: failures first, an error cut at 400 characters with a marker, at most 80 result lines, then a count of what was left out. [C]
+- Report format now: header (`All N checks passed.` / `K of N checks failed.` / `Tests did not finish cleanly.`), then `- pass: <name> [12 ms]` and `- FAIL: <name> [12 ms] (<error>)`, then an optional skipped line and `Error: ...`. `isError` is true when `!r.ok`. [C]
+- Unchanged: the registry is still one global array (`globalThis.__custardTests`) for the whole bundle; `src/plugin-sdk/plugin-tests.test.ts` still runs every plugin test file under vitest; the sandbox still has no bridge, no network and no capabilities; `testing.ts` is still not part of the build hash. [C]
+- Spotify has 114 tests (115 checks with the load check). The 114-case probe at 4261aed was a vm stand-in, not the Electron sandbox. [T] [U]
 
-Output the model sees (from the `plugin_test` branch in `workspace/index.ts`): [C]
+### Still open for this item
 
-```
-All checks passed.            (or: Some checks failed.)
-- pass: <name>
-- FAIL: <name> (<error>)
-Error: <r.error>              (only when the run itself failed)
-```
-
-`isError` is true when `!r.ok`.
-
-- `plugin_test` lists a line for every passing test, so output grows with the suite (114 lines for spotify). There is no cap. [C] [I]
-- If one test never finishes, the 30 s timeout rejects the whole run: `test()` catches it and returns `{ ok: false, results, error }` where `results` holds only the load-check result. The names and outcomes of the tests that already passed are lost. Error text: `Tests took longer than 30 seconds, so they were stopped.` [C]
-- The registry is a global array (`globalThis.__custardTests`), so the whole bundle is one registry; test files do not know their own name. [C testing.ts]
-- Under repo vitest, `src/plugin-sdk/plugin-tests.test.ts` runs every `plugin/*/tests/*.test.ts` by loading each file separately and registering its cases. That is a developer path, not available to the model. [C]
-- Existing host test of the output: `host.test.ts` ("echo greets", "fails on purpose") expects `['Plugin loads and handles every tool in plugin.json', true], ['echo greets', true], ['fails on purpose', false]`. [T]
-
-No filter by file or name, and no timings: [NB]
-
-### Feasibility
-
-Feasible and mostly mechanical. The bundler already takes a list of test files. [C]
-
-### Effort: small to medium
-
-Files touched: `src/main/workspace/index.ts` (input schema, parse, output lines), `src/main/plugins/host.ts` (`test(id, signal, filter?)`; choose files), `src/plugin-sdk/testing.ts` (`runRegisteredTests(filter?)` and timing), `src/main/plugins/runtime.ts` (call with the filter; copy `ms` through the result mapping, which today keeps only `name`, `ok`, `error`), `src/shared/plugins.ts` (`TestReport` adds `ms?`), `src/main/plugins/host.ts` `TestRunner` type, the test stand-ins in `host.test.ts` and `src/plugin-sdk/plugin-tests.test.ts`, docs `API.md` line 113 and `TESTING.md`. [I]
-
-### What exactly would change (PROPOSAL, not built)
-
-- Input: `{ file?: string, name?: string }`. [NB]
-  - `file`: matched by exact equality against the list from `readSources` that already passes the `tests/*.test.ts` regex, so the model's string is never used as a path. Bundle only that file.
-  - `name`: case-sensitive substring on the test name, applied inside `runRegisteredTests`. Report `No tests matched <name>.` as an error, not as "All checks passed" with zero results; today an empty suite also passes silently (`ok: results.every(...)` on the load check alone). [I]
-- Timings: wrap each case with `Date.now()` before and after, return `ms`, print `- pass: <name> (12 ms)` and a total line. `performance.now()` precision in the sandbox window is [U]; Electron may coarsen timers. A per-test timeout (so one hanging test fails only itself) is a separate item and would need `Promise.race` inside the runner. [NB]
-- Return partial results when the global timeout hits, by streaming or by having the runner post results as they finish. [NB]
-- Cap the output (print failures in full, passes as a count or only names, with a flag for verbose). [NB]
-- Keep the load check on every run (cheap) or skip it when a filter is given. [NB]
-
-### Risks and security consequences
-
-- No new reach: the test sandbox has "no bridge at all" (`runtime.ts` comment) and no network. A filter changes only which cases run. [C]
-- `testing.ts` is not part of the build hash: `sourceHash` hashes `index.ts`, `runtime.ts` (and the widget files for widget plugins) from the SDK, not `testing.ts`. A change to `testing.ts` therefore does not make a new build ID for existing plugins, which is fine for tests (they are not shipped in the build). [C host.ts `sourceHash`]
-- Test code is plugin code the model wrote, running in the sandbox window; the existing 30 s kill and `forcefullyCrashRenderer` path covers a busy loop. [C]
+- A plugin with no test files still reports "All 1 checks passed." on an unfiltered run, because the load check counts as a result; only `plugin_validate` warns "There are no tests in tests/*.test.ts." The "No tests ran" line appears when nothing at all produced a result. [C] [I]
+- A test stuck in a busy loop is named by its start. A test that loops after its last progress line cannot be told apart from one that hung earlier. The 30 s limit is one limit for the whole run. [C]
+- Per-test timing precision in the sandbox window (timers may be coarsened) was not checked. [U]
 
 ---
 
 ## 5. Reading the active (built/installed) plugin's source to diff against the workspace copy
+
+### Status: still open at 7a23d19 (no `plugin_diff` or `plugin_read_active`; `devTools` has two tools; `review()` and `diffSources` are still reachable only from Settings)
 
 ### Where installed plugins live, and whether the workspace is a copy
 
@@ -228,7 +223,7 @@ Files touched: `src/main/workspace/index.ts` (input schema, parse, output lines)
   ```
   Probe of `saveBuild` produced a build folder with `["bundle.js","instructions.md","manifest.json","sources.json"]` (plus `widgets/` when there are widgets). `sources.json` is a JSON array of `{ path, content }` for every source file at build time, and `store.buildSources(id, buildId)` returns it (probe: `[{"path":"a.ts","content":"x"}]`). So the installed plugin does include a full source snapshot. [T] [C]
 - Build ID: first 16 hex characters of a SHA-256 over all source files plus selected SDK files. `status().sourceChanged` is true when the current source hash differs from the active build ID. [C host.ts `sourceHash`, `status`]
-- Builds are kept per source hash: `validate()` saves a build whenever the hash is new, active or not (staged). `pruneBuilds` is called only from `activate()`, keeping the new active and the previous one. So repeated `plugin_validate` runs on changed source accumulate builds in the app data folder until the next activation. [C host.ts lines 459-520, 721] [I] (no cap was found)
+- Builds are kept per source hash: `validate()` saves a build whenever the hash is new, active or not (staged). `pruneBuilds` is called only from `activate()`, keeping the new active and the previous one. So repeated `plugin_validate` runs on changed source accumulate builds in the app data folder until the next activation. [C host.ts `validate` and `activate`] [I] (no cap was found)
 
 ### Can the model read the installed copy today? No.
 
@@ -238,7 +233,7 @@ Files touched: `src/main/workspace/index.ts` (input schema, parse, output lines)
   - Other plugins in `plugin/` besides spotify are not readable by the model from another plugin's workspace. [C]
   - `reference_read` uses the same `read()` as `fs_read`: binary files refused, text over 200,000 characters truncated with `[truncated at 200000 characters]`. [C]
 - The Settings review screen already computes the diff: `PluginHost.review(id)` calls `diffSources(store.buildSources(id, active.buildId), readSources(sourceDir))` and returns `files: FileChange[]` (`{ path, change: 'added'|'changed'|'removed', diff? }`), shown in `PluginsTab.tsx`. It is reachable by IPC `plugins:review` only. The model gets neither `review` nor `diffSources`; `devTools` has only `plugin_validate` and `plugin_test`. [C host.ts `review`, plugins/index.ts, workspace/index.ts]
-- `review()` calls `validate()` first, which may save a staged build. A diff tool built on `review()` would carry that side effect. [C]
+- `review()` calls `validate()` first (without the type check), which may save a staged build. A diff tool built on `review()` would carry that side effect. [C]
 
 ### Feasibility
 
@@ -259,11 +254,13 @@ Files touched: `src/main/workspace/index.ts` (tool def, run branch, prompt line)
 
 - Content leaves `userData`, but only what `readSources` captured, which already excludes `isDeniedName` names (`.env*`, keys, `.git`, `node_modules`) and symlinks. A secret that was in a file at build time and removed since would be returned from the old snapshot. Source files must not hold secrets anyway (workspace prompt: "Never put secrets in files"). The risk is that the model sees an old leaked value; it would already have seen it if it wrote it. [C] [I]
 - Never give the model a path into `userData`. The tool must take no path or only a path validated against the snapshot's own file list, never joined onto the store directory. [I]
-- `diffSources` output for a large change is unbounded text (a diff string per file); `lineDiff` returns `undefined` above 4,000,000 cells and the UI then prints "(too large to show)". A tool result needs its own cap. [C diff.ts] [I]
+- `diffSources` output for a large change is unbounded text (a diff string per file); `lineDiff` in `plugins/diff.ts` returns `undefined` above 4,000,000 cells and the UI then prints "(too large to show)". A tool result needs its own cap. [C diff.ts] [I]
 
 ---
 
 ## 6. How a plugin enabled in Settings becomes callable in Code mode in the same chat
+
+### Status: a question, not a request; the answer still holds at 7a23d19 (re-read in `chat.ts` and `host.ts`, the host probe was not re-run)
 
 ### Short answer
 
@@ -271,7 +268,7 @@ A chat can use a plugin enabled in Settings on its very next message. No new cha
 
 ### As built
 
-- The tool list is built once per user message, not once per chat and not once per model round. `chat:send` calls `send(sender, req)` (`src/main/chat.ts` line 1083), and `send` builds the list once: [C]
+- The tool list is built once per user message, not once per chat and not once per model round. `chat:send` calls `send(sender, req)` (`src/main/chat.ts`, line 1104 for the handler and line 252 for `send` at 7a23d19), and `send` builds the list once: [C]
   ```ts
   const policy = modePolicy(conversation.mode, conversation.workspace)
   ...
@@ -290,11 +287,11 @@ A chat can use a plugin enabled in Settings on its very next message. No new cha
   ].filter((t) => policy.tools.has(kindOf(t.name)))
   const available = new Set(tools.map((t) => t.name))
   ```
-  The same `tools` and `available` are used for every model round in that reply (the tool loop passes `tools` to each request, line 926), so a plugin enabled while a reply is already running is not offered until the next message. [C] [I]
-- `toolSet(mode)` reads current state each call: for every id in the store, skip unless `st.enabled && st.active`; tools are `<id>__<tool>` with description `[<plugin name> plugin] <description>`. In `code` mode the per-mode "Chat design" opt-in is not required (`needsChatDesign = (mode) => mode !== 'code'`). [C host.ts lines 156, 881-910]
-- Which Code chats get plugin tools at all: `modePolicy('code', workspace)` adds `'plugin'` and `'widget'` only when `workspace.kind === 'internal'`. A General Code chat never gets plugin tools. [C policy.ts] [T policy.test.ts lines 59-65: `general.tools.has('plugin')` is false, `internal.tools.has('plugin')` is true]
-- The workspace is fixed per chat: `conversation.workspace = verifyWorkspace(req.workspace)` runs only when the conversation is new (`if (!existing && req.mode === 'code')`), the renderer passes `workspace` only for a new Code chat (`mode === 'code' && !current && workspace`), and the picker is shown as `fixed={current ? current.workspace : null}`. A General chat cannot become a Plugins chat, and a Plugins chat for plugin A stays on A (although it sees the tools of every enabled plugin, not just A). [C chat.ts line 273, ChatView.tsx lines 391 and 642]
-- The system prompt is also rebuilt per message. Enabled plugins' `instructions.md` text goes in as `<plugin name="..." tools="<id>__*">`. The paragraph introducing the `<plugin>__<tool>` naming ("Plugins the user enabled add the tools named <plugin>__<tool>...") is added only `if (plugins.instructions.length)`, so a plugin with empty instructions would add tools with no explanatory paragraph. The scaffold writes a non-empty placeholder instructions file, so this only bites if it is emptied. [C chat.ts lines 366-373; scaffold.ts] [I]
+  The same `tools` and `available` are used for every model round in that reply (the tool loop passes `tools` to each request), so a plugin enabled while a reply is already running is not offered until the next message. [C] [I]
+- `toolSet(mode)` reads current state each call: for every id in the store, skip unless `st.enabled && st.active`; tools are `<id>__<tool>` with description `[<plugin name> plugin] <description>`. In `code` mode the per-mode "Chat design" opt-in is not required (`needsChatDesign = (mode) => mode !== 'code'`). [C host.ts `toolSet`, `needsChatDesign`]
+- Which Code chats get plugin tools at all: `modePolicy('code', workspace)` adds `'plugin'` and `'widget'` only when `workspace.kind === 'internal'`. A General Code chat never gets plugin tools. [C policy.ts] [T policy.test.ts: `general.tools.has('plugin')` is false, `internal.tools.has('plugin')` is true]
+- The workspace is fixed per chat: `conversation.workspace = verifyWorkspace(req.workspace)` runs only when the conversation is new (`if (!existing && req.mode === 'code')`), the renderer passes `workspace` only for a new Code chat (`mode === 'code' && !current && workspace`), and the picker is shown as `fixed={current ? current.workspace : null}`. A General chat cannot become a Plugins chat, and a Plugins chat for plugin A stays on A (although it sees the tools of every enabled plugin, not just A). [C chat.ts around line 278, ChatView.tsx]
+- The system prompt is also rebuilt per message. Enabled plugins' `instructions.md` text goes in as `<plugin name="..." tools="<id>__*">`. The paragraph introducing the `<plugin>__<tool>` naming ("Plugins the user enabled add the tools named <plugin>__<tool>...") is added only `if (plugins.instructions.length)`, so a plugin with empty instructions would add tools with no explanatory paragraph. The scaffold writes a non-empty placeholder instructions file, so this only bites if it is emptied. [C chat.ts, where the system prompt is built; scaffold.ts] [I]
 - History: calls in earlier turns to tools no longer offered are converted to text (`withoutUnavailableTools(history, available)`), so disabling does not break the transcript. [C chat.ts; src/main/history.ts] [T history.test.ts]
 - Every call is checked again when it runs: `if (!available.has(c.name))` → `<name> isn't available in this chat, so nothing was done.`; and in `PluginHost.invoke` (re-checked at call time) state, build and permissions are compared with the snapshot taken in `toolSet`. [C]
 - Messages (verbatim): `The <id> plugin is disabled, so this call was not run.` and `The plugin was updated or rolled back after this reply started, so this call was not run. Ask again to use the current version.` and `This tool is not available right now.` [C host.ts `invoke`] [T host.test.ts "unregisters tools on disable and rejects stale calls without running them", "rejects calls offered by an older build after an update", "rejects tools the model was never offered"]
@@ -326,25 +323,21 @@ Q6 after enable => ["zzdemo__hello"]
 
 ---
 
-## Defects and gaps collected (decisions for Neno)
+## Remaining known gaps
 
-1. `fs_write` is not atomic (plain `writeFileSync`); `vault_edit` writes atomically with `writeReplaceSync`. [C]
-2. A leftover atomic-write temp file inside a plugin folder would be read as plugin source and change the build hash, because `readSources` filters only `isDeniedName` and symlinks. [T]
-3. Two diff styles disagree on `-`/`+` order (`workspace/diff.ts` vs `plugins/diff.ts`). [T]
-4. Approval card shows diffs uncoloured and unfolded in one grey `<pre>`. [C]
-5. `plugin_validate` does not type-check; type errors pass validate, test and activation. [T]
-6. `typescript` is a devDependency, so a packaged app cannot type-check without packaging changes. [C] [U]
-7. `plugin_test` has no filter, no timings, no cap on output, and loses all passing results when the 30 s global timeout hits. [C]
-8. An empty test suite reports "All checks passed." (load check alone). [C]
-9. Each distinct `plugin_validate` stages a build in app data; `pruneBuilds` runs only on activation, and no cap was found. [C] [I]
-10. The model cannot see the active build or any diff against it, though `review()`/`diffSources` already exist for Settings. [C]
-11. The generic "Plugins the user enabled add the tools named..." paragraph in the system prompt depends on plugin instructions being non-empty. [C]
-12. `chat.ts` `send` is not covered by any test, so the per-message tool list behaviour in item 6 rests on code reading. [U]
+Shared gaps (same wording in every refreshed reference doc):
 
-## Could not verify
+1. Memory: Memory.md is edited by the user only. Nothing in Custard writes or corrects a stored UTC offset in it; a stale "UTC+2" there stays. The chat is told the time zone by name with its current offset and to trust that over a note's offset, and docs/vault-tools.md says Memory should record a zone name, not an offset. Accepted by design (Neno, 2026-10-12).
+2. Type check (plugin_validate): type errors are reported but do not block review or activation; other plugins than Spotify may now show type errors. Verified in a dev build and in the packaged Linux worker; the full packaged-app UI path and Windows/macOS packaging of the TypeScript lib resource are unverified.
+3. plugin_test: a test stuck in a busy loop is named by its start, not its progress; the 30 s global limit is a single limit for the whole run.
+4. A widget must handle `dataDropped` itself; the Spotify widget does not yet show that its view is out of date. A widget's input over its limit is still refused rather than reported (not changed).
+5. Docs errors not fixed in code: docs/plugins/TESTING.md says 23 Spotify tests (there are 114; 115 checks with the load check). `docs/plugins/README.md` and `API.md` still describe `plugin_validate` and `plugin_test` in one line each and do not mention type errors, `file`, `name` or timings.
+6. Not verified anywhere: Windows, macOS, live providers, a running Obsidian, real OS clock changes, rename-over-open-file behaviour with antivirus or Obsidian holding the file (`fs_write` now relies on it).
 
-- Behaviour in the real Electron sandbox, packaged builds, Windows and macOS.
-- Whether `typescript` works from inside an asar archive.
-- Whether SDK types compile without the DOM lib.
-- Timer precision for per-test timings in the sandbox window.
-- Any real model use of the tools above.
+Request-specific leftovers:
+
+7. No patch / replace-text tool (request 1) and no coloured or folded diff card (request 2). The two diff modules (`workspace/diff.ts`, `plugins/diff.ts`) still order `-` and `+` differently.
+8. The model cannot see the active build or any diff against it (request 5). Each distinct `plugin_validate` still stages a build in app data; `pruneBuilds` runs only on activation and no cap was found.
+9. An unfiltered `plugin_test` on a plugin with no test files reports "All 1 checks passed." (the load check). The type-check host compares path text and does not resolve symlinks; no test covers a symlink inside the plugin folder.
+10. The "Plugins the user enabled add the tools named..." paragraph in the system prompt is still added only when some plugin has instructions text, and the Plugins workspace prompt still does not say that an activated plugin shows up on the next message.
+11. `chat.ts` `send` is still not covered by a test, so the per-message tool list in request 6 rests on code reading. Timer precision for per-test timings in the sandbox window, and any real model use of these tools, were not checked.

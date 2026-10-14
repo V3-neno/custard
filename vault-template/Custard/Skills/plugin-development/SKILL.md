@@ -1,7 +1,7 @@
 ---
 name: plugin-development
-description: Use when building, changing, testing or reviewing a Custard plugin in Code mode's Plugins workspace.
-modes: code
+description: Use when building, changing, testing or reviewing a Custard plugin in Plugins mode.
+modes: plugins
 ---
 
 # Plugin development
@@ -20,7 +20,7 @@ This skill is guidance for writing good plugins. It is not a security mechanism:
 8. **Report only what happened.** Results say exactly what the service confirmed: what succeeded, what failed, and what is unknown. Never retry a non-idempotent write after an unclear failure; report it as unknown instead.
 9. **Handle failure and cancellation.** Check `res.ok`, explain common errors in plain words, stop when `ctx.signal` is aborted, and stay within the tool's timeout. Throw `PluginError` for an expected failure so its message reaches the model as written.
 10. **Test with the SDK harness.** Add `tests/*.test.ts` using `custard-plugin-sdk/testing` (`createContext`, `response`, `test`, `assert`) with a scripted fetch. Cover success, each error the API can return, partial success, and input the schema should have rejected.
-11. **Validate, test, then hand over.** Run `plugin_validate` and `plugin_test` after every round of changes and fix what they report. Then list the files you changed and the permissions requested, and tell the user to review and activate it in Settings → Plugins. You can't activate plugins.
+11. **Validate, test, then hand over.** Run `plugin_validate` and `plugin_test` after every round of changes and fix what they report. Then list the files you changed and the permissions requested, and tell the user to review and activate it with Manage on its card in Plugins mode. You can't activate plugins.
 12. **Say when the SDK can't do it.** If the plugin needs something API v1 doesn't offer (vault or file access, background work, a UI panel, npm packages, raw sockets), explain that plainly and describe the core change it would need as a separate proposal. Don't work around the sandbox.
 
 ## What validation checks, and what it can't

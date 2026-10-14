@@ -35,7 +35,8 @@ export type CaptureDeps = {
   update: (id: string, change: (c: Conversation) => void) => Conversation | null
   vaultPath: () => string | null
   settings: () => MemorySettings
-  summarizer: (provider: Provider) => Summarizer | null
+  // `chatId`: whose summary it is, for its cost.
+  summarizer: (provider: Provider, chatId: string) => Summarizer | null
   queueFile: string
   pluginName: (id: string) => string
   // The folder for a plugin's own capture notes (plugin knowledge); null to
@@ -351,7 +352,7 @@ export class Capture {
         })
         return false
       }
-      const summarize = this.deps.summarizer(job.provider ?? 'claude')
+      const summarize = this.deps.summarizer(job.provider ?? 'claude', id)
       if (!summarize) {
         const why = "There's no API key to summarize it with; it will be saved once there is."
         if (job.reason !== why)

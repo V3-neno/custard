@@ -1,16 +1,14 @@
-import Anthropic from '@anthropic-ai/sdk'
-import OpenAI from 'openai'
-import type { Provider } from '../../shared/chat'
-import { anthropicEndpoint, openaiEndpoint } from '../endpoints'
+import { providerIds, providers, type Provider } from '../../shared/providers'
+import { adapterFor } from '../adapters/registry'
+import type { OnUsage } from '../../shared/pricing'
 
 // The one model call a capture makes: the evidence in, a structured summary
 // out. It has no tools of any kind, so it can't act, read anything else or
 // reach the web; its answer is only ever turned into note text by code.
 
-export const SUMMARY_MODELS: Record<Provider, string> = {
-  claude: 'claude-haiku-4-5',
-  openai: 'gpt-6-luna'
-}
+export const SUMMARY_MODELS: Record<Provider, string> = Object.fromEntries(
+  providerIds.map((p) => [p, providers[p].summaryModel])
+) as Record<Provider, string>
 export const SUMMARY_LIMITS = { maxTokens: 1500, timeoutMs: 30_000, retries: 2 }
 
 // Whether what the user asked for was seen at a later check. Separate from
@@ -149,43 +147,27 @@ export function parseSummary(raw: string): Summary {
 
 export type Summarizer = (evidence: string, signal?: AbortSignal) => Promise<Summary>
 
-export function summarizer(provider: Provider, apiKey: string): Summarizer {
-  const opts = { timeout: SUMMARY_LIMITS.timeoutMs, maxRetries: SUMMARY_LIMITS.retries }
-  if (provider === 'openai') {
-    const client = new OpenAI({ apiKey, ...opts, ...openaiEndpoint() })
-    return async (evidence, signal) => {
-      const r = await client.responses.create(
-        {
-          model: SUMMARY_MODELS.openai,
-          instructions: SUMMARY_SYSTEM,
-          input: evidence,
-          max_output_tokens: SUMMARY_LIMITS.maxTokens,
-          reasoning: { effort: 'low' },
-          store: false,
-          text: {
-            format: { type: 'json_schema', name: 'memory', strict: true, schema: SUMMARY_SCHEMA }
-          }
-        },
-        { signal }
-      )
-      if (r.status === 'incomplete') throw new Error('The summary was cut off.')
-      return parseSummary(r.output_text)
-    }
-  }
-  const client = new Anthropic({ apiKey, ...opts, ...anthropicEndpoint() })
+// `onUsage` is told what each call used (see usage.ts).
+export function summarizer(provider: Provider, apiKey: string, onUsage?: OnUsage): Summarizer {
+  const adapter = adapterFor(provider)
   return async (evidence, signal) => {
-    const m = await client.messages.create(
-      {
-        model: SUMMARY_MODELS.claude,
-        max_tokens: SUMMARY_LIMITS.maxTokens,
-        system: SUMMARY_SYSTEM,
-        messages: [{ role: 'user', content: evidence }],
-        output_config: { format: { type: 'json_schema', schema: SUMMARY_SCHEMA } }
-      },
-      { signal }
-    )
-    if (m.stop_reason === 'refusal') throw new Error('The summary was declined.')
-    if (m.stop_reason === 'max_tokens') throw new Error('The summary was cut off.')
-    return parseSummary(m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''))
+    const r = await adapter.sendMessage({
+      model: SUMMARY_MODELS[provider],
+      apiKey,
+      system: SUMMARY_SYSTEM,
+      messages: evidence,
+      schema: { name: 'memory', schema: SUMMARY_SCHEMA },
+      maxTokens: SUMMARY_LIMITS.maxTokens,
+      effort: 'low',
+      timeoutMs: SUMMARY_LIMITS.timeoutMs,
+      retries: SUMMARY_LIMITS.retries,
+      signal
+    })
+    for (const u of r.usage) onUsage?.(u.model, u.usage)
+    if (r.stop === 'refused') throw new Error('The summary was declined.')
+    if (r.stop === 'cut-off') throw new Error('The summary was cut off.')
+    if (r.stop === 'too-long') throw new Error('The chat was too long to summarize.')
+    if (r.stop === 'failed') throw new Error(`The summary failed: ${r.error ?? 'no reason given'}`)
+    return parseSummary(r.text)
   }
 }

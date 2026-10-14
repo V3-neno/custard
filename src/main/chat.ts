@@ -1,19 +1,17 @@
-import Anthropic from '@anthropic-ai/sdk'
 import type {
-  BetaContentBlock,
-  BetaContentBlockParam,
   BetaTextBlockParam,
   BetaTool,
-  BetaToolResultBlockParam,
-  MessageCreateParamsStreaming
+  BetaToolResultBlockParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { type WebContents } from 'electron'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
+import { join } from 'path'
 import { getApiKey } from './apiKey'
 import { describeError } from './providerError'
 import {
   allConversations,
+  charge,
   getChatSettings,
   getConversation,
   getMemorySettings,
@@ -26,30 +24,20 @@ import {
   saveConversation,
   vaultEditsDir
 } from './store'
-import { allPluginInfo, memory } from './memory'
+import { allPluginInfo, chatNotes, memory } from './memory'
 import { pluginContext } from './memory/plugins'
-import { runOpenAI } from './openai'
+import { adapterFor } from './adapters/registry'
 import { carriedContext, handoffSummarizer } from './handoff'
+import {
+  chatTools,
+  isChatTool,
+  makeReferences,
+  recentChatsPrompt,
+  referencesPrompt,
+  runChatTool
+} from './earlierChats'
 import { continueChat } from './continue'
-import {
-  claudeCounter,
-  capResult,
-  maxResultChars,
-  compactTrigger,
-  COMPACTION_INSTRUCTIONS,
-  estimateTokens,
-  fromLastCompaction,
-  isContextError,
-  measure
-} from './context'
-import {
-  claudeHistory,
-  compactionRefused,
-  isCompactionRejected,
-  openaiStart,
-  recordClaudeCompaction,
-  usesCompaction
-} from './compaction'
+import { capResult, maxResultChars, isContextError, measure } from './context'
 import {
   previewNote,
   runVaultTool,
@@ -73,22 +61,36 @@ import { chatHasOutsideText, isOutsideTool } from '../shared/outsideText'
 import { anyGrantAllows } from '../shared/vaultGrants'
 import { withoutUnavailableTools } from './history'
 import { attachments } from './attachments'
-import { claudeFilesFrom, prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
+import { prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
 import { acceptsAttachments, type Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
-import { pluginHost, protectedRoots, verifyWorkspace } from './plugins'
+import { createPluginNamed, pluginHost, protectedRoots, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
 import { workspaceTools, type WorkspaceTools } from './workspace'
+import {
+  answerProposal,
+  PROPOSE_TOOL,
+  proposePrompt,
+  proposeTool,
+  runProposeTool
+} from './workspace/propose'
+import { createSkill, skillEntries, skillExists } from './skillsHub'
 import { isWebTool, runWebTool, webTools } from './web'
 import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
 import {
   chatModels,
+  isChatModel,
+  isEffort,
+  type ChatSettings,
   isMode,
+  introduce,
   providerOf,
   type ActionStatus,
   type ApprovalDecision,
   providerNames,
   type ChatEvent,
+  type ProposalResult,
+  type ChatReference,
   type ContinueResult,
   type Conversation,
   type Mode,
@@ -96,9 +98,8 @@ import {
 } from '../shared/chat'
 import { toolLabel } from '../shared/vault'
 import { setRequestLookup, widgets } from './widgets'
-import { anthropicEndpoint } from './endpoints'
 import { modeName, modePolicy, refuseKind, toolKind } from './modes/policy'
-import { extensionRefusal, extensionTarget } from './modes/extensions'
+import { extensionRefusal, extensionTarget, aboveRoot, writesInside } from './modes/extensions'
 import { resolveInVault } from './memory/paths'
 import { design } from './design'
 import { designTools, runDesignTool } from './design/tools'
@@ -165,21 +166,21 @@ const isCoreWrite = (name: string, input: unknown): boolean =>
   (name === 'design_jobs' && (input as { action?: unknown } | null)?.action === 'cancel')
 
 const systemPrompt = (model: (typeof chatModels)[number]): string =>
-  `${model.provider === 'claude' ? 'You are Claude' : `You are ${model.label}, an OpenAI model`}, ` +
+  `${introduce(model)}, ` +
   'working with the user through Custard, their personal desktop client. ' +
   'Format responses in Markdown when it helps readability.'
 
 // Chat and Design use extensions but never make them; the app enforces it
 // (see modes/policy), and this says what to offer instead.
 const USE_ONLY =
-  " In this mode you can't create, change or install skills or plugins, or hand work to Code mode or another agent. When one would help, recommend it, and if the user asks, draft the skill's text or a development prompt in a code block for them to copy. Never say one was sent, built or installed."
+  " In this mode you can't create, change or install skills or plugins, or hand work to Plugins mode or another agent. When one would help, recommend it, and if the user asks, draft the skill's text or a development prompt in a code block for them to copy. Never say one was sent, built or installed."
 
 // Each mode keeps its own history and nudges Claude toward that kind of work.
 const MODE_PROMPTS: Record<Mode, string> = {
   chat: 'The user is in Chat mode: a general conversation.' + USE_ONLY,
   code:
-    'The user is in Code mode. Act as a senior software engineer: give complete, working code in fenced blocks with the language named, ' +
-    'explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
+    'The user is in Plugins mode, where Custard plugins are built and improved. Act as a senior software engineer: in a plugin workspace, work on it with the workspace tools; ' +
+    'on the hub, brainstorm and offer to open or create one. Explain the reasoning briefly, and point out bugs, edge cases and trade-offs. The user mostly works in TypeScript, Next.js and Electron on Windows.',
   design:
     'The user is in Design mode. Act as a product and visual designer: think about layout, hierarchy, color, typography, spacing and interaction states. ' +
     'When the user wants a page, mockup or UI, make it with design_html: send the complete document (inline CSS and JS, or local files through `files`), never a fragment, and never only a code block. ' +
@@ -188,9 +189,9 @@ const MODE_PROMPTS: Record<Mode, string> = {
     "The user's own words override skill defaults. Report only the checks design_html says ran, and describe the design choices briefly." +
     USE_ONLY,
   skills: [
-    "The user is in Skills mode. You curate their Obsidian vault, Custard's long-term brain, so that future answers in Chat, Code and Design get better.",
+    "The user is in Skills mode. You curate their Obsidian vault, Custard's long-term brain, so that future answers in Chat, Design and Plugins get better.",
     "- If the vault isn't connected, ask them to connect it in Settings and stop there.",
-    '- Create skills as Custard/Skills/<kebab-case-name>/SKILL.md. Frontmatter has `name`, `description` (one sentence saying when to use the skill; this decides whether it gets used) and, optionally, `modes: code, design` to load it only in those modes (leave it out for every mode). The body is concrete, step-by-step instructions with the conventions and short examples a model needs.',
+    '- Create skills as Custard/Skills/<kebab-case-name>/SKILL.md. Frontmatter has `name`, `description` (one sentence saying when to use the skill; this decides whether it gets used) and, optionally, `modes: plugins, design` to load it only in those modes (leave it out for every mode). The body is concrete, step-by-step instructions with the conventions and short examples a model needs.',
     '- Before creating a skill, list Custard/Skills and read related skills so you extend rather than duplicate. You can only add to existing notes, so improve a skill by appending a clearly headed section.',
     '- Learn from the user: ask about their stack, coding conventions, design taste and writing style, and turn the answers into skills or memory.',
     '- To improve the vault, survey it with vault_list and vault_search: look for duplicates, orphan notes, missing links and inconsistent names. You can create index notes and append links, but you cannot move, rename, rewrite or delete notes, so give the user a short checklist for those to do in Obsidian.',
@@ -238,17 +239,6 @@ const pluginName = (id: string): string => {
 const approvals = new Map<string, { requestId: string; resolve: (d: ApprovalDecision) => void }>()
 const allowedInChat = new Set<string>()
 
-// After a mid-answer fallback, blocks the declining model produced before the
-// last `fallback` marker (other than text) must not be sent back to the API.
-function echoableContent(content: BetaContentBlock[]): BetaContentBlockParam[] {
-  const boundary = content.map((b) => b.type).lastIndexOf('fallback')
-  return content.filter(
-    (b, i) =>
-      i >= boundary ||
-      !(b.type === 'thinking' || b.type === 'redacted_thinking' || b.type === 'tool_use')
-  ) as BetaContentBlockParam[]
-}
-
 async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const { requestId } = req
   const emit = (e: ChatEvent): void => {
@@ -268,9 +258,29 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   if (!existing && !isMode(req.mode)) return refuse('Unknown mode.')
   if (existing && active.has(existing.id))
     return refuse('This chat is still answering. Wait for it to finish or stop it first.')
+  if (existing?.workspace?.kind === 'general')
+    return refuse(
+      'General Code was removed, so this chat is kept to read only. Start a new chat to keep going.'
+    )
   if (fileIds.length && !acceptsAttachments(existing?.mode ?? req.mode))
     return refuse('Files can be attached in Chat and Design modes only.')
   const conversation: Conversation = existing ?? newConversation(req.mode, req.text)
+  // The chat is bound to the model and effort this message was sent with.
+  conversation.model = model.id
+  conversation.effort = isEffort(req.settings.effort) ? req.settings.effort : 'medium'
+  // Earlier chats picked in the message box, checked before anything changes.
+  let references: ChatReference[] = []
+  try {
+    references = makeReferences(
+      getVaultPath(),
+      conversation,
+      req.references ?? [],
+      conversation.messages.length,
+      (id) => getConversation(id)
+    )
+  } catch (err) {
+    return refuse(err instanceof Error ? err.message : String(err))
+  }
   // Off before anything is said, so no part of it is ever captured.
   if (!existing && req.temporary) conversation.memory = { off: true, temporary: true, watermark: 0 }
   if (!existing && req.mode === 'code')
@@ -279,6 +289,13 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     } catch (err) {
       return refuse(err instanceof Error ? err.message : String(err))
     }
+  // A skill's workspace: a skill folder that is there now.
+  if (!existing && req.mode === 'skills' && req.skill !== undefined) {
+    const v = getVaultPath()
+    if (!v || !existsSync(v) || !skillExists(v, req.skill))
+      return refuse("That skill isn't in Custard/Skills, so the chat wasn't started.")
+    conversation.skill = req.skill
+  }
   // Created before the user's message goes in, so it can be taken back out
   // if nothing at all happens.
   const log = new TurnLog(conversation, saveConversation)
@@ -304,6 +321,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ;(conversation.attachments ??= []).push(...committed)
     if (!existing && !req.text.trim()) conversation.title = committed[0].name.slice(0, 60)
   }
+  if (references.length) (conversation.references ??= []).push(...references)
 
   const controller = new AbortController()
   const vault = getVaultPath()
@@ -313,7 +331,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const workspace = conversation.mode === 'code' ? workspaceTools(conversation.workspace) : null
   // What this mode may do (see modes/policy): which kinds of tool it's
   // offered and runs, and whether it may write skills or plugin files.
-  const policy = modePolicy(conversation.mode, conversation.workspace)
+  const policy = modePolicy(conversation.mode, conversation.workspace, conversation.skill)
+  const hubTarget = conversation.mode === 'skills' ? 'skill' : 'plugin'
   const kindOf = (name: string): ReturnType<typeof toolKind> =>
     toolKind(name, { isWorkspace: (n) => !!workspace?.has(n), isWeb: isWebTool })
   // Enabled plugins' tools, and which build each came from. Every call is
@@ -327,6 +346,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
   ]
   if (workspace) system.push({ type: 'text', text: workspace.prompt })
+  if (policy.tools.has('navigate')) system.push({ type: 'text', text: proposePrompt(hubTarget) })
+  if (policy.writeRoot)
+    system.push({
+      type: 'text',
+      text: `This chat is the workspace of one skill, "${conversation.skill}", in ${policy.writeRoot}/. You can write notes only inside that folder: its SKILL.md and files next to it. Read anything else in the vault you need, but never offer to change notes elsewhere; for that the user goes to Chat mode.`
+    })
   let vaultPrompt: string | null = null
   if (vaultReady)
     try {
@@ -341,6 +366,15 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       if (recall.outside) noteOutside(conversation, 'memory')
     } catch (err) {
       console.error('Vault prompt:', err)
+    }
+  // The newest earlier chats, from their notes, when memory is on (as
+  // captures are).
+  let recentChats = ''
+  if (vaultReady && getMemorySettings().auto && !conversation.memory?.off)
+    try {
+      recentChats = recentChatsPrompt(vault, conversation.id)
+    } catch (err) {
+      console.error('Earlier chats:', err)
     }
   if (vaultPrompt && grants.length)
     vaultPrompt += [
@@ -408,6 +442,16 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const carried = carriedContext(conversation)
   for (const text of carried.system) system.push({ type: 'text', text })
   injected.push(...carried.injected)
+  if (recentChats) {
+    system.push({ type: 'text', text: recentChats })
+    injected.push('summaries of your earlier chats')
+  }
+  // Earlier chats the user referenced in this chat.
+  if (conversation.references?.length) {
+    system.push({ type: 'text', text: referencesPrompt(conversation.references) })
+    injected.push('summaries of earlier chats you referenced')
+    if (conversation.references.some((r) => r.outside)) noteOutside(conversation, 'chats')
+  }
   const web = webTools(model)
   system.push({ type: 'text', text: web.prompt })
   system.push({
@@ -433,6 +477,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
 
   const tools: BetaTool[] = [
     ...(vaultReady ? vaultTools : []),
+    ...(vaultReady ? chatTools : []),
     ...(vaultReady
       ? vaultChangeTools.filter((t) =>
           anyGrantAllows(grants, t.name === 'vault_edit' ? 'edit' : 'append')
@@ -443,19 +488,19 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ...web.tools,
     ...plugins.tools,
     ...(widgetCatalog.length ? widgetTools(widgets().keys(conversation.id)) : []),
-    ...(policy.tools.has('design') ? designTools() : [])
+    ...(policy.tools.has('design') ? designTools() : []),
+    ...(policy.tools.has('navigate') ? [proposeTool(hubTarget)] : [])
   ].filter((t) => policy.tools.has(kindOf(t.name)))
   const available = new Set(tools.map((t) => t.name))
   // Attached files, read once the turn starts (see attachments/request).
   let files: PreparedFiles | null = null
   // Calls in the history to tools that aren't offered now go in as text.
-  // Claude models that don't compact get the history without compaction blocks.
+  // The adapter drops what its provider can't read.
   const history = (): Conversation['messages'] => {
-    const h = withoutUnavailableTools(
+    return withoutUnavailableTools(
       withFiles(conversation.messages, files?.blocks ?? new Map()),
       available
     )
-    return model.provider === 'claude' ? claudeHistory(h, model.id) : h
   }
 
   // Checks the next request against the model's budget (see context.ts) and
@@ -520,6 +565,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     }
   }
 
+  const outsideSkill = (): string =>
+    `This chat can only write inside ${policy.writeRoot}/, the folder of the skill it works on, so nothing was done.`
+
   // Why the mode refuses a call, checked before anything runs or asks: its
   // kind of tool, and for a new note, whether it would land among skills,
   // plugin files or Custard's own files (by any path, links included).
@@ -534,6 +582,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       // A path the vault refuses anyway; the tool says why.
       return null
     }
+    if (policy.writeRoot && !writesInside(full, join(vault, policy.writeRoot)))
+      return outsideSkill()
     const target = extensionTarget(full, vault, protectedRoots())
     if (!target || (target === 'skill' && policy.authorSkills)) return null
     return extensionRefusal(target, modeName(policy.mode))
@@ -546,7 +596,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const runTool = async (c: Call): Promise<ToolRun> => {
     emit({ requestId, type: 'tool', id: c.id, label: c.label, status: 'running', write: c.write })
     // Only tools offered in this turn run: a call to anything else (a
-    // plugin's tool in General Code, or one from an earlier turn) is refused.
+    // plugin's tool with no plugin chosen, or one from an earlier turn) is refused.
     if (!available.has(c.name))
       return {
         content: `${c.name} isn't available in this chat, so nothing was done.`,
@@ -628,7 +678,15 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         injected,
         model,
         apiKey,
+        onUsage: (m, u) => charge(conversation, m, u),
         signal: controller.signal,
+        search: (query) =>
+          adapterFor(model.provider).webSearch({
+            model: model.id,
+            apiKey,
+            query,
+            signal: controller.signal
+          }),
         turn: log.startLength,
         approve: (label, input, warning) =>
           approve(
@@ -636,8 +694,33 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
             warning
           )
       })
+    if (c.name === PROPOSE_TOOL)
+      return runProposeTool(
+        conversation,
+        c.input,
+        log.startLength,
+        hubTarget,
+        hubTarget === 'skill'
+          ? vaultReady
+            ? skillEntries(vault, new Set()).map((x) => ({ id: x.folder, name: x.name }))
+            : []
+          : pluginHost()
+              .list()
+              .map((p) => ({ id: p.id, name: p.name }))
+      )
     if (c.name === QUESTION_TOOL)
       return runQuestionTool(automationQuestionsFile(), shownQuestions, c.input)
+    if (isChatTool(c.name)) {
+      if (!vaultReady)
+        return {
+          content: 'The vault is not connected right now.',
+          isError: true,
+          outcome: 'not-run'
+        }
+      return runChatTool(vault, conversation.id, c.name, c.input, () =>
+        noteOutside(conversation, 'chats')
+      )
+    }
     if (isVaultTool(c.name)) {
       if (!vaultReady)
         return {
@@ -704,6 +787,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         c.name,
         c.input,
         (real) => {
+          const root = policy.writeRoot && join(vault, policy.writeRoot)
+          if (root && !writesInside(real, root) && !aboveRoot(real, root)) return outsideSkill()
           const t = extensionTarget(real, vault, protectedRoots())
           return t && !(t === 'skill' && policy.authorSkills)
             ? extensionRefusal(t, modeName(policy.mode))
@@ -795,44 +880,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     )
   }
 
-  const params: MessageCreateParamsStreaming = {
-    model: model.id,
-    max_tokens: 64000,
-    system,
-    messages: history(),
-    cache_control: { type: 'ephemeral' },
-    stream: true
-  }
-  if (tools.length) params.tools = tools
-  if (model.effort) {
-    params.thinking = { type: 'adaptive', display: 'summarized' }
-    params.output_config = { effort: req.settings.effort }
-  }
-  if (model.fallbacks) {
-    // If a safety classifier declines, the API retries on Anthropic's
-    // recommended fallback model instead of returning a refusal.
-    params.betas = ['server-side-fallback-2026-07-01']
-    params.fallbacks = 'default'
-  }
-  // Claude summarizes earlier messages itself once the input passes the
-  // trigger, and returns a compaction block that is kept in the history.
-  const compact = (on: boolean): void => {
-    params.betas = (params.betas ?? []).filter((b) => b !== 'compact-2026-01-12')
-    if (on) {
-      params.betas.push('compact-2026-01-12')
-      params.context_management = {
-        edits: [
-          {
-            type: 'compact_20260112',
-            trigger: { type: 'input_tokens', value: compactTrigger(model.id) },
-            instructions: COMPACTION_INSTRUCTIONS
-          }
-        ]
-      }
-    } else delete params.context_management
-    if (!params.betas.length) delete params.betas
-  }
-  if (model.provider === 'claude') compact(usesCompaction(model.id))
+  const adapter = adapterFor(model.provider)
 
   running.set(requestId, controller)
   requestConversation.set(requestId, conversation.id)
@@ -853,6 +901,11 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     const keptTurn = log.interrupt(kind, message)
     if (keptTurn) recordFiles()
     else if (committed.length) message += await takeBackFiles()
+    // A turn taken back takes its references with it.
+    if (!keptTurn && references.length)
+      conversation.references = (conversation.references ?? []).filter(
+        (r) => !references.includes(r)
+      )
     kept = keptTurn || log.startLength > 0
     if (kept) saveConversation(conversation)
     emit({
@@ -921,12 +974,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         conversation,
         model,
         current,
-        from:
-          model.provider === 'openai'
-            ? openaiStart(conversation, model.id).from
-            : usesCompaction(model.id)
-              ? claudeFilesFrom(conversation.messages)
-              : 0,
+        from: adapter.historyStart(conversation, model.id),
         store: attachments()
       })
       if (!prepared.ok)
@@ -934,107 +982,31 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       files = prepared.files
       for (const a of files.missing) a.missing = true
     }
-    if (model.provider === 'openai') {
-      const end = await runOpenAI({
-        requestId,
-        maxSteps: MAX_STEPS,
-        apiKey,
-        model: model.id,
-        effort: req.settings.effort,
-        instructions: system.map((b) => b.text).join('\n\n'),
-        history: history(),
-        conversation,
-        fits,
-        tools,
-        signal: controller.signal,
-        emit,
-        log,
-        runRound
-      })
-      if (controller.signal.aborted) return await stopEarly('stopped', 'Stopped by you.')
-      if (end === 'cut-off-tool') return await stopEarly('cut-off', CUT_OFF_TOOL)
-      if (end === 'too-long') return await stopEarly('too-long', TOO_LONG)
-      if (end === 'cut-off') log.notice('cut-off', CUT_OFF)
-      if (end === 'step-limit') log.notice('step-limit', STEP_LIMIT)
-      return finish()
-    }
-    const client = new Anthropic({ apiKey, ...anthropicEndpoint() })
-    for (let step = 0; ; step++) {
-      if (step === MAX_STEPS) {
-        log.notice('step-limit', STEP_LIMIT)
-        break
-      }
-      params.messages = history()
-      const { messages, system: sys, tools: offered, thinking, betas } = params
-      const count = claudeCounter(client, {
-        model: params.model,
-        system: sys,
-        ...(offered ? { tools: offered } : {}),
-        ...(thinking ? { thinking } : {}),
-        ...(betas ? { betas } : {}),
-        ...(params.context_management ? { context_management: params.context_management } : {})
-      })
-      const estimate = estimateTokens(sys, offered, fromLastCompaction(messages))
-      if (!(await fits(estimate, () => count(messages))))
-        return await stopEarly('too-long', TOO_LONG)
-      const stream = client.beta.messages.stream(params, { signal: controller.signal })
-      let streamed = false
-      let message: Awaited<ReturnType<typeof stream.finalMessage>>
-      try {
-        for await (const event of stream) {
-          streamed = true
-          if (event.type === 'content_block_start' && event.content_block.type === 'compaction') {
-            emit({ requestId, type: 'compacting' })
-          } else if (
-            event.type === 'content_block_start' &&
-            event.content_block.type === 'fallback'
-          ) {
-            const { from, to } = event.content_block
-            emit({ requestId, type: 'fallback', from: from.model, to: to.model })
-          } else if (event.type === 'content_block_delta') {
-            if (event.delta.type === 'thinking_delta') {
-              emit({ requestId, type: 'thinking', text: event.delta.thinking })
-            } else if (event.delta.type === 'text_delta') {
-              log.text(event.delta.text)
-              emit({ requestId, type: 'text', text: event.delta.text })
-            }
-          }
-        }
-        message = await stream.finalMessage()
-      } catch (err) {
-        // The model doesn't take compaction: send without it from now on.
-        if (streamed || !params.context_management || !isCompactionRejected(err)) throw err
-        compactionRefused(model.id)
-        compact(false)
-        step--
-        continue
-      }
-      if (message.stop_reason === 'refusal') {
-        const category = message.stop_details?.category
-        return await stopEarly(
-          'error',
-          `Claude declined this request${category ? ` (${category})` : ''}.`
-        )
-      }
-      const toolUses = message.content.filter((b) => b.type === 'tool_use')
-      const full = message.stop_reason === 'model_context_window_exceeded'
-      if (toolUses.length > 0 && (message.stop_reason === 'max_tokens' || full))
-        return await stopEarly(full ? 'too-long' : 'cut-off', full ? FULL_WINDOW : CUT_OFF_TOOL)
-      // Before the message goes in, so the record points at it.
-      recordClaudeCompaction(conversation, message.content, model.id)
-      log.addAssistant(echoableContent(message.content))
-      if (full) {
-        log.notice('too-long', FULL_WINDOW)
-        break
-      }
-      if (message.stop_reason === 'max_tokens') {
-        log.notice('cut-off', CUT_OFF)
-        break
-      }
-      if (message.stop_reason !== 'tool_use') break
-      await runRound(toolUses)
-      if (controller.signal.aborted) return await stopEarly('stopped', 'Stopped by you.')
-    }
+    const end = await adapter.streamMessage({
+      requestId,
+      model: model.id,
+      apiKey,
+      effort: req.settings.effort,
+      system,
+      history,
+      conversation,
+      tools,
+      maxSteps: MAX_STEPS,
+      fits,
+      onUsage: (m, u) => charge(conversation, m, u),
+      signal: controller.signal,
+      emit,
+      log,
+      runRound
+    })
+    if (end === 'stopped') return await stopEarly('stopped', 'Stopped by you.')
+    if (typeof end === 'object') return await stopEarly('error', end.refused)
+    if (end === 'cut-off-tool') return await stopEarly('cut-off', CUT_OFF_TOOL)
+    if (end === 'too-long') return await stopEarly('too-long', TOO_LONG)
+    if (end === 'full-window-tool') return await stopEarly('too-long', FULL_WINDOW)
+    if (end === 'cut-off') log.notice('cut-off', CUT_OFF)
+    if (end === 'full-window') log.notice('too-long', FULL_WINDOW)
+    if (end === 'step-limit') log.notice('step-limit', STEP_LIMIT)
     finish()
   } catch (err) {
     if (controller.signal.aborted) await stopEarly('stopped', 'Stopped by you.')
@@ -1048,7 +1020,10 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     active.delete(conversation.id)
     releaseConversation(conversation.id)
     // Memory capture looks at the chat after the turn; it only writes notes.
-    if (kept) memory().afterTurn(conversation, model.provider)
+    if (kept) {
+      memory().afterTurn(conversation, model.provider)
+      chatNotes().afterTurn(conversation, model.provider)
+    }
   }
 }
 
@@ -1072,12 +1047,24 @@ async function continueFrom(id: string, withoutSummary: boolean): Promise<Contin
     return await continueChat(
       {
         load: getConversation,
-        create: (mode, title) => ({ ...newConversation(mode, title), title }),
+        // The new chat keeps the model and effort of the one it continues.
+        create: (mode, title) => {
+          const from = getConversation(id)
+          return {
+            ...newConversation(mode, title),
+            title,
+            ...(from?.model ? { model: from.model } : {}),
+            ...(from?.effort ? { effort: from.effort } : {})
+          }
+        },
         save: saveConversation,
         summarizer: (original) => {
           const p = providerOf(original.context?.model ?? getChatSettings().model)
           const key = getApiKey(p)
-          return key ? handoffSummarizer(p, key) : null
+          // Charged to the chat being summarized.
+          return key
+            ? handoffSummarizer(p, key, undefined, (m, u) => charge(original.id, m, u))
+            : null
         }
       },
       id,
@@ -1092,6 +1079,19 @@ export function registerChatHandlers(): void {
   handle('chat:continue', (_, id: string, withoutSummary?: boolean) =>
     continueFrom(id, !!withoutSummary)
   )
+  // Picking another model (or effort) in an open chat: saved on the chat, so
+  // its next message goes there. No provider is asked.
+  handle('conversations:setModel', (_, id: string, settings: ChatSettings) => {
+    const c = openConversation(String(id))
+    if (!c) throw new Error('That chat is gone.')
+    if (active.has(c.id)) throw new Error('Wait for this chat to finish answering first.')
+    if (!isChatModel(settings?.model) || !isEffort(settings?.effort))
+      throw new Error('Unknown model or effort.')
+    c.model = settings.model
+    c.effort = settings.effort
+    saveConversation(c)
+    return c
+  })
   // The chats that continue this one, for "Continued in".
   handle('conversations:continuations', (_, id: string) =>
     allConversations()
@@ -1115,6 +1115,34 @@ export function registerChatHandlers(): void {
     })
   )
   on('chat:stop', (_, requestId: string) => running.get(requestId)?.abort())
+  // Yes or Not now on a hub chat's offer to enter (or create) a plugin's or
+  // skill's workspace. Only this, the user's click, makes the plugin or skill.
+  handle('chat:proposal', (_, chatId: string, proposalId: string, yes: boolean): ProposalResult => {
+    try {
+      if (active.has(String(chatId)))
+        return { ok: false, error: 'Wait for this chat to finish answering first.' }
+      const c = openConversation(String(chatId))
+      if (!c) return { ok: false, error: 'That chat is gone.' }
+      const vault = getVaultPath()
+      const needVault = (): string => {
+        if (!vault || !existsSync(vault)) throw new Error('Connect a vault first.')
+        return vault
+      }
+      const r = answerProposal(c, String(proposalId), yes === true, {
+        pluginExists: (id) =>
+          pluginHost()
+            .list()
+            .some((p) => p.id === id),
+        create: (name) => createPluginNamed(name).id,
+        skillExists: (folder) => skillExists(needVault(), folder),
+        createSkill: (name) => createSkill(needVault(), name)
+      })
+      saveConversation(c)
+      return { ok: true, enter: r, conversation: c }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
   handle('chat:approve', (_, id: string, decision: ApprovalDecision) => {
     const a = approvals.get(id)
     if (a) a.resolve(decision === 'once' || decision === 'chat' ? decision : 'deny')
