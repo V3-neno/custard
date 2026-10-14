@@ -95,6 +95,11 @@ function realParent(path: string): string {
   return real
 }
 
+// The name writeReplace gives the file it writes beside the target before
+// renaming it over. One left behind by a crash is not part of anything: readers
+// of a folder skip it.
+export const isAtomicTemp = (name: string): boolean => /^\..+\.[0-9a-f]{12}\.tmp$/.test(name)
+
 function checkName(name: string): void {
   if (!name || name === '.' || name === '..' || name.includes('/') || name.includes(sep))
     throw new FsafeError('A file name is required.')

@@ -6,12 +6,23 @@ import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { clearApiKey, getApiKey, setApiKey } from './apiKey'
+import { allModels } from './adapters/registry'
+import { checkProvider, forgetCheck, lastCheck, modelAvailability } from './adapters/checks'
+import { scanCapabilities, type ScanSources } from './adapters/scan'
+import { DISCOVERY_SKILL, gapFor, starterPrompt } from './plugins/discovery'
+import { isProvider } from '../shared/providers'
 import { chatBusy, openConversation, registerChatHandlers } from './chat'
 import { attachments, registerAttachmentHandlers } from './attachments'
-import { memory, registerMemoryHandlers } from './memory'
+import { chatNotes, memory, registerMemoryHandlers } from './memory'
 import { allowOnlyAppPage, handle } from './ipc'
 import { sameAppPage } from './appPage'
-import { pluginHost, protectedRoots, registerPluginHandlers, startPlugins } from './plugins'
+import {
+  createPluginNamed,
+  pluginHost,
+  protectedRoots,
+  registerPluginHandlers,
+  startPlugins
+} from './plugins'
 import { extensionRefusal, extensionTarget } from './modes/extensions'
 import { listEdits, undoEdit } from './vault/edit'
 import { isPluginContents } from './plugins/runtime'
@@ -29,10 +40,23 @@ import {
   vaultEditsDir
 } from './store'
 import type { VaultInfo } from '../shared/vault'
-import type { ChatSettings, Mode, Provider } from '../shared/chat'
+import {
+  isChatModel,
+  isEffort,
+  isMode,
+  type ChatSettings,
+  type Mode,
+  type Provider
+} from '../shared/chat'
 import { listSkills } from './vault'
 import { pinProviderEndpoints } from './endpoints'
-import { addMissingStarterSkills, createStarterVault } from './vaultTemplate'
+import {
+  addMissingStarterSkills,
+  createStarterVault,
+  starterFile,
+  starterSkillFolders
+} from './vaultTemplate'
+import { createSkill, readSkill, skillEntries } from './skillsHub'
 
 function vaultInfo(): VaultInfo {
   const path = getVaultPath()
@@ -40,7 +64,7 @@ function vaultInfo(): VaultInfo {
   return {
     path,
     isObsidian: existsSync(join(path, '.obsidian')),
-    skills: existsSync(path) ? listSkills(path).map((s) => s.name) : []
+    skills: existsSync(path) ? listSkills(path).map((s) => s.folder) : []
   }
 }
 
@@ -112,11 +136,48 @@ app.whenReady().then(() => {
   handle('apiKey:set', (_, p: Provider, key: string) => {
     setApiKey(p, key)
     void memory().run()
+    void chatNotes().runAll()
   })
-  handle('apiKey:clear', (_, p: Provider) => clearApiKey(p))
+  handle('apiKey:clear', (_, p: Provider) => {
+    clearApiKey(p)
+    forgetCheck(p)
+  })
+  // The model picker's list, from the provider adapters.
+  handle('models:list', () => allModels())
+  // Settings only: Save and Refresh check a key with its own provider.
+  handle('models:check', (_, p: Provider) => checkProvider(p))
+  // Which models can be picked now, from saved keys and the last check: no
+  // request.
+  handle('models:availability', () => modelAvailability())
+  handle('models:lastCheck', (_, p: Provider) => (isProvider(p) ? lastCheck(p) : null))
+  // Settings → Capabilities, and its Refresh: local files and rules only, so
+  // it asks no provider and no model (see adapters/scan).
+  const capabilitySources = (): ScanSources => ({
+    vault: getVaultPath(),
+    plugins: () => pluginHost().list(),
+    checks: lastCheck
+  })
+  handle('capabilities:scan', () => scanCapabilities(capabilitySources()))
+  // Start building: a new plugin for a gap, like New plugin in Plugins mode,
+  // with a starter prompt from the plugin-discovery skill (filled in here, no
+  // model asked) for the user to check and send in its workspace.
+  handle('capabilities:startPlugin', (_, provider: unknown, capability: unknown) => {
+    const gap = gapFor(scanCapabilities(capabilitySources()), provider, capability)
+    const bundled = starterFile(DISCOVERY_SKILL)
+    if (!bundled) throw new Error('Custard is missing its plugin-discovery skill.')
+    const p = starterPrompt(gap, getVaultPath(), bundled)
+    const made = createPluginNamed(p.name)
+    return { pluginId: made.id, name: made.name, request: p.request }
+  })
   handle('settings:get', () => getChatSettings())
-  handle('settings:set', (_, s: ChatSettings) => setChatSettings(s))
-  handle('conversations:list', (_, mode: Mode) => listConversations(mode))
+  // The default model: only a model and effort Custard knows.
+  handle('settings:set', (_, s: ChatSettings) => {
+    if (!isChatModel(s?.model) || !isEffort(s?.effort)) throw new Error('Unknown model or effort.')
+    setChatSettings({ model: s.model, effort: s.effort })
+  })
+  handle('conversations:list', (_, mode: Mode | null) =>
+    mode === null ? listConversations(null) : isMode(mode) ? listConversations(mode) : []
+  )
   handle('conversations:get', (_, id: string) => openConversation(id))
   handle('conversations:delete', async (_, id: string) => {
     if (chatBusy(id))
@@ -142,6 +203,7 @@ app.whenReady().then(() => {
     if (!result.canceled && result.filePaths[0]) {
       setVaultPath(result.filePaths[0])
       void memory().run()
+      void chatNotes().runAll()
     }
     return vaultInfo()
   })
@@ -157,6 +219,7 @@ app.whenReady().then(() => {
     if (!result.canceled && result.filePaths[0]) {
       setVaultPath(createStarterVault(result.filePaths[0]))
       void memory().run()
+      void chatNotes().runAll()
     }
     return vaultInfo()
   })
@@ -187,6 +250,22 @@ app.whenReady().then(() => {
     const path = getVaultPath()
     if (!path || !existsSync(path)) throw new Error('Connect a vault first.')
     return { added: addMissingStarterSkills(path), vault: vaultInfo() }
+  })
+  // The Skills hub. Read only.
+  handle('skills:list', () => {
+    const path = getVaultPath()
+    return path && existsSync(path) ? skillEntries(path, starterSkillFolders()) : null
+  })
+  // Add a skill: its folder and a draft SKILL.md (see createSkill).
+  handle('skills:create', (_, name: string) => {
+    const path = getVaultPath()
+    if (!path || !existsSync(path)) throw new Error('Connect a vault first.')
+    return createSkill(path, String(name))
+  })
+  handle('skills:read', (_, folder: string) => {
+    const path = getVaultPath()
+    if (!path || !existsSync(path)) throw new Error('Connect a vault first.')
+    return readSkill(path, folder)
   })
   registerChatHandlers()
   registerAttachmentHandlers()

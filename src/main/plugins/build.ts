@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'fs'
 import { dirname, join, relative, sep } from 'path'
+import { isAtomicTemp } from '../fsafe'
 import { isDeniedName, isInside } from '../workspace/paths'
 
 // Bundles a plugin's TypeScript into one script for its sandbox. esbuild only
@@ -14,7 +15,8 @@ const MAX_BUNDLE_BYTES = 2 * 1024 * 1024
 
 export type SourceFile = { path: string; content: string }
 
-// Every regular file in the plugin folder, skipping links, secrets and VCS data.
+// Every regular file in the plugin folder, skipping links, secrets, VCS data and
+// the temporary file an interrupted atomic write leaves beside its target.
 export function readSources(dir: string): SourceFile[] {
   const files: SourceFile[] = []
   let bytes = 0
@@ -22,7 +24,7 @@ export function readSources(dir: string): SourceFile[] {
     for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) =>
       a.name.localeCompare(b.name)
     )) {
-      if (isDeniedName(e.name) || e.isSymbolicLink()) continue
+      if (isDeniedName(e.name) || isAtomicTemp(e.name) || e.isSymbolicLink()) continue
       const full = join(d, e.name)
       if (e.isDirectory()) walk(full)
       else if (e.isFile()) {

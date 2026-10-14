@@ -28,6 +28,9 @@ const clean = (s: string): string =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
 
+// How long `text` is once fenced: escaping can grow it up to five times.
+export const fencedLength = (text: string): number => clean(text).length
+
 export function fenceResult(source: string, text: string, cap: number): string {
   const body = clean(text)
   const shown = body.length > cap ? body.slice(0, cap) : body

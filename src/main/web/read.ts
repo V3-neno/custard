@@ -134,7 +134,7 @@ export async function webRead(input: unknown, signal: AbortSignal, hop?: Hop): P
       ? '[Some of this page may only appear with JavaScript: it carries a notice saying so.]'
       : '',
     offset === 0 && page.links.length
-      ? `Links (untrusted; reading one needs the user's approval unless the user gave it or it came from a search):\n${page.links.map((l, n) => `[${n + 1}] ${l.text || '(no text)'}: ${l.url}`).join('\n')}`
+      ? `Links (untrusted; reading one needs the user's approval unless the user gave it or it came from a search):\n${page.links.map((l, n) => `[${n + 1}] ${l.text || '(no text)'}: ${l.url}`).join('\n')}${page.moreLinks ? `\n[${page.moreLinks} more links on the page are not listed]` : ''}`
       : ''
   ]
   return { content: parts.filter(Boolean).join('\n'), isError: false, page: meta }

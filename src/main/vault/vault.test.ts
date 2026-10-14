@@ -19,11 +19,12 @@ import {
   MEMORY_LIMITS,
   previewNote,
   runVaultTool,
+  todayLine,
   vaultSystemPrompt,
   vaultTools
 } from '../vault'
 import { fold, matchNote, parseQuery, search, searchVault, SEARCH_LIMITS, tagsOf } from './search'
-import { READ_LIMITS, readPart, versionOf } from './read'
+import { partSizeFor, READ_LIMITS, readPart, versionOf } from './read'
 
 let root: string
 let vault: string
@@ -302,6 +303,63 @@ describe('vault read', () => {
 })
 
 // --- Safeguards ----------------------------------------------------------------
+
+describe('what the chat model is told about the date', () => {
+  const at = (iso: string, tz: string): string => todayLine(new Date(iso), tz)
+  it('names the date, the weekday and the zone, with its offset now', () => {
+    expect(at('2026-10-12T11:32:00Z', 'Europe/Stockholm')).toBe(
+      "Today's date is 2026-10-12 (Monday). The user's time zone is Europe/Stockholm, UTC+02:00 now; offsets change with daylight saving time, so trust this zone over an offset written in a note or memory. You are not told the time of day."
+    )
+  })
+  it('the offset follows the clocks: the same zone is UTC+01:00 after 2026-10-25', () => {
+    expect(at('2026-10-24T12:00:00Z', 'Europe/Stockholm')).toContain('UTC+02:00 now')
+    expect(at('2026-10-26T12:00:00Z', 'Europe/Stockholm')).toContain('UTC+01:00 now')
+  })
+  it('uses the date in the zone, not in UTC', () => {
+    // 23:30 UTC on the 12th is already the 13th in Tokyo and still the 12th in New York.
+    expect(at('2026-10-12T23:30:00Z', 'Asia/Tokyo')).toContain('2026-10-13 (Tuesday)')
+    expect(at('2026-10-12T23:30:00Z', 'America/New_York')).toContain('2026-10-12 (Monday)')
+    expect(at('2026-10-12T23:30:00Z', 'America/New_York')).toContain('UTC-04:00 now')
+  })
+  it('says UTC+00:00 for UTC, and uses the computer zone by default', () => {
+    expect(at('2026-10-12T12:00:00Z', 'UTC')).toContain('UTC, UTC+00:00 now')
+    expect(todayLine()).toContain(Intl.DateTimeFormat().resolvedOptions().timeZone)
+  })
+  it('is in the vault prompt, once', () => {
+    const p = vaultSystemPrompt(vault, 'chat')
+    expect(p.match(/Today's date is/g)).toHaveLength(1)
+  })
+})
+
+describe('vault read in a capped chat', () => {
+  it('sizes a part to leave room for the header and footer, within 1,000 and the usual part', () => {
+    expect(partSizeFor(100_000)).toBe(READ_LIMITS.part)
+    // Haiku 4.5 and unknown models: the chat cuts a result at 38,760 characters.
+    expect(partSizeFor(38_760)).toBe(36_760)
+    expect(partSizeFor(1_500)).toBe(1_000)
+  })
+  it('a part of that size, with its header and footer, is never longer than the cap', async () => {
+    const body = Array.from({ length: 3000 }, (_, i) => `line ${i} ${'y'.repeat(60)}`).join('\n')
+    note('capped.md', body)
+    let offset = 0
+    let version: string | undefined
+    let got = ''
+    for (let i = 0; i < 20 && offset < body.length; i++) {
+      const out = await readPart(vault, { path: 'capped.md', offset, version }, partSizeFor(38_760))
+      expect(out.length).toBeLessThanOrEqual(38_760)
+      const next = /offset (\d+) and version "(\w+)"/.exec(out)
+      got += out
+        .split('\n')
+        .slice(1)
+        .join('\n')
+        .replace(/\n\[Part ends at[^\n]*\]$/, '')
+      if (!next) break
+      offset = Number(next[1])
+      version = next[2]
+    }
+    expect(got).toBe(body)
+  })
+})
 
 describe('vault note creation (race-resistant)', () => {
   it("re-checks the real place against the caller's guard just before creating", async () => {
