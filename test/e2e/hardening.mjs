@@ -1,8 +1,10 @@
 // Security and data-integrity regressions (hardening pass) in the built app,
 // against test/e2e/interrupt-mock.mjs:
-//   M1  General Code file writes, deletes and renames each need approval of
-//       the whole change; a renderer-supplied folder alone is refused.
-//   M2  General Code gets no plugin tools, and a forged call is refused.
+//   M1  Plugins-mode file writes, deletes and renames each need approval of
+//       the whole change. General Code was removed: a renderer-supplied
+//       folder is refused, and an old General Code chat can't send.
+//   M2  A Plugins chat with no plugin chosen gets no plugin tools, and a
+//       forged call is refused.
 //   M5  model-requested notes need approval of their full content, and
 //       vault_append is off.
 //   L9  approvals show everything, not the first 800 characters.
@@ -21,15 +23,29 @@ const check = (cond, what) => {
   if (!cond) process.exitCode = 1
 }
 const step = (s) => console.log('\n## ' + s)
+
+// Plugins are managed from Plugins mode's start page (the hub), not Settings.
+// Opening it closes Settings if open and remembers the mode to come back to.
+let backTo = null
+const openPlugins = async () => {
+  if (await w.locator('h2:text-is("Settings")').count()) await w.click('button:text-is("Done")')
+  backTo = (await w.locator('button.molten-fill[title]').first().innerText()).trim()
+  await w.click('button[title][class*="rounded-full"]:text-is("Plugins")')
+  if (!(await w.locator('text=What Custard can reach').count()))
+    await w.click('button[title][class*="rounded-full"]:text-is("Plugins")')
+  await w.waitForSelector('text=What Custard can reach')
+}
+// Closes the plugin's panel and goes back to the mode it was opened from.
+const closePlugins = async () => {
+  await w.click('[role=dialog] button:text-is("Done")')
+  if (backTo && backTo !== 'Plugins') await w.click(`button[title]:text-is("${backTo}")`)
+}
 const CFG = OUT + '/cfg-hard'
-const WS = OUT + '/ws-hard'
+// The plugin M1 creates; its files are seeded once it exists.
+const WS = OUT + '/plugin/ws-hard'
 const ELSEWHERE = OUT + '/ws-not-chosen'
 fs.rmSync(WS, { recursive: true, force: true })
-fs.mkdirSync(WS, { recursive: true })
 fs.mkdirSync(ELSEWHERE, { recursive: true })
-fs.writeFileSync(`${WS}/keep.txt`, 'line one\nline two\n')
-fs.writeFileSync(`${WS}/gone.txt`, 'delete me\n')
-fs.writeFileSync(`${WS}/old.txt`, 'rename me\n')
 
 const read = (f, fallback) => {
   try {
@@ -150,8 +166,8 @@ try {
   await w.press('input[aria-label="Claude API key"]', 'Enter')
   await w.click('button:has-text("Use an existing vault")')
   await w.waitForSelector('text=· connected')
-  await w.click('button:text-is("Plugins")')
-  await w.click('button:has-text("Spotify")')
+  await openPlugins()
+  await w.click('article[aria-label="Plugin Spotify"] button:text-is("Manage")')
   await w.click('button:has-text("Review and activate")')
   await w.waitForSelector('text=New permissions to approve', { timeout: 30000 })
   const boxes = w.locator('section:has-text("New permissions to approve") input[type=checkbox]')
@@ -162,15 +178,24 @@ try {
   await w.click('button:has-text("Save configuration")')
   await w.click('button:text-is("Connect")')
   await w.waitForSelector('text=· connected', { timeout: 15000 })
-  await w.click('button:text-is("Done")')
+  await closePlugins()
 
-  step('M1: General Code file changes each ask, showing the whole change')
-  await w.click('button:text-is("Code")')
-  await w.click('button:text-is("General Code")')
-  await app.evaluate((_, p) => (globalThis.__pick = p), [WS])
-  await w.click('button:has-text("Choose a project folder")')
-  await w.waitForSelector('button:has-text("ws-hard")')
-  await app.evaluate(() => (globalThis.__pick = null))
+  step('M1: Plugins-mode file changes each ask, showing the whole change')
+  await w.click('button:text-is("Plugins")')
+  check(
+    (await w.locator('button:text-is("General Code")').count()) === 0,
+    'there is no General Code workspace to pick'
+  )
+  await w.click('button:has-text("Add a plugin")')
+  await w.fill('input[aria-label="New plugin name"]', 'WS Hard')
+  await w.click('button:text-is("Create and open")')
+  check(
+    await until(async () => (await w.locator('text=Workspace · plugin/ws-hard').count()) === 1),
+    'the new plugin is made and its workspace entered'
+  )
+  fs.writeFileSync(`${WS}/keep.txt`, 'line one\nline two\n')
+  fs.writeFileSync(`${WS}/gone.txt`, 'delete me\n')
+  fs.writeFileSync(`${WS}/old.txt`, 'rename me\n')
   await send('fs write test: make some file changes')
   let c = await nextCard()
   check(!!c, 'creating a file asks first')
@@ -223,11 +248,15 @@ try {
   check(!fs.existsSync(`${WS}/gone.txt`), 'the approved delete happened')
   check(fs.existsSync(`${WS}/moved/new.txt`), 'the approved rename happened')
 
-  step('M2: no plugin tools in General Code')
+  step('M2: no plugin tools in a Plugins chat with no plugin chosen')
+  await w.click('button:text-is("All plugins")')
+  await w.waitForSelector('button:has-text("Add a plugin")')
+  await send('plain question')
+  await idle()
   const tools = read('/anthropic.json', []).at(-1)?.tools ?? []
   check(
     tools.length > 0 && !tools.some((t) => t.includes('__')),
-    `General Code requests offer no plugin tools (${tools.join(',')})`
+    `requests with no plugin chosen offer no plugin tools (${tools.join(',')})`
   )
   const before = spotifyCalls().length
   await send('forged test: call a plugin anyway')
@@ -243,7 +272,7 @@ try {
     'the model is told the tool is not available'
   )
 
-  step('M1: a folder the user never chose is refused')
+  step('M1: General Code was removed: a folder from the renderer is refused')
   const refused = await w.evaluate(
     (root) =>
       new Promise((resolve) => {
@@ -267,12 +296,44 @@ try {
     ELSEWHERE
   )
   check(
-    refused.type === 'error' && /Choose this folder again/.test(refused.message),
-    `a renderer-supplied folder alone is refused (${refused.type}: ${refused.message ?? ''})`
+    refused.type === 'error' && /General Code was removed/.test(refused.message),
+    `a renderer-supplied folder is refused (${refused.type}: ${refused.message ?? ''})`
   )
   check(
     !conversations().some((x) => x.workspace?.root?.endsWith('ws-not-chosen')),
     'no conversation was made for that folder'
+  )
+
+  step('M1: an old General Code chat opens but cannot send')
+  const old = {
+    ...newest(),
+    id: 'old-general-chat',
+    workspace: { kind: 'general', root: ELSEWHERE }
+  }
+  fs.writeFileSync(`${CFG}/custard/conversations/${old.id}.json`, JSON.stringify(old))
+  const oldSend = await w.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const requestId = 'old-general'
+        const off = window.custard.chat.onEvent((e) => {
+          if (e.requestId !== requestId) return
+          if (e.type === 'error' || e.type === 'done') {
+            off()
+            resolve(e)
+          }
+        })
+        window.custard.chat.send({
+          requestId,
+          conversationId: 'old-general-chat',
+          mode: 'code',
+          text: 'keep going',
+          settings: { model: 'claude-opus-5-5', effort: 'medium' }
+        })
+      })
+  )
+  check(
+    oldSend.type === 'error' && /read only/.test(oldSend.message),
+    `an old General Code chat can't send (${oldSend.type}: ${oldSend.message ?? ''})`
   )
 
   step('M5: notes the model asks to create need approval of their full content')
