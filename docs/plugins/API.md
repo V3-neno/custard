@@ -66,7 +66,7 @@ type ToolResult = string | { content: string; isError?: boolean; data?: unknown 
 
 ## Accounts (OAuth)
 
-If the manifest has an `auth` block, Settings → Plugins shows **Connect**, and the host runs Authorization Code with PKCE:
+If the manifest has an `auth` block, Plugins mode (**Manage** on the plugin's card) shows **Connect**, and the host runs Authorization Code with PKCE:
 
 1. It opens the provider's consent page in the browser.
 2. It receives the redirect on `http://127.0.0.1:<redirectPort><redirectPath>`, checks `state`, and exchanges the code.

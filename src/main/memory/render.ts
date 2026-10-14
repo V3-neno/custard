@@ -15,6 +15,8 @@ export type Provenance = {
   title: string
   date: string
   time: string
+  // The IANA zone date and time are in; a time without one is ambiguous.
+  zone?: string
   chatId: string
   // The chat had attached files, so the note was made from restricted
   // evidence (see filesInContext).
@@ -175,7 +177,7 @@ export function noteText(
   return [
     `---\n${fm}\n---`,
     `# ${plain(from.title) || 'Chat'}`,
-    `_Saved by Custard from the chat "${plain(from.title)}" on ${from.date} at ${from.time}. Custard writes this note once and never changes it. Edit or delete it as you like; a deleted note is not written again._`,
+    `_Saved by Custard from the chat "${plain(from.title)}" on ${from.date} at ${from.time}${from.zone ? ` (${from.zone})` : ''}. Custard writes this note once and never changes it. Edit or delete it as you like; a deleted note is not written again._`,
     ...(from.fileSafe
       ? [
           "_This chat had attached files, so this note was made only from the user's own words and the names and outcomes of actions. File names, file contents, action details, results and the assistant's answers were left out._"

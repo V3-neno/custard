@@ -79,6 +79,21 @@ describe('firing', () => {
     await t.s.idle()
     expect(t.ran.map((r) => r.slot)).toEqual(['2026-03-01T08:00', '2026-03-01T12:00'])
   })
+  it('a time the clocks jump over runs once, when they jump, and not twice with the time after it', async () => {
+    // Europe/Stockholm 2026-03-29: 02:00 becomes 03:00 at 01:00Z.
+    const a = make({ times: ['02:30', '03:30'], timezone: 'Europe/Stockholm' })
+    const t = setup([a], '2026-03-29T00:30:00Z')
+    t.s.tick()
+    t.at('2026-03-29T01:00:10Z')
+    t.s.tick()
+    await t.s.idle()
+    // 02:30 runs the moment the clocks jump, with the context saying so.
+    expect(t.ran.map((r) => r.slot)).toEqual(['2026-03-29T02:30'])
+    t.at('2026-03-29T01:30:10Z')
+    t.s.tick()
+    await t.s.idle()
+    expect(t.ran.map((r) => r.slot)).toEqual(['2026-03-29T02:30', '2026-03-29T03:30'])
+  })
   it('does not run slots from before it first saw the automation', async () => {
     const t = setup([make()], '2026-03-01T13:00:00Z')
     t.s.tick()
@@ -370,9 +385,9 @@ describe('catch-up', () => {
     expect(ctxs).toHaveLength(1)
     expect(ctxs[0]).toMatchObject({
       catch_up: true,
-      scheduled_for: { local: '2026-03-01T08:00', utc: '2026-03-01T08:00:00Z' },
-      window_start: { local: '2026-02-28T12:00', utc: '2026-02-28T12:00:00Z' },
-      window_end: { local: '2026-03-01T08:00' },
+      scheduled_for: { local: '2026-03-01T08:00+00:00', utc: '2026-03-01T08:00:00Z' },
+      window_start: { local: '2026-02-28T12:00+00:00', utc: '2026-02-28T12:00:00Z' },
+      window_end: { local: '2026-03-01T08:00+00:00' },
       last_successful_run: null,
       missed_slots: [],
       time_zone: 'UTC'
@@ -404,13 +419,13 @@ describe('catch-up', () => {
     expect(ctxs.every((c) => c.ctx.catch_up)).toBe(true)
     // The three older slots ride in the first run's context only.
     expect(ctxs[0].ctx.missed_slots.map((m) => m.local)).toEqual([
-      '2026-03-01T08:00',
-      '2026-03-01T09:00',
-      '2026-03-01T10:00'
+      '2026-03-01T08:00+00:00',
+      '2026-03-01T09:00+00:00',
+      '2026-03-01T10:00+00:00'
     ])
     expect(ctxs[1].ctx.missed_slots).toEqual([])
     expect(ctxs[2].ctx.missed_slots).toEqual([])
-    expect(ctxs[1].ctx.window_start?.local).toBe('2026-03-01T11:00')
+    expect(ctxs[1].ctx.window_start?.local).toBe('2026-03-01T11:00+00:00')
     const runs = loadRuns(dir, 'a1').runs
     const note = runs.find((r) => r.status === 'skipped')
     expect(note?.reason).toMatch(/3 older scheduled runs were missed and not run/)
@@ -443,8 +458,8 @@ describe('catch-up', () => {
     await s.idle()
     expect(ctxs.map((c) => c.catch_up)).toEqual([false, false])
     expect(ctxs[0].last_successful_run).toBeNull()
-    expect(ctxs[1].last_successful_run).toMatchObject({ slot: '2026-03-01T08:00' })
-    expect(ctxs[1].window_start?.local).toBe('2026-03-01T08:00')
+    expect(ctxs[1].last_successful_run).toMatchObject({ slot: '2026-03-01T08:00+00:00' })
+    expect(ctxs[1].window_start?.local).toBe('2026-03-01T08:00+00:00')
   })
   it('the setting limits how many run, and counts against the daily limit', async () => {
     const t = setup(

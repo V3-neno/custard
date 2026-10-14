@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { localDay, slotsBetween, zonedInstant } from './schedule'
+import { isoLocal, localDay, slotsBetween, zonedInstant } from './schedule'
 
 const utc = (s: string): number => Date.parse(s)
 const labels = (a: Parameters<typeof slotsBetween>[0], from: string, to: string): string[] =>
@@ -63,8 +63,45 @@ describe('time zones and DST', () => {
       '2026-03-08T02:30',
       '2026-03-09T02:30'
     ])
-    // 02:30 EST does not exist on the 8th; it is 03:30 EDT = 07:30Z.
-    expect(new Date(s[1].instant).toISOString()).toBe('2026-03-08T07:30:00.000Z')
+    // 02:30 does not exist on the 8th: the clocks go from 02:00 EST to 03:00 EDT
+    // = 07:00Z, and that is when it runs. Not 03:30, the time the gap would
+    // shift it to.
+    expect(new Date(s[1].instant).toISOString()).toBe('2026-03-08T07:00:00.000Z')
+    expect(s.map((x) => x.shifted)).toEqual([undefined, true, undefined])
+  })
+  it('a shifted time and the time it is shifted to are one run, in Europe/Stockholm', () => {
+    // 2026-03-29: 02:00 CET becomes 03:00 CEST at 01:00Z.
+    const win: [number, number] = [utc('2026-03-28T12:00:00Z'), utc('2026-03-29T12:00:00Z')]
+    const at = (times: string[]): { label: string; at: string; shifted?: true }[] =>
+      slotsBetween({ times, days: [], timezone: 'Europe/Stockholm' }, ...win).map((x) => ({
+        label: x.label,
+        at: new Date(x.instant).toISOString(),
+        ...(x.shifted ? { shifted: true as const } : {})
+      }))
+    expect(at(['02:30'])).toEqual([
+      { label: '2026-03-29T02:30', at: '2026-03-29T01:00:00.000Z', shifted: true }
+    ])
+    // 03:00 exists and is that same moment: one run, labelled by the time that exists.
+    expect(at(['02:30', '03:00'])).toEqual([
+      { label: '2026-03-29T03:00', at: '2026-03-29T01:00:00.000Z' }
+    ])
+    // 03:30 is half an hour later: two runs, as configured.
+    expect(at(['02:30', '03:30'])).toEqual([
+      { label: '2026-03-29T02:30', at: '2026-03-29T01:00:00.000Z', shifted: true },
+      { label: '2026-03-29T03:30', at: '2026-03-29T01:30:00.000Z' }
+    ])
+    // Two times in the gap are one moment: the first label keeps it.
+    expect(at(['02:15', '02:45'])).toEqual([
+      { label: '2026-03-29T02:15', at: '2026-03-29T01:00:00.000Z', shifted: true }
+    ])
+  })
+  it('finds the moment the clocks jump in a half-hour zone too', () => {
+    // Lord Howe: 02:00 +10:30 becomes 02:30 +11:00 on 2026-10-04, a 30-minute gap.
+    const lh = { times: ['02:15'], days: [], timezone: 'Australia/Lord_Howe' }
+    const s = slotsBetween(lh, utc('2026-10-03T00:00:00Z'), utc('2026-10-05T00:00:00Z'))
+    expect(s.map((x) => x.shifted)).toEqual([true, undefined])
+    // 02:15 on the 4th does not exist; the jump is at 02:00 +10:30 = 15:30Z on the 3rd.
+    expect(new Date(s[0].instant).toISOString()).toBe('2026-10-03T15:30:00.000Z')
   })
   it('runs a time that happens twice the first time only', () => {
     const twice = { times: ['01:30'], days: [], timezone: 'America/New_York' }
@@ -110,5 +147,23 @@ describe('localDay', () => {
   it('names the day in the zone', () => {
     expect(localDay(utc('2026-05-01T20:00:00Z'), 'Asia/Tokyo')).toBe('2026-05-02')
     expect(localDay(utc('2026-05-01T20:00:00Z'), 'UTC')).toBe('2026-05-01')
+  })
+})
+
+describe('local times with their offset', () => {
+  const at = (iso: string, tz: string): string => isoLocal(Date.parse(iso), tz)
+  it('writes the offset in force at that instant, in half-hour and negative zones too', () => {
+    expect(at('2026-03-01T08:00:00Z', 'UTC')).toBe('2026-03-01T08:00+00:00')
+    expect(at('2026-07-01T08:00:00Z', 'Europe/Stockholm')).toBe('2026-07-01T10:00+02:00')
+    expect(at('2026-01-01T08:00:00Z', 'Europe/Stockholm')).toBe('2026-01-01T09:00+01:00')
+    expect(at('2026-01-01T08:00:00Z', 'Asia/Kolkata')).toBe('2026-01-01T13:30+05:30')
+    expect(at('2026-01-01T08:00:00Z', 'America/St_Johns')).toBe('2026-01-01T04:30-03:30')
+    expect(at('2026-07-01T08:00:00Z', 'America/St_Johns')).toBe('2026-07-01T05:30-02:30')
+    expect(at('2026-01-01T08:00:00Z', 'Australia/Lord_Howe')).toBe('2026-01-01T19:00+11:00')
+  })
+  it('tells the two passes of a repeated hour apart', () => {
+    // Stockholm goes back at 03:00 local on 2026-10-25: 02:30 happens twice.
+    expect(at('2026-10-25T00:30:00Z', 'Europe/Stockholm')).toBe('2026-10-25T02:30+02:00')
+    expect(at('2026-10-25T01:30:00Z', 'Europe/Stockholm')).toBe('2026-10-25T02:30+01:00')
   })
 })
