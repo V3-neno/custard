@@ -100,6 +100,9 @@ try {
     (await w.locator('ul[aria-label="Editable folders"]').count()) === 0,
     'no folder is allowed by default'
   )
+  // Captures from these chats would be shown to later ones; this script is
+  // about the edit rules, and the recall rule has its own step at the end.
+  await w.uncheck('input[aria-label="Remember automatically"]')
   await closeSettings()
 
   step('Nothing allowed: an existing note cannot be changed')
@@ -212,7 +215,8 @@ try {
         const text = (await c.first().textContent()) ?? ''
         seen.push(text)
         const hold =
-          /WEB-APPEND|WEB-MADE|APPENDED-LINE|vgrant/.test(text) && !/tea\.example\.com/.test(text)
+          /WEB-APPEND|WEB-MADE|APPENDED-LINE|READ-OTHER|vgrant/.test(text) &&
+          !/tea\.example\.com/.test(text)
         await c
           .first()
           .getByRole('button', { name: hold ? "Don't allow" : 'Allow', exact: true })
@@ -224,7 +228,10 @@ try {
   await answer()
   const appendCard = seen.find((t) => /WEB-APPEND-4410/.test(t)) ?? ''
   check(!!appendCard, 'an append after a web page shows the card')
-  check(/text from the web, a plugin or an automation/.test(appendCard), 'the card says why it is asking')
+  check(
+    /text from the web, a plugin or an automation/.test(appendCard),
+    'the card says why it is asking'
+  )
   check(!file('Journal/Log.md').includes('WEB-APPEND-4410'), 'declining left the note unchanged')
   check(
     seen.some((t) => /WebMade\.md/.test(t) && /WEB-MADE-2203/.test(t)),
@@ -258,6 +265,65 @@ try {
     file('Journal/Log.md').split('APPENDED-LINE-7731').length === 3,
     'and the change was applied'
   )
+
+  step('Reading a note outside the allowed folders counts as outside text')
+  await w.click('button[aria-label="Temporary chat"]')
+  await w.click('button[aria-label="Temporary chat"]')
+  await w.waitForSelector('text=Outside text', { state: 'detached' })
+  await send('vgrant readgranted')
+  await idle()
+  check(!(await card().count()), 'reading a note in an allowed folder keeps edits card-free')
+  check(file('Journal/Log.md').includes('GRANTED-READ-3301'), 'and the change was applied')
+  check((await indicator.count()) === 0, 'and the chat shows no indicator')
+  await w.click('button[aria-label="Temporary chat"]')
+  await w.click('button[aria-label="Temporary chat"]')
+  await w.waitForSelector('text=Outside text', { state: 'detached' })
+  seen.length = 0
+  await send('vgrant readother')
+  await answer()
+  check(
+    seen.some(
+      (t) => /READ-OTHER-6602/.test(t) && /text from the web, a plugin or an automation/.test(t)
+    ),
+    'after reading a note elsewhere, an edit in an allowed folder shows the card'
+  )
+  check(!file('Journal/Log.md').includes('READ-OTHER-6602'), 'declining left the note unchanged')
+  check((await indicator.count()) > 0, 'and the chat shows the Outside text indicator')
+
+  step('Captures made from outside text are outside text for the chat shown them')
+  await openSettings()
+  await w.check('input[aria-label="Remember automatically"]')
+  await closeSettings()
+  const seed = (outside) =>
+    put(
+      'Custard/Captures/2026-10-12 0900 Seed 1a2b3c4d.md',
+      `---\ncustard-capture: "seed"\noutside: "${outside}"\n---\n\n# Seed\n\n## Preferences\n\n- Likes tea\n`
+    )
+  seed(true)
+  await w.click('button[aria-label="Temporary chat"]')
+  await w.click('button[aria-label="Temporary chat"]')
+  seen.length = 0
+  await send('vgrant append')
+  await answer()
+  check(
+    seen.some(
+      (t) => /APPENDED-LINE-7731/.test(t) && /text from the web, a plugin or an automation/.test(t)
+    ),
+    'a chat shown a capture made from outside text asks before editing an allowed folder'
+  )
+  check((await indicator.count()) > 0, 'and shows the Outside text indicator')
+  // The chat that was just shown that capture is captured too, flagged: leave
+  // only the clean seed so the next chat is shown nothing from outside text.
+  for (let i = 0; i < 80 && fs.readdirSync(`${V}/Custard/Captures`).length < 3; i++)
+    await new Promise((r) => setTimeout(r, 100))
+  for (const f of fs.readdirSync(`${V}/Custard/Captures`)) fs.rmSync(`${V}/Custard/Captures/${f}`)
+  seed(false)
+  await w.click('button[aria-label="Temporary chat"]')
+  await w.click('button[aria-label="Temporary chat"]')
+  await w.waitForSelector('text=Outside text', { state: 'detached' })
+  await send('vgrant append')
+  await idle()
+  check(!(await card().count()), 'a capture made without outside text brings no card')
 
   step('Removing a grant stops it')
   const logBefore = file('Journal/Log.md')

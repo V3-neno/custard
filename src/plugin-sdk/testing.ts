@@ -100,17 +100,53 @@ export const assert = Object.assign(
   }
 )
 
-// Used by the host's sandboxed test run.
-export async function runRegisteredTests(): Promise<
-  { name: string; ok: boolean; error?: string }[]
-> {
-  const results: { name: string; ok: boolean; error?: string }[] = []
+// A test that never settles fails after this long, and the rest still run.
+const TEST_LIMIT_MS = 10_000
+
+type Outcome = { name: string; ok: boolean; error?: string; ms?: number; skipped?: true }
+
+// Used by the host's sandboxed test run. `filter` runs only the tests whose
+// name contains it (case-insensitive); the others come back as skipped. The
+// host's sandbox sets __custardEmit, and gets a line as each test starts and
+// finishes, so a run it has to stop (a test stuck in a loop never answers) can
+// still report what passed before it and which test was running.
+export async function runRegisteredTests(filter?: string | null): Promise<Outcome[]> {
+  const results: Outcome[] = []
+  const emit = (line: unknown): void => {
+    const f = (globalThis as { __custardEmit?: (s: string) => void }).__custardEmit
+    if (typeof f === 'function') f(JSON.stringify(line))
+  }
+  const want = filter ? String(filter).toLowerCase() : ''
   for (const t of registry) {
+    if (want && !t.name.toLowerCase().includes(want)) {
+      results.push({ name: t.name, ok: true, skipped: true })
+      continue
+    }
+    emit({ start: t.name })
+    const start = Date.now()
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      await t.fn()
-      results.push({ name: t.name, ok: true })
+      await Promise.race([
+        Promise.resolve().then(t.fn),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Took longer than ${TEST_LIMIT_MS / 1000} seconds.`)),
+            TEST_LIMIT_MS
+          )
+        })
+      ])
+      results.push({ name: t.name, ok: true, ms: Date.now() - start })
+      emit({ done: results[results.length - 1] })
     } catch (err) {
-      results.push({ name: t.name, ok: false, error: String((err as Error)?.message ?? err) })
+      results.push({
+        name: t.name,
+        ok: false,
+        error: String((err as Error)?.message ?? err),
+        ms: Date.now() - start
+      })
+      emit({ done: results[results.length - 1] })
+    } finally {
+      clearTimeout(timer)
     }
   }
   return results

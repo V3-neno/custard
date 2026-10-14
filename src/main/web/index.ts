@@ -1,6 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import OpenAI from 'openai'
 import type { ActionRecord, Conversation, WebSource } from '../../shared/chat'
 import type { ToolRun } from '../turn'
 import { originWarning, rememberLinks, urlOrigin } from './provenance'
@@ -10,22 +8,24 @@ import {
   formatResults,
   MAX_QUERY,
   MAX_SEARCHES_PER_TURN,
-  searchClaude,
-  searchOpenAI,
   webSearchTool,
   type SearchOutcome
 } from './search'
-import { anthropicEndpoint, openaiEndpoint } from '../endpoints'
+import { providers, responsesFeatures, type Provider } from '../../shared/providers'
+import type { OnUsage } from '../../shared/pricing'
 
 export const isWebTool = (name: string): boolean => name === 'web_read' || name === 'web_search'
 
-export type WebModel = { id: string; provider: 'claude' | 'openai' }
+export type WebModel = { id: string; provider: Provider }
 
 // web_read works with any model. Search needs the provider's hosted search
-// for that model (see claudeSearchTool; every OpenAI model Custard offers
-// lists web search).
+// for that model (see claudeSearchTool; a Responses provider says whether it
+// has one, and every OpenAI model Custard offers lists web search).
 export function webTools(model: WebModel): { tools: BetaTool[]; prompt: string } {
-  const search = model.provider === 'openai' || claudeSearchTool(model.id) !== null
+  const search =
+    providers[model.provider].api === 'responses'
+      ? responsesFeatures(model.provider).webSearch
+      : claudeSearchTool(model.id) !== null
   return {
     tools: search ? [webSearchTool, webReadTool] : [webReadTool],
     prompt: [
@@ -52,6 +52,10 @@ export type WebContext = {
   // messages and its fixed instructions, e.g. "your vault notes". Any of it
   // could end up in a query.
   injected: string[]
+  // Told what a search's own model call used (see usage.ts).
+  onUsage?: OnUsage
+  // Runs one search: the model's provider adapter (adapter.webSearch).
+  search: (query: string) => Promise<SearchOutcome>
 }
 
 const notRun = (content: string): ToolRun => ({ content, isError: true, outcome: 'not-run' })
@@ -162,23 +166,9 @@ export async function runWebTool(
         ? 'Stopped before it ran, so nothing was searched.'
         : 'The user declined this search, so nothing was sent.'
     )
-  const search =
-    deps.search ??
-    ((q: string) =>
-      ctx.model.provider === 'claude'
-        ? searchClaude(
-            new Anthropic({ apiKey: ctx.apiKey, ...anthropicEndpoint() }),
-            ctx.model.id,
-            q,
-            ctx.signal
-          )
-        : searchOpenAI(
-            new OpenAI({ apiKey: ctx.apiKey, ...openaiEndpoint() }),
-            ctx.model.id,
-            q,
-            ctx.signal
-          ))
+  const search = deps.search ?? ctx.search
   const outcome = await search(query)
+  if (outcome.usage) ctx.onUsage?.(ctx.model.id, outcome.usage)
   addSources(
     c,
     outcome.hits.map((h) => ({

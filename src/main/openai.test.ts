@@ -36,11 +36,14 @@ beforeAll(async () => {
     })
   })
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
-  process.env.OPENAI_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`
+  const port = (server.address() as AddressInfo).port
+  process.env.OPENAI_BASE_URL = `http://127.0.0.1:${port}/v1`
+  process.env.DEEPSEEK_BASE_URL = `http://127.0.0.1:${port}/deepseek`
 })
 afterAll(() => {
   server.close()
   delete process.env.OPENAI_BASE_URL
+  delete process.env.DEEPSEEK_BASE_URL
 })
 
 const completed = (output: unknown[]): Reply => ({
@@ -66,6 +69,7 @@ function turn(
     events,
     t: {
       requestId: 'r',
+      provider: 'openai',
       maxSteps: 5,
       apiKey: 'sk-test',
       model,
@@ -320,5 +324,82 @@ describe('malformed tool arguments (L14)', () => {
     })
     await runOpenAI(t)
     expect(seen).toEqual([{ __custardMalformedArguments: '{"path": "x' }])
+  })
+})
+
+describe('OpenAI request features', () => {
+  it('asks for reasoning summaries, encrypted reasoning and an exact count', async () => {
+    requests.length = 0
+    replies = [completed([message('hi')])]
+    let counted = 0
+    const { t } = turn(conv(), 'gpt-6-luna', {
+      fits: async (_estimate, count) => ((counted = await count()), true)
+    })
+    await runOpenAI(t)
+    expect(counted).toBe(123)
+    const sent = requests.find((r) => r.path.endsWith('/responses'))!.body
+    expect(sent.reasoning).toEqual({ effort: 'low', summary: 'auto' })
+    expect(sent.include).toEqual(['reasoning.encrypted_content'])
+    expect(sent.store).toBe(false)
+  })
+})
+
+describe('DeepSeek through the same loop (mocked Responses API)', () => {
+  it('asks only for what DeepSeek supports, shows its reasoning and passes it back', async () => {
+    requests.length = 0
+    const reasoning = {
+      type: 'reasoning',
+      id: 'rs_1',
+      summary: [],
+      content: [{ type: 'reasoning_text', text: 'Check the vault first.' }]
+    }
+    replies = [
+      {
+        events: [
+          { type: 'response.reasoning_text.delta', sequence_number: 1, delta: 'Check the vault' },
+          { type: 'response.reasoning_text.delta', sequence_number: 2, delta: ' first.' },
+          {
+            type: 'response.completed',
+            sequence_number: 3,
+            response: {
+              output: [
+                reasoning,
+                { type: 'function_call', call_id: 'c1', name: 'vault_list', arguments: '{}' }
+              ]
+            }
+          }
+        ]
+      },
+      completed([message('Done.')])
+    ]
+    let counted: unknown = null
+    const { t, events } = turn(conv(), 'deepseek-flash', {
+      provider: 'deepseek',
+      apiKey: 'sk-deepseek',
+      fits: async (_estimate, count) => {
+        counted = await count().catch((e: Error) => e.message)
+        return true
+      }
+    })
+    expect(await runOpenAI(t)).toBe('done')
+    const sent = requests.filter((r) => r.path === '/deepseek/responses')
+    // Its own address, never OpenAI's, and no counting request.
+    expect(sent).toHaveLength(2)
+    expect(requests.every((r) => r.path.startsWith('/deepseek/'))).toBe(true)
+    expect(counted).toBe('No token counting')
+    const [first, second] = sent.map((r) => r.body)
+    expect(first.reasoning).toEqual({ effort: 'low' })
+    expect(first).not.toHaveProperty('include')
+    expect(first).not.toHaveProperty('context_management')
+    expect(first.store).toBe(false)
+    expect(first.instructions).toBe('be brief')
+    expect(events.filter((e) => e.type === 'thinking').map((e) => e.text)).toEqual([
+      'Check the vault',
+      ' first.'
+    ])
+    // Within the turn its reasoning goes back with the tool result.
+    const input = second.input as Record<string, unknown>[]
+    expect(input).toContainEqual(reasoning)
+    expect(input.at(-1)).toMatchObject({ type: 'function_call_output', call_id: 'c1' })
   })
 })

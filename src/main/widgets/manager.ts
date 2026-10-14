@@ -579,7 +579,12 @@ export class WidgetManager {
       const status = r.outcome ?? (r.isError ? 'failed' : 'completed')
       if (status === 'unknown')
         this.d.log(entry.pluginId, `widget ${entry.widget.id}: ${tool} outcome unknown`)
-      return { status, content: r.content, ...(r.data !== undefined ? { data: r.data } : {}) }
+      return {
+        status,
+        content: r.content,
+        ...(r.data !== undefined ? { data: r.data } : {}),
+        ...(r.dataDropped ? { dataDropped: r.dataDropped } : {})
+      }
     } catch (err) {
       return {
         status: write ? 'unknown' : 'failed',

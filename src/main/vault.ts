@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, sep } from 'path'
 import { resolveInVault, VaultPathError } from './memory/paths'
 import { CAPTURES, readCaptures } from './memory/write'
 import { MEMORY_NOTE } from '../shared/vault'
+import { localParts, systemTimezone } from './automations/schedule'
 import { modes, type Mode } from '../shared/chat'
 import { SKILLS_DIR } from './modes/extensions'
 import type { ToolRun } from './turn'
@@ -150,7 +151,8 @@ const MAX_SKILLS = 60
 // Memory.md in the prompt: the start and the newest end, up to this much.
 export const MEMORY_LIMITS = { chars: 12_000, head: 4_000 }
 
-type Skill = { name: string; description: string; path: string; modes: Mode[] }
+// folder is the name under Custard/Skills; name is the frontmatter's and may differ.
+type Skill = { name: string; folder: string; description: string; path: string; modes: Mode[] }
 
 // Skills are folders in the vault with a SKILL.md whose frontmatter has a name
 // and description, and optionally the modes it applies to. Only those fields
@@ -187,17 +189,31 @@ export function listSkills(vault: string): Skill[] {
       const skillModes = field('modes')
         .toLowerCase()
         .split(/[\s,[\]]+/)
+        // Plugins mode's id is still `code`; skills may use either name.
+        .map((m) => (m === 'plugins' ? 'code' : m))
         .filter((m): m is Mode => modes.some((x) => x.id === m))
       return description
-        ? [{ name: field('name') || e.name, description, path, modes: skillModes }]
+        ? [{ name: field('name') || e.name, folder: e.name, description, path, modes: skillModes }]
         : []
     })
 }
 
-// YYYY-MM-DD in the user's own time zone, for daily notes and memory entries.
-const localDate = (): string => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// The date, and the zone it is in, as the chat model is told them. The zone is
+// the computer's, by name: an offset ("UTC+2") goes out of date when the clocks
+// change, and a note that gives one is not to be trusted over this. No time of
+// day: it would change the prompt every minute (and its cache) for little use,
+// and the model is told it does not know it rather than left to guess.
+export function todayLine(now = new Date(), tz = systemTimezone()): string {
+  const l = localParts(now.getTime(), tz)
+  const pad = (x: number): string => String(x).padStart(2, '0')
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(now)
+  const offset =
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
+      .formatToParts(now)
+      .find((p) => p.type === 'timeZoneName')
+      ?.value.replace('GMT', 'UTC') ?? 'UTC'
+  const shown = offset === 'UTC' ? 'UTC+00:00' : offset
+  return `Today's date is ${l.y}-${pad(l.m)}-${pad(l.d)} (${weekday}). The user's time zone is ${tz}, UTC${shown.slice(3)} now; offsets change with daylight saving time, so trust this zone over an offset written in a note or memory. You are not told the time of day.`
 }
 
 const n = (x: number): string => x.toLocaleString('en-US')
@@ -214,7 +230,14 @@ export function boundMemory(text: string): string {
   return `${text.slice(0, cutAt)}\n[… characters ${n(cutAt)}–${n(resume)} of ${n(text.length)} are left out here for length. Read them with vault_read, path "${MEMORY_NOTE}", offset ${cutAt} …]\n\n${text.slice(resume)}`
 }
 
-export function vaultSystemPrompt(vault: string, mode: Mode, memoryAuto = true): string {
+// `recall.outside` is set when a capture shown in the prompt was made from a
+// chat that held text from the web or a plugin (or from before captures said).
+export function vaultSystemPrompt(
+  vault: string,
+  mode: Mode,
+  memoryAuto = true,
+  recall?: { outside: boolean }
+): string {
   // Skills mode sees every skill so it can maintain them; other modes only
   // get the skills meant for them.
   const all = listSkills(vault).filter(
@@ -228,10 +251,11 @@ export function vaultSystemPrompt(vault: string, mode: Mode, memoryAuto = true):
   } catch {
     // Not there yet, or a link out of the vault.
   }
-  const none = { remembered: [], activity: [], notes: 0, cut: 0 }
+  const none = { remembered: [], activity: [], notes: 0, cut: 0, outside: false }
   let captured: ReturnType<typeof readCaptures> = none
   try {
     if (memoryAuto) captured = readCaptures(vault)
+    if (recall && captured.outside) recall.outside = true
   } catch {
     // Unreadable capture folder: nothing from it this turn.
   }
@@ -251,9 +275,9 @@ export function vaultSystemPrompt(vault: string, mode: Mode, memoryAuto = true):
       ? `Left out above for length: ${[captured.cut ? `${captured.cut} more remembered or activity ${captured.cut === 1 ? 'item' : 'items'}` : '', capturesLeft ? `${capturesLeft} older capture ${capturesLeft === 1 ? 'note' : 'notes'}` : ''].filter(Boolean).join(' and ')}. Find them with vault_search folder:${CAPTURES} or vault_list ${CAPTURES}.`
       : '',
     'When you create notes, write clean Obsidian Markdown and use [[wikilinks]] to related notes you know exist.',
-    `Today's date is ${localDate()}.`,
+    todayLine(),
     skills.length
-      ? `Skills are instructions for specific tasks in this vault. When a request matches a skill's description, read its SKILL.md with vault_read before doing anything else, then follow it.\n<skills>\n${skills.map((s) => `- ${s.name} (${s.path})${mode === 'skills' && s.modes.length ? ` [modes: ${s.modes.join(', ')}]` : ''}: ${s.description}`).join('\n')}\n</skills>${all.length > skills.length ? `\n${all.length - skills.length} more skills aren't listed here; vault_list ${SKILLS_DIR} shows them all.` : ''}`
+      ? `Skills are instructions for specific tasks in this vault. When a request matches a skill's description, read its SKILL.md with vault_read before doing anything else, then follow it.\n<skills>\n${skills.map((s) => `- ${s.name} (${s.path})${mode === 'skills' && s.modes.length ? ` [modes: ${s.modes.map((m) => (m === 'code' ? 'plugins' : m)).join(', ')}]` : ''}: ${s.description}`).join('\n')}\n</skills>${all.length > skills.length ? `\n${all.length - skills.length} more skills aren't listed here; vault_list ${SKILLS_DIR} shows them all.` : ''}`
       : '',
     memory.trim()
       ? `<memory>\n${boundMemory(memory)}\n</memory>`
@@ -440,7 +464,9 @@ export async function runVaultTool(
   guard?: Guard,
   // The user's granted folders and where edit records go; without it, existing
   // notes can't be changed.
-  editing?: Omit<EditContext, 'guard'>
+  editing?: Omit<EditContext, 'guard'>,
+  // Characters per vault_read part, when the caller's results are capped.
+  readChars?: number
 ): Promise<ToolRun> {
   const i = (input ?? {}) as Record<string, unknown>
   if (!(await reachable(vault)))
@@ -456,7 +482,7 @@ export async function runVaultTool(
       case 'vault_list':
         return { content: await list(vault, i.folder), isError: false }
       case 'vault_read':
-        return { content: await readPart(vault, i), isError: false }
+        return { content: await readPart(vault, i, readChars), isError: false }
       case 'vault_create_note': {
         const r = await create(vault, i.path, i.content, guard)
         // A note made in a granted folder had no approval card, so it is kept

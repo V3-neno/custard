@@ -41,20 +41,32 @@ export async function readNote(full: string): Promise<string> {
   return fsp.readFile(full, 'utf8')
 }
 
+// The part size for a caller whose results are cut at `maxChars` (the whole
+// result: header, part and footer). 2,000 characters are left for the header
+// and footer; never below 1,000 so a note always moves forward.
+export const partSizeFor = (maxChars: number): number =>
+  Math.max(1000, Math.min(READ_LIMITS.part, maxChars - 2000))
+
 const n = (x: number): string => x.toLocaleString('en-US')
 
 // Where a part ends: the last line break in the part, unless that would make
 // it much shorter, so lines aren't cut in two.
-function partEnd(text: string, from: number): number {
-  const max = from + READ_LIMITS.part
+function partEnd(text: string, from: number, size: number): number {
+  const max = from + size
   if (max >= text.length) return text.length
   const nl = text.lastIndexOf('\n', max - 1)
-  return nl >= from + READ_LIMITS.part / 2 ? nl + 1 : max
+  return nl >= from + size / 2 ? nl + 1 : max
 }
 
+// `size` is characters per part, at most READ_LIMITS.part. A caller whose
+// results are capped (a chat, an unattended run) asks for a part small enough
+// that header, part and footer fit, so the cap never cuts the footer off: a
+// cut part would lose its tail and the offset to continue from (the next part
+// starts after the end the header names).
 export async function readPart(
   vault: string,
-  input: { path?: unknown; offset?: unknown; version?: unknown }
+  input: { path?: unknown; offset?: unknown; version?: unknown },
+  size: number = READ_LIMITS.part
 ): Promise<string> {
   const full = resolveInVault(vault, input.path)
   const path = toVaultPath(vault, full)
@@ -71,7 +83,7 @@ export async function readPart(
     throw new ReadError(
       `offset ${n(offset)} is past the end of ${path} (${n(text.length)} characters).`
     )
-  const end = partEnd(text, offset)
+  const end = partEnd(text, offset, Math.max(1, Math.min(size, READ_LIMITS.part)))
   const whole = offset === 0 && end === text.length
   const more = end < text.length
   const head = whole

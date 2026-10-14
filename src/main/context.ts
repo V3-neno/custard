@@ -1,7 +1,7 @@
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
-import { providerOf } from '../shared/chat'
+import { providerOf, type Provider } from '../shared/chat'
 
 // How much of a model's context window a request may use, checked before
 // every model call so a long chat stops cleanly instead of failing at the
@@ -25,7 +25,10 @@ export const CONTEXT_LIMITS: Record<string, ContextLimits> = {
   'claude-haiku-4-5': { window: 200_000, maxOutput: 64_000, compaction: false },
   'gpt-6-astra': { window: 1_050_000, maxOutput: 128_000, compaction: true },
   'gpt-6.1-sol': { window: 1_050_000, maxOutput: 128_000, compaction: true },
-  'gpt-6-luna': { window: 1_050_000, maxOutput: 128_000, compaction: true }
+  'gpt-6-luna': { window: 1_050_000, maxOutput: 128_000, compaction: true },
+  // DeepSeek: 1M context, up to 384K output, no compaction.
+  'deepseek-flash': { window: 1_000_000, maxOutput: 384_000, compaction: false },
+  'deepseek-v4-pro': { window: 1_000_000, maxOutput: 384_000, compaction: false }
 }
 const FALLBACK: ContextLimits = { window: 200_000, maxOutput: 64_000, compaction: false }
 export const limitsFor = (model: string): ContextLimits => CONTEXT_LIMITS[model] ?? FALLBACK
@@ -42,7 +45,7 @@ export const COUNT_AT = 0.5
 export const COMPACT_TRIGGER = 400_000
 // Smallest trigger each provider accepts (Claude: 50,000; OpenAI's
 // compact_threshold: 1,000).
-const MIN_TRIGGER = { claude: 50_000, openai: 1_000 }
+const MIN_TRIGGER: Record<Provider, number> = { claude: 50_000, openai: 1_000, deepseek: 1_000 }
 
 // Input tokens a request may use for this model.
 export const budgetFor = (model: string): number => {
