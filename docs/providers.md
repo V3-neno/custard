@@ -1,6 +1,6 @@
 # Providers
 
-Custard talks to each provider through one of two APIs: Anthropic's Messages API (Claude) or the OpenAI Responses API (OpenAI, DeepSeek). Each provider is one entry in `src/shared/providers.ts`; its adapter is in `src/main/adapters/registry.ts`, its key file in `src/main/providers.ts` and its address in `src/main/endpoints.ts`. Its models are in `src/shared/chat.ts`, its prices in `src/shared/pricing.ts` and its context limits in `src/main/context.ts`. TypeScript flags the other tables that need an entry: attachment rules (`attachments/request.ts`), Design's chat-output note (`design/capabilities.ts`), the orb colours (`Orb.tsx`) and the context minimum (`MIN_TRIGGER`). The theme is a `data-provider` block in `src/renderer/src/assets/main.css`, which TypeScript can't check.
+Custard talks to each provider through one of two APIs: Anthropic's Messages API (Claude) or the OpenAI Responses API (OpenAI, DeepSeek). Each provider is one entry in `src/shared/providers.ts`; its adapter is in `src/main/adapters/registry.ts`, its key file in `src/main/providers.ts` and its address in `src/main/endpoints.ts`. Each of its models has one profile in `src/shared/models.ts`: label, context limits, prices, thinking, effort levels, fallbacks, files, hosted search and live evidence. `chatModels`, `CONTEXT_LIMITS` and `PRICES` are views of those profiles. TypeScript flags the other tables that need an entry: attachment rules (`attachments/request.ts`), Design's chat-output note (`design/capabilities.ts`), the orb colours (`Orb.tsx`) and the context minimum (`MIN_TRIGGER`). The theme is a `data-provider` block in `src/renderer/src/assets/main.css`, which TypeScript can't check.
 
 To add a provider, follow [adding-a-provider.md](adding-a-provider.md): the steps in order, a template adapter (`src/main/adapters/template.ts`) and walkthroughs for Qwen and Claude on Amazon Bedrock.
 
@@ -105,14 +105,14 @@ The chat picker, the chat's "can't be used now" notice and the Automations picke
 
 Stated plainly so nobody has to rediscover them.
 
-- **Search is wired in two places.** `webTools` (`web/index.ts`) decides whether a model gets `web_search` at all (from the Responses `webSearch` flag, or `claudeSearchTool`, which matches Claude model ids by pattern). The adapter's `webSearch()` runs it. A provider with hosted search needs both. Moving the decision into the adapters would make `capabilities.ts` (which imports `webTools`) and the adapters import each other.
+- **Search: one decision, two runners.** Whether a model has hosted search, and which, is its profile's `search` (`hasHostedSearch` in `shared/models.ts`); `webTools`, the capability matrix, `claudeSearchTool` and the Responses adapter all read it. The adapter's `webSearch()` runs the search, so a provider with a new kind of hosted search still needs a runner.
 - **Chats are stored in Anthropic's block format.** Every other provider is a conversion on each request (`toInput`/`toBlocks` in `openai.ts`). A new Anthropic block type needs a decision in every converter; a provider-specific item (OpenAI's encrypted reasoning, DeepSeek's reasoning text) is never stored, so it can't reach another provider, and is only passed back within a turn.
-- **DeepSeek's effort names map to low/high/max.** The picker's Fast, Balanced and Thorough send `reasoning.effort` low, high and max (Neno's call, 2026-10-13). The branch is by name in three places: `responses.ts` (`effortFor`), `effortChoices` and `shownEffort` in `src/shared/chat.ts` (the picker), and `SettingsDialog.tsx`.
+- **Effort levels are profile data.** Each model's profile lists its levels: the picker's label, Settings' label, the stored value and what is sent, plus the level any other stored value shows as. DeepSeek's Fast, Balanced and Thorough store and send low, high and max (Neno's call, 2026-10-13). The picker shows one row of buttons per provider, so a provider's models must share their levels (a test checks it).
 - **The Claude adapter is hard-wired to `claude`.** Its id, its key check and `anthropicEndpoint()` say `claude`. A second Anthropic-API provider (Bedrock, Vertex) means making it take an id and a client first.
 - **One key string per provider.** `apiKey.ts`, the key IPC, Settings and `OneShotRequest.apiKey` all hold one string. Providers that need a region, an account or a key pair don't fit without changing that.
 - **Errors are classified for two SDKs.** `errorKind` and `isContextError` know the Anthropic and OpenAI SDKs' error classes and messages. Another SDK's errors come out as `unknown`. Each provider's too-long wording is a guess until seen.
 - **Key hiding by shape covers `sk-…` only.** The exact key is always removed where the caller passes it; other shapes need a pattern added to `hideKey`.
-- **Model ids are global.** `chatModels`, `PRICES`, `CONTEXT_LIMITS` and `capabilitiesOf` are keyed by id alone, and a model's facts are spread over four files.
+- **Model ids are global.** Profiles, and the tables derived from them, are keyed by id alone.
 - **Claude's streamed one-shot call drops `schema`.** `sendMessage` with `stream: true` (automation steps) sends no `output_config`. Nothing calls it with both today.
 - **Unverified live**, as of 2026-10-14 (everything else was tested against local stand-ins):
   - Claude's thinking blocks accepted back after other providers' turns in one chat, and DeepSeek accepting history converted from Claude.
@@ -129,8 +129,8 @@ Stated plainly so nobody has to rediscover them.
 **Weak points.**
 
 1. The stored format is Anthropic's, so every other provider depends on two converters staying in step with Anthropic's block types.
-2. Provider names still appear in code: DeepSeek's effort (three places), Claude's adapter and address, `providerOf` falling back to Claude, and `claudeSearchTool`'s id patterns.
-3. A model's facts are spread over `chat.ts`, `pricing.ts`, `context.ts` and `attachments/request.ts`, held together by tests rather than by one type.
+2. Provider names still appear in code: Claude's adapter and address, and `providerOf` falling back to Claude. (DeepSeek's effort and `claudeSearchTool`'s id patterns are profile data since model profiles Phase A2.)
+3. Fixed: a model's facts were spread over six files; since Phase A2 they are one profile per model in `src/shared/models.ts`.
 4. `runOpenAI` (`openai.ts`) serves two providers through flags; each quirk of a third adds a flag there.
 5. Credentials are one string.
 

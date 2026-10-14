@@ -2,7 +2,7 @@
 
 How to add a model provider to Custard, in the order the work goes. How the pieces fit together is in [providers.md](providers.md) (registry design and known wrinkles). Two worked examples follow the steps: [Qwen](#walkthrough-qwen-openai-compatible) and [Claude on Amazon Bedrock](#walkthrough-claude-on-amazon-bedrock).
 
-Checked against the code on 2026-10-14 (branch of PR #51). File paths are from the repo root.
+Checked against the code on 2026-10-14 (branch of PR #51; model profiles from Phase A2). File paths are from the repo root.
 
 ## Before you start: which kind of provider is it?
 
@@ -22,10 +22,10 @@ Add an entry to `providers`. The key (`qwen`, say) becomes the `Provider` type e
 
 - `name`, `maker` ("a Qwen model": how the model is introduced in its instructions; `null` only for Claude).
 - `api`: `'anthropic'` or `'responses'`. A third API means a new `ProviderApi` value and a new adapter.
-- `summaryModel`: the cheap model for captures, chat notes and Continue. It must also be in `chatModels` (step 5).
+- `summaryModel`: the cheap model for captures, chat notes and Continue. It must also have a model profile (step 5).
 - `keyPlaceholder`, `keyWhere`: shown in Settings.
 - `discoverModels`: `true` lists models the provider has that Custard has no profile for, as "not yet supported" in Settings. They are never pickable.
-- `responses` (Responses providers only): `reasoningSummary`, `encryptedReasoning`, `tokenCount`, `webSearch`. Set each one only when the provider documents it. A flag that is wrongly on sends a field the provider may reject or silently ignore.
+- `responses` (Responses providers only): `reasoningSummary`, `encryptedReasoning`, `tokenCount`. (Hosted search is per model, in its profile: step 8.) Set each one only when the provider documents it. A flag that is wrongly on sends a field the provider may reject or silently ignore.
 
 ### 2. Adapter: reuse or write
 
@@ -62,21 +62,19 @@ TypeScript requires it once the profile exists. Nothing else finds providers: th
 
 Each model id must be unique across all providers: `adapterForModel` and `capabilitiesOf` look models up by id alone.
 
-- `src/shared/chat.ts` → `chatModels`: `{ id, label, provider, effort, fallbacks }`. Order is picker order. `effort: false` means no effort is sent and the picker hides it.
-- `src/shared/pricing.ts` → `PRICES`, with the source URL in the comment at the top. Without a price, the usage meter counts the model's calls as unpriced, and `capabilities.test.ts` fails (it requires every model to be priced).
-- `src/main/context.ts` → `CONTEXT_LIMITS` (`window`, `maxOutput`, `compaction`) and `MIN_TRIGGER` (TypeScript asks for it). A missing entry falls back to 200K / 64K with no compaction, silently.
+- `src/shared/models.ts` → one entry in `modelProfiles` per model: `id`, `provider`, `label`, `limits` (`window`, `maxOutput`), `compaction`, `prices` (put the source URL in the comment at the top of `pricing.ts`), `thinking`, `effort` (levels, or `null` for none: no effort is sent and the picker greys its buttons), `fallbacks`, `files` (`images`, `pdf`, `imageTokens`), `search` and `live`. Order is picker order. `chatModels`, `PRICES` and `CONTEXT_LIMITS` are built from it. Without prices, the usage meter counts the model's calls as unpriced, and `capabilities.test.ts` fails (it requires every model to be priced).
+- `src/main/context.ts` → `MIN_TRIGGER` (TypeScript asks for it).
 - `discoverModels` (step 1): the key check (step 9) then lists the provider's other models in Settings as "not yet supported". Unknown models never reach the picker.
 
 ### 6. Capability flags and evidence tags
 
 `src/main/adapters/capabilities.ts` derives every capability from the rules a request is built from. For a new provider you mostly change those rules, not this file:
 
-- vision and PDF come from `src/main/attachments/request.ts` (a per-provider entry: what is refused, image size rules). TypeScript asks for it.
+- vision and PDF come from `src/main/attachments/request.ts` (a per-provider entry: the refusal wording and image size rules), which asks the profile's `files` whether the model takes them. TypeScript asks for it.
 - reasoning summaries and token counting come from the `responses` flags.
-- web search comes from `webTools` (step 8).
-- compaction comes from `CONTEXT_LIMITS`.
+- thinking, effort, fallbacks, web search and compaction come from the profile.
 
-**Evidence tags:** every answer is `docs` until someone records a live test on that model. Then add the capability to `LIVE` with who tested it and when. Never mark `live` from a stand-in test.
+**Evidence tags:** every answer is `docs` until someone records a live test on that model. Then add the capability to the profile's `live`, with who tested it and when in a comment. Never mark `live` from a stand-in test.
 
 Other per-provider tables TypeScript will ask for: `CHAT_IMAGE_OUTPUT` in `src/main/design/capabilities.ts` (Design's note on image output), `RAMPS` in `src/renderer/src/components/Orb.tsx` (orb colours). The theme is a `:root[data-provider='…']` block in `src/renderer/src/assets/main.css`; TypeScript can't see that one.
 
@@ -84,19 +82,19 @@ Other per-provider tables TypeScript will ask for: `CHAT_IMAGE_OUTPUT` in `src/m
 
 The picker offers Custard's levels. What goes on the wire is decided per provider:
 
-- Claude: `output_config.effort`, only for models with `effort: true`.
-- Responses: `reasoning.effort`, through `effortFor` in `responses.ts`. DeepSeek's levels go through `deepseekEffort` in `src/shared/chat.ts`.
-- A provider with its own level names needs a mapping like `deepseekEffort` and, today, edits in three places that branch on `'deepseek'` by name: `responses.ts` (`effortFor`), `effortChoices` in `src/shared/chat.ts` (the picker's buttons) and `SettingsDialog.tsx` (labels). See wrinkles in [providers.md](providers.md#known-wrinkles).
+- Claude: `output_config.effort`, only for models whose profile has effort levels.
+- Responses: `reasoning.effort`, through `effortFor` in `responses.ts`.
+- What is sent comes from the profile's `effort`: each level has the picker's `label`, Settings' `settingsLabel`, the stored `value` and the `send` value, and `otherwise` is the level any other stored value shows and sends as. DeepSeek's profiles are the example (Fast, Balanced, Thorough send low, high, max). No code branches on a provider's name for effort. A provider's models must share their levels: the picker shows one row per provider.
 - Map only to levels the provider documents. When the docs and the API's own list disagree, ask (Neno's rule for DeepSeek: map to the documented values).
 
 ### 8. Web search
 
 Hosted search is wired in **two places**:
 
-1. `webTools` in `src/main/web/index.ts` decides whether `web_search` is offered at all: from `responses.webSearch` for a Responses provider, or `claudeSearchTool(model)` for Claude. The capability matrix reads the same function.
-2. The adapter's `webSearch()` runs the search. `responsesAdapter` calls `searchOpenAI` when the flag is on, and that code expects OpenAI's `web_search` tool and its reply shape.
+1. The model's profile says whether it has hosted search, and which (`search`: `'claude-20260209'`, `'claude-20250305'`, `'responses'` or `false`). `webTools`, the capability matrix and `claudeSearchTool` read it.
+2. The adapter's `webSearch()` runs the search. `responsesAdapter` calls `searchOpenAI` for a model whose profile says `'responses'`, and that code expects OpenAI's `web_search` tool and its reply shape.
 
-A provider without hosted search needs nothing: the flag stays off, the model gets `web_read` only and is told search isn't available. A provider with a different search mechanism (a request flag rather than a tool, say) needs its own search function in `web/search.ts` and its own branch in `webTools`.
+A provider without hosted search needs nothing: its profiles say `search: false`, the model gets `web_read` only and is told search isn't available. A provider with a different search mechanism (a request flag rather than a tool, say) needs its own search function in `web/search.ts` and its own branch in `webTools`.
 
 ### 9. Save/Refresh key check
 
@@ -157,15 +155,15 @@ Not built. Official docs read on 2026-10-14. **Checked** means read on the cited
 ### Profile only
 
 - Entry in `providers`: `api: 'responses'`, `maker: 'a Qwen model'`, `summaryModel: 'qwen3.8-flash'`, `discoverModels: false` (no list to discover from).
-- `responses` flags: `reasoningSummary: true` (checked), `encryptedReasoning: false`, `tokenCount: false` (both assumed), `webSearch`: see below.
-- Registry line `qwen: responsesAdapter('qwen')`, key file, theme, orb colours, `chatModels`, `PRICES`, `CONTEXT_LIMITS`, attachment rules.
+- `responses` flags: `reasoningSummary: true` (checked), `encryptedReasoning: false`, `tokenCount: false` (both assumed). Each model profile's `search`: see below.
+- Registry line `qwen: responsesAdapter('qwen')`, key file, theme, orb colours, a model profile per model, attachment rules.
 - `store: false`, which Custard always sends, is accepted (checked: a documented field).
 
 ### Needs new code
 
 1. **The address.** It holds a region and a workspace id, and keys only work in their region. Custard pins one official address per provider and never takes one from Settings, so either one region and workspace form is pinned (only works for keys from that region, and the workspace id still has to come from somewhere), or `ENDPOINTS` and Settings learn a region choice from a fixed list. This is a decision for Neno before building.
 2. **The key check.** No documented model list, so `listRaw` can't be `GET /models`. Options: try `GET /models` live and keep it if it works, or a minimal Responses call (costs tokens on each Save/Refresh).
-3. **Effort.** Qwen's levels differ per model (Qwen 3.8: none, low, medium, xhigh). A mapping like `deepseekEffort`, and the three name branches (`responses.ts`, `effortChoices` in `shared/chat.ts`, `SettingsDialog.tsx`), which are better replaced by profile data first.
+3. **Effort.** Qwen's levels differ per model (Qwen 3.8: none, low, medium, xhigh). Effort levels are profile data, but a provider's models must share their levels (the picker shows one row per provider), and `send` only takes Custard's five level names today. Per-model rows and other wire names need new code.
 4. **Structured output for summaries.** Captures, chat notes and Continue send `text.format: json_schema`. That is undocumented on Qwen's Responses API, and unsupported in Singapore even on Chat Completions. Until a live test shows it works, Qwen chats' summaries would fail (safely: nothing is written). A fallback means a JSON-in-prompt path in `sendMessage`.
 5. **Web search.** The flag would offer `web_search`, and `searchOpenAI` parses OpenAI's `web_search_call` items and citation annotations. Whether Qwen's results have the same shape is assumed, not checked. Leave the flag off until a live search is recorded.
 6. **Too-long and refusal.** `isContextError` matches OpenAI's wording; Qwen's is unknown. How Qwen declines (a refusal part or plain text) is unknown.
@@ -203,8 +201,8 @@ Not built. Official docs read on 2026-10-14, same labels as above.
 ### Profile only
 
 - Entry in `providers`: `api: 'anthropic'`, `maker`: `null` (it is Claude), `summaryModel: 'anthropic.claude-haiku-4-5'`, `discoverModels: false`.
-- `chatModels` entries with the Bedrock ids (they don't clash with `claude-opus-5-5`), `fallbacks: false` (server-side fallback is unsupported), `PRICES`, `CONTEXT_LIMITS`, attachment rules (no URL sources, no Files API), theme, orb colours.
-- Web search stays off without new code, by accident: `claudeSearchTool` matches ids starting `claude-`, and Bedrock ids start `anthropic.`. Better made explicit (see below).
+- Model profiles with the Bedrock ids (they don't clash with `claude-opus-5-5`), `fallbacks: false` (server-side fallback is unsupported), prices and limits in the profiles, attachment rules (no URL sources, no Files API), theme, orb colours.
+- Web search: set each profile's `search` to `false` (hosted search is unsupported on this integration).
 
 ### Needs new code
 
@@ -213,5 +211,5 @@ Not built. Official docs read on 2026-10-14, same labels as above.
 3. **The key check.** The Models endpoint isn't available, and the control plane needs SigV4. Options: `ListFoundationModels` with SigV4 credentials (needs the AWS SDK), or a one-token Messages call (costs a little on each Save/Refresh).
 4. **Summaries.** Captures, chat notes and Continue ask for `output_config` JSON schema, which Bedrock doesn't support. Without new code every Bedrock chat's summary fails (safely: nothing is written). Needs a prompt-only JSON path in `sendMessage` for this provider, or summaries routed to another provider (a data decision for Neno).
 5. **Betas and features per endpoint.** Compaction, the fallback beta and `cache_control` are sent by Claude's `streamMessage` by model. They need to follow the provider: fallback off (unsupported), compaction only once checked live.
-6. **Search as a flag.** Replace the id pattern in `claudeSearchTool` with a provider-level "has hosted search" so Bedrock is off on purpose.
+6. **Search.** Done since model profiles Phase A2: each profile says `search: false`, so Bedrock is off on purpose.
 7. **Key hiding.** `hideKey`'s pattern covers `sk-…` only; AWS access keys and Bedrock API keys have other shapes. Add their patterns.

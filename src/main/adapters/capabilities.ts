@@ -5,37 +5,25 @@ import {
   type ModelCapabilities,
   type ModelInfo
 } from '../../shared/adapter'
-import { chatModels } from '../../shared/chat'
+import { hasHostedSearch, profileOf, type ModelProfile } from '../../shared/models'
 import { PRICES } from '../../shared/pricing'
 import { providers, responsesFeatures } from '../../shared/providers'
 import { kindRefusal } from '../attachments/request'
 import { CONTEXT_LIMITS, limitsFor } from '../context'
-import { webTools } from '../web'
 
-// What each model Custard offers can do, read from the same rules a request
-// is built from: the attachment rules that refuse a file, the web tools a
-// chat is given, the provider's Responses flags, the context limits. So the
-// list can't say yes to something a chat would then refuse.
+// What each model Custard offers can do: the rules below, applied to the
+// model's profile (shared/models.ts), the same profile a request is built
+// from. Files go through the attachment rules that refuse a file, and web
+// search through the same check that gives a chat web_search. So the list
+// can't say yes to something a chat would then refuse.
 
-// Seen working in a live test, rather than only documented. Only what was
-// recorded as tested on a known model is here (DeepSeek, by Neno on
-// 2026-10-13): an image read by DeepSeek Flash, and a chat note written by
-// DeepSeek Flash (the summary model for every DeepSeek chat). Which model ran
-// the tool-call chat wasn't recorded, so text and tools stay 'docs'.
-const LIVE: Partial<Record<string, Capability[]>> = {
-  'deepseek-flash': ['vision', 'json_schema']
-}
-
-type Known = (typeof chatModels)[number]
-
-function derive(m: Known): Record<Capability, Omit<CapabilityEntry, 'evidence'>> {
+function derive(m: ModelProfile): Record<Capability, Omit<CapabilityEntry, 'evidence'>> {
   const anthropic = providers[m.provider].api === 'anthropic'
   const features = responsesFeatures(m.provider)
   const refuses = (kind: 'image' | 'pdf'): Omit<CapabilityEntry, 'evidence'> => {
     const why = kindRefusal(m, kind)
     return why ? { supported: false, note: why } : { supported: true }
   }
-  const search = webTools(m).tools.some((t) => t.name === 'web_search')
   return {
     text: { supported: true },
     streaming: { supported: true },
@@ -45,16 +33,16 @@ function derive(m: Known): Record<Capability, Omit<CapabilityEntry, 'evidence'>>
     json_schema: { supported: true },
     vision: refuses('image'),
     pdf: refuses('pdf'),
-    // Claude thinks only on models that take effort; a Responses model
-    // always reasons.
-    reasoning: { supported: anthropic ? m.effort : true },
+    // Claude thinks only on models whose profile turns thinking on; a
+    // Responses model always reasons.
+    reasoning: { supported: anthropic ? m.thinking : true },
     reasoning_summary: anthropic
-      ? { supported: m.effort }
+      ? { supported: m.thinking }
       : features.reasoningSummary
         ? { supported: true }
         : { supported: false, note: 'Shows its raw reasoning instead.' },
-    effort: { supported: m.effort },
-    web_search: search
+    effort: { supported: m.effort !== null },
+    web_search: hasHostedSearch(m.id)
       ? { supported: true }
       : { supported: false, note: 'Reads pages it is given (web_read) but cannot search.' },
     // Claude: Custard marks the prompt for caching. Responses providers
@@ -75,13 +63,12 @@ function derive(m: Known): Record<Capability, Omit<CapabilityEntry, 'evidence'>>
   }
 }
 
-const known = (id: string): Known | undefined => chatModels.find((m) => m.id === id)
-
 // What a model can do. A model Custard has no profile for gets only plain
-// text, which is all Custard could promise for it.
+// text, which is all Custard could promise for it. Evidence is `live` only
+// for what the profile records as tested live on that model.
 export function capabilitiesOf(id: string): ModelCapabilities {
-  const m = known(id)
-  const live = new Set(LIVE[id] ?? [])
+  const m = profileOf(id)
+  const live = new Set(m?.live ?? [])
   const base = m ? derive(m) : null
   return Object.fromEntries(
     capabilities.map((c) => [
@@ -96,7 +83,7 @@ export function capabilitiesOf(id: string): ModelCapabilities {
 
 // A model Custard offers, in the adapter schema.
 export function modelInfo(id: string): ModelInfo | null {
-  const m = known(id)
+  const m = profileOf(id)
   if (!m) return null
   const limits = CONTEXT_LIMITS[m.id] ?? limitsFor(m.id)
   return {

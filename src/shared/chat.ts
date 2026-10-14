@@ -3,47 +3,30 @@ import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages
 import type { Workspace } from './plugins'
 import type { Attachment, AttachmentKind } from './attachments'
 import { providers, type Provider, type ProviderApi } from './providers'
+import {
+  efforts,
+  modelProfiles,
+  providerEffort,
+  shownLevel,
+  type Effort,
+  type ModelId
+} from './models'
 
 export { providerNames, type Provider } from './providers'
 
-// Picking a model picks its provider; the app's tint follows it.
-export const chatModels = [
-  { id: 'claude-opus-5-5', label: 'Opus 5.5', provider: 'claude', effort: true, fallbacks: true },
-  {
-    id: 'claude-sonnet-5-5',
-    label: 'Sonnet 5.5',
-    provider: 'claude',
-    effort: true,
-    fallbacks: true
-  },
-  {
-    id: 'claude-haiku-4-5',
-    label: 'Haiku 4.5',
-    provider: 'claude',
-    effort: false,
-    fallbacks: false
-  },
-  { id: 'gpt-6-astra', label: 'GPT-6 Astra', provider: 'openai', effort: true, fallbacks: false },
-  { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', provider: 'openai', effort: true, fallbacks: false },
-  { id: 'gpt-6-luna', label: 'GPT-6 Luna', provider: 'openai', effort: true, fallbacks: false },
-  // DeepSeek takes low, high and max (see deepseekEffort).
-  {
-    id: 'deepseek-v4-pro',
-    label: 'DeepSeek V4 Pro',
-    provider: 'deepseek',
-    effort: true,
-    fallbacks: false
-  },
-  {
-    id: 'deepseek-flash',
-    label: 'DeepSeek Flash',
-    provider: 'deepseek',
-    effort: true,
-    fallbacks: false
-  }
-] as const
+// Picking a model picks its provider; the app's tint follows it. A view of
+// the model profiles (shared/models.ts), in picker order: `effort` is
+// whether the model takes effort levels, `fallbacks` whether Claude's
+// server-side fallback is on.
+export const chatModels = modelProfiles.map((m) => ({
+  id: m.id,
+  label: m.label,
+  provider: m.provider,
+  effort: m.effort !== null,
+  fallbacks: m.fallbacks
+}))
 
-export type ChatModel = (typeof chatModels)[number]['id']
+export type ChatModel = ModelId
 export const providerOf = (model: string): Provider =>
   chatModels.find((m) => m.id === model)?.provider ?? 'claude'
 
@@ -57,9 +40,7 @@ export const introduce = (model: { label: string; provider: Provider }): string 
   return maker ? `You are ${model.label}, ${maker}` : 'You are Claude'
 }
 
-export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-
-export const efforts: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+export { efforts, type Effort }
 
 export type ChatSettings = { model: ChatModel; effort: Effort }
 
@@ -78,36 +59,14 @@ export function chatSettingsOf(c: Conversation | null, fallback: ChatSettings): 
   return { model, effort }
 }
 
-// DeepSeek's effort levels as its model list names them, shown as three
-// buttons. Each is stored and sent as the value DeepSeek's Create Response
-// docs list for reasoning.effort (Neno's call, 2026-10-13): Fast sends low,
-// Balanced high, Thorough max. The names themselves are never sent.
-export const deepseekEfforts: { effort: Effort; label: string }[] = [
-  { effort: 'low', label: 'Fast' },
-  { effort: 'high', label: 'Balanced' },
-  { effort: 'max', label: 'Thorough' }
-]
-// Balanced is the default, and stands in for any other level (medium and
-// xhigh are DeepSeek aliases of high anyway).
-export const deepseekEffort = (e: Effort): Effort => (e === 'low' || e === 'max' ? e : 'high')
-
 // The effort buttons the model picker shows for a provider, and the value
-// each one stores and sends. Claude and OpenAI take every level as it is;
-// DeepSeek has its own three (above).
-const EFFORT_LABELS: Record<Effort, string> = {
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  xhigh: 'X-High',
-  max: 'Max'
-}
+// each one stores, from its models' profiles: Claude and OpenAI take every
+// level as it is; DeepSeek has its own three (Fast, Balanced, Thorough).
 export const effortChoices = (provider: Provider): { effort: Effort; label: string }[] =>
-  provider === 'deepseek'
-    ? deepseekEfforts
-    : efforts.map((effort) => ({ effort, label: EFFORT_LABELS[effort] }))
+  (providerEffort(provider)?.levels ?? []).map((l) => ({ effort: l.value, label: l.label }))
 // The level a provider's buttons show as picked for a stored effort.
 export const shownEffort = (provider: Provider, e: Effort): Effort =>
-  provider === 'deepseek' ? deepseekEffort(e) : e
+  shownLevel(providerEffort(provider), e)
 
 // Whether a model can be picked now, from what Custard already knows (the
 // saved keys and the last Save/Refresh check). Asking costs no request.

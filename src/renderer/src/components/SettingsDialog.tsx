@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { providerIds, providers, providerNames, type Provider } from '../../../shared/providers'
+import {
+  providerIds,
+  providerInfo,
+  providers,
+  providerNames,
+  type Provider
+} from '../../../shared/providers'
 import { MEMORY_NOTE, type VaultInfo } from '../../../shared/vault'
 import type { MemorySettings } from '../../../shared/memory'
+import { profileOf, shownLevel } from '../../../shared/models'
 import {
   chatModels,
-  deepseekEffort,
-  deepseekEfforts,
-  efforts,
   isChatModel,
   isEffort,
   type ChatSettings,
@@ -167,11 +171,9 @@ function KeySection({
               </li>
             ))}
           </ul>
-          {provider === 'deepseek' && (
+          {providerInfo(provider).effortNote && (
             <p className="mt-1 text-ash-500" data-effort-note>
-              DeepSeek&apos;s model list also names effort levels (fast, balanced, thorough).
-              Custard doesn&apos;t read them yet: the picker&apos;s Fast, Balanced and Thorough send
-              low, high and max, the values DeepSeek documents for its Responses API.
+              {providerInfo(provider).effortNote}
             </p>
           )}
           {unsupported.length > 0 && (
@@ -199,7 +201,9 @@ function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JS
     window.custard.settings.get().then(setS)
   }, [])
   if (!s) return <section className="mb-6" />
-  const model = chatModels.find((m) => m.id === s.model)
+  // The default model's effort levels, labelled as Settings always has
+  // them (see settingsLabel in shared/models.ts).
+  const levels = profileOf(s.model)?.effort ?? null
   const save = (next: ChatSettings): void => {
     setS(next)
     window.custard.settings.set(next).then(onChanged)
@@ -220,8 +224,7 @@ function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JS
           onChange={(e) => {
             const id = e.target.value
             if (!isChatModel(id)) return
-            const deepseek = chatModels.find((m) => m.id === id)?.provider === 'deepseek'
-            save({ model: id, effort: deepseek ? deepseekEffort(s.effort) : s.effort })
+            save({ model: id, effort: shownLevel(profileOf(id)?.effort ?? null, s.effort) })
           }}
         >
           {providerIds.map((p) => (
@@ -236,24 +239,18 @@ function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JS
             </optgroup>
           ))}
         </select>
-        {model?.effort && (
+        {levels && (
           <select
             title="Default effort"
             className={select}
-            value={model.provider === 'deepseek' ? deepseekEffort(s.effort) : s.effort}
+            value={shownLevel(levels, s.effort)}
             onChange={(e) => isEffort(e.target.value) && save({ ...s, effort: e.target.value })}
           >
-            {model.provider === 'deepseek'
-              ? deepseekEfforts.map((e) => (
-                  <option key={e.effort} value={e.effort}>
-                    {e.label}
-                  </option>
-                ))
-              : efforts.map((e) => (
-                  <option key={e} value={e}>
-                    {e} effort
-                  </option>
-                ))}
+            {levels.levels.map((l) => (
+              <option key={l.value} value={l.value}>
+                {l.settingsLabel}
+              </option>
+            ))}
           </select>
         )}
       </div>

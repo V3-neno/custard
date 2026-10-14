@@ -5,7 +5,7 @@ import type {
   BetaMessageParam,
   MessageCreateParamsStreaming
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import { chatModels } from '../../shared/chat'
+import { modelProfiles, profileOf, sentLevel, type ModelProfile } from '../../shared/models'
 import { claudeFilesFrom } from '../attachments/request'
 import {
   claudeHistory,
@@ -56,7 +56,7 @@ const client = (apiKey: string, opts: { timeout?: number; maxRetries?: number } 
 
 async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
   const { requestId, emit, log, signal } = turn
-  const model = chatModels.find((m) => m.id === turn.model) ?? chatModels[0]
+  const model: ModelProfile = profileOf(turn.model) ?? modelProfiles[0]
   const history = (): TurnRequest['conversation']['messages'] =>
     claudeHistory(turn.history(), model.id)
   const params: MessageCreateParamsStreaming = {
@@ -68,10 +68,8 @@ async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
     stream: true
   }
   if (turn.tools.length) params.tools = turn.tools
-  if (model.effort) {
-    params.thinking = { type: 'adaptive', display: 'summarized' }
-    params.output_config = { effort: turn.effort }
-  }
+  if (model.thinking) params.thinking = { type: 'adaptive', display: 'summarized' }
+  if (model.effort) params.output_config = { effort: sentLevel(model.effort, turn.effort) }
   if (model.fallbacks) {
     // If a safety classifier declines, the API retries on Anthropic's
     // recommended fallback model instead of returning a refusal.

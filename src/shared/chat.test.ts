@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   chatModels,
   chatSettingsOf,
-  deepseekEffort,
-  deepseekEfforts,
   effortChoices,
   efforts,
   isChatModel,
@@ -77,7 +75,7 @@ describe('a chat’s model', () => {
 
 describe('DeepSeek effort', () => {
   it('Fast, Balanced, Thorough send low, high, max (the documented values)', () => {
-    expect(deepseekEfforts.map((e) => [e.label, e.effort])).toEqual([
+    expect(effortChoices('deepseek').map((e) => [e.label, e.effort])).toEqual([
       ['Fast', 'low'],
       ['Balanced', 'high'],
       ['Thorough', 'max']
@@ -85,7 +83,13 @@ describe('DeepSeek effort', () => {
   })
 
   it('any other level is Balanced', () => {
-    expect(efforts.map(deepseekEffort)).toEqual(['low', 'high', 'high', 'high', 'max'])
+    expect(efforts.map((e) => shownEffort('deepseek', e))).toEqual([
+      'low',
+      'high',
+      'high',
+      'high',
+      'max'
+    ])
   })
 })
 
@@ -104,7 +108,7 @@ describe('effort buttons in the model picker', () => {
   })
 
   it('DeepSeek shows its own three, and any other level as Balanced', () => {
-    expect(effortChoices('deepseek')).toBe(deepseekEfforts)
+    expect(effortChoices('deepseek').map((e) => e.label)).toEqual(['Fast', 'Balanced', 'Thorough'])
     expect(shownEffort('deepseek', 'medium')).toBe('high')
   })
 })

@@ -2,11 +2,11 @@ import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { providerOf, type Provider } from '../shared/chat'
+import { modelProfiles, type ModelProfile } from '../shared/models'
 
 // How much of a model's context window a request may use, checked before
 // every model call so a long chat stops cleanly instead of failing at the
-// provider. Limits checked against the providers' docs on 2026-10-07 (see
-// docs/long-chats.md); they are not looked up at run time.
+// provider. The limits are in each model's profile (shared/models.ts).
 
 export type ContextLimits = {
   // Input and output together, in tokens.
@@ -19,17 +19,13 @@ export type ContextLimits = {
   compaction: boolean
 }
 
-export const CONTEXT_LIMITS: Record<string, ContextLimits> = {
-  'claude-opus-5-5': { window: 1_000_000, maxOutput: 128_000, compaction: true },
-  'claude-sonnet-5-5': { window: 1_000_000, maxOutput: 128_000, compaction: true },
-  'claude-haiku-4-5': { window: 200_000, maxOutput: 64_000, compaction: false },
-  'gpt-6-astra': { window: 1_050_000, maxOutput: 128_000, compaction: true },
-  'gpt-6.1-sol': { window: 1_050_000, maxOutput: 128_000, compaction: true },
-  'gpt-6-luna': { window: 1_050_000, maxOutput: 128_000, compaction: true },
-  // DeepSeek: 1M context, up to 384K output, no compaction.
-  'deepseek-flash': { window: 1_000_000, maxOutput: 384_000, compaction: false },
-  'deepseek-v4-pro': { window: 1_000_000, maxOutput: 384_000, compaction: false }
-}
+// Each model's limits, from its profile (shared/models.ts).
+export const CONTEXT_LIMITS: Record<string, ContextLimits> = Object.fromEntries(
+  (modelProfiles as readonly ModelProfile[]).map((m) => [
+    m.id,
+    { window: m.limits.window, maxOutput: m.limits.maxOutput, compaction: m.compaction }
+  ])
+)
 const FALLBACK: ContextLimits = { window: 200_000, maxOutput: 64_000, compaction: false }
 export const limitsFor = (model: string): ContextLimits => CONTEXT_LIMITS[model] ?? FALLBACK
 

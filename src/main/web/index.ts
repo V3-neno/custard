@@ -4,28 +4,25 @@ import type { ToolRun } from '../turn'
 import { originWarning, rememberLinks, urlOrigin } from './provenance'
 import { webRead, webReadTool } from './read'
 import {
-  claudeSearchTool,
   formatResults,
   MAX_QUERY,
   MAX_SEARCHES_PER_TURN,
   webSearchTool,
   type SearchOutcome
 } from './search'
-import { providers, responsesFeatures, type Provider } from '../../shared/providers'
+import { hasHostedSearch } from '../../shared/models'
+import type { Provider } from '../../shared/providers'
 import type { OnUsage } from '../../shared/pricing'
 
 export const isWebTool = (name: string): boolean => name === 'web_read' || name === 'web_search'
 
 export type WebModel = { id: string; provider: Provider }
 
-// web_read works with any model. Search needs the provider's hosted search
-// for that model (see claudeSearchTool; a Responses provider says whether it
-// has one, and every OpenAI model Custard offers lists web search).
+// web_read works with any model. Search needs hosted search for that model,
+// which its profile names (shared/models.ts: Claude's search tool, or a
+// Responses provider's web_search).
 export function webTools(model: WebModel): { tools: BetaTool[]; prompt: string } {
-  const search =
-    providers[model.provider].api === 'responses'
-      ? responsesFeatures(model.provider).webSearch
-      : claudeSearchTool(model.id) !== null
+  const search = hasHostedSearch(model.id)
   return {
     tools: search ? [webSearchTool, webReadTool] : [webReadTool],
     prompt: [

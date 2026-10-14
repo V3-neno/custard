@@ -125,7 +125,8 @@ export function templateAdapter(id: Provider): ProviderAdapter {
 
   // PROVIDER-SPECIFIC: the request body and reading the reply. Tools are
   // offered as the provider's function tools; effort maps to the provider's
-  // documented levels (see deepseekEffort in shared/chat.ts for an example).
+  // documented levels (see the effort levels in a model's profile,
+  // shared/models.ts).
   async function complete(
     apiKey: string,
     model: string,
