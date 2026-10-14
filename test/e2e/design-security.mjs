@@ -336,7 +336,13 @@ fs.mkdirSync(FILES, { recursive: true })
 const { png } = await import('./mocks/b-images.mjs')
 fs.writeFileSync(`${FILES}/Osprey-8890.png`, png(2, 2))
 const held = []
-const hang = http.createServer((req) => {
+const hang = http.createServer((req, res) => {
+  // Saving the OpenAI key checks it with the model list (provider adapters,
+  // Phase 3); only image requests are held and counted.
+  if (req.url.endsWith('/models')) {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify({ object: 'list', data: [] }))
+  }
   held.push({ method: req.method, path: req.url })
   req.resume()
 })

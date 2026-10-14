@@ -3,7 +3,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import type { Workspace } from '../../shared/plugins'
 import { testReport } from './report'
-import { custardSource, pluginDocsDir, pluginHost, pluginsRoot, sdkDir } from '../plugins'
+import { pluginDocsDir, pluginHost, pluginsRoot, sdkDir } from '../plugins'
 import type { Boundary } from './paths'
 import {
   FILE_WRITES,
@@ -69,7 +69,7 @@ function internal(pluginId: string): WorkspaceTools {
       `Workspace: Internal (Plugins). You are developing the Custard plugin "${pluginId}". The fs_ tools work only inside plugin/${pluginId}; everything else, including Custard's core, is out of reach.`,
       '- Read the reference first: reference_read docs/API.md and docs/MANIFEST.md, and look at examples/spotify for a complete plugin. sdk/ is the custard-plugin-sdk source.',
       '- Work in steps: edit, then plugin_validate, then plugin_test, and fix what they report. Show the user what you changed and which permissions the plugin asks for.',
-      "- You can't activate, enable or install plugins, and you have no shell. When it validates and tests cleanly, tell the user to open Settings → Plugins, review the changes and permissions, and activate it.",
+      "- You can't activate, enable or install plugins, and you have no shell. When it validates and tests cleanly, tell the user to click Manage on its card in Plugins mode (the start page of a new Plugins chat), review the changes and permissions, and activate it.",
       '- Plugin code runs in a sandbox with no Node.js and no direct network. Everything goes through the context: ctx.fetch (https, hosts in permissions.network), ctx.storage, ctx.openExternal, ctx.config. There are no npm packages.',
       "- If the plugin needs something the SDK doesn't offer, say so plainly and describe the core change it would need as a separate proposal. Don't try to work around the sandbox.",
       '- Each file change you make is shown to the user in full and happens only if they allow it; a declined change did nothing.',
@@ -92,7 +92,9 @@ function internal(pluginId: string): WorkspaceTools {
             : v.typeErrors
               ? ['Types: no errors.']
               : []),
-          v.ok ? 'Run plugin_test next. Only the user can activate it, in Settings → Plugins.' : ''
+          v.ok
+            ? 'Run plugin_test next. Only the user can activate it, with Manage on its card in Plugins mode.'
+            : ''
         ]
         return { content: lines.filter(Boolean).join('\n'), isError: !v.ok || types.length > 0 }
       }
@@ -109,28 +111,8 @@ function internal(pluginId: string): WorkspaceTools {
   }
 }
 
-function general(root: string, coreAccess: boolean): WorkspaceTools {
-  const deny = [app.getPath('userData')]
-  if (!coreAccess) deny.push(custardSource(), pluginsRoot(), sdkDir())
-  const boundary: Boundary = { root, deny }
-  const names = new Set(fileTools.map((t) => t.name))
-  return {
-    tools: fileTools,
-    has: (n) => names.has(n),
-    preview: previewer(boundary),
-    prompt: [
-      `Workspace: General Code, in the folder ${root}. The fs_ tools read and edit files only inside it.`,
-      coreAccess
-        ? "The user explicitly allowed editing Custard's own source in this conversation. Be careful: changes there affect the app itself."
-        : "Custard's own source is protected here even if it is inside this folder.",
-      "You have no shell, so you can't run builds, tests, installs or scripts. Give the user the exact commands to run themselves.",
-      'Read files before changing them, keep edits focused, and list every file you created, changed, renamed or deleted. The user sees each change in full and allows it before it happens; a declined change did nothing.'
-    ].join('\n'),
-    run: async (name, input) => runFileTool(boundary, name, input)
-  }
-}
-
 export function workspaceTools(w: Workspace | undefined): WorkspaceTools | null {
   if (!w) return null
-  return w.kind === 'internal' ? internal(w.pluginId) : general(w.root, w.coreAccess === true)
+  // General Code was removed: its old chats get no file tools.
+  return w.kind === 'internal' ? internal(w.pluginId) : null
 }

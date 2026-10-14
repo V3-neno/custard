@@ -6,6 +6,8 @@ import type {
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import OpenAI from 'openai'
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import { noUsage, type TokenUsage } from '../../shared/pricing'
+import { addUsage, fromClaude, fromOpenAI } from '../usage'
 
 // Web search that Custard can see before it happens. The chat model asks for
 // a search with the web_search tool; Custard shows or checks the exact query,
@@ -36,6 +38,8 @@ export type SearchOutcome = {
   hits: SearchHit[]
   summary: string
   error?: string
+  // What the search's own model call(s) used (see usage.ts).
+  usage?: TokenUsage
 }
 
 const SYSTEM =
@@ -90,6 +94,7 @@ export async function searchClaude(
       },
       { signal }
     )
+    out.usage = addUsage(out.usage ?? noUsage(), fromClaude(msg.usage))
     collectClaude(msg.content, out, byUrl)
     if (msg.stop_reason === 'refusal') {
       out.error = 'The search was declined by the provider.'
@@ -174,7 +179,12 @@ export async function searchOpenAI(
     },
     { signal }
   )
-  const out: SearchOutcome = { ran: [], hits: [], summary: '' }
+  const out: SearchOutcome = {
+    ran: [],
+    hits: [],
+    summary: '',
+    usage: fromOpenAI(res.usage, res.output.filter((o) => o.type === 'web_search_call').length)
+  }
   const byUrl = new Map<string, SearchHit>()
   for (const item of res.output) {
     if (item.type === 'web_search_call') {

@@ -5,6 +5,7 @@ import vm from 'vm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   cutResult,
+  widgetData,
   PluginHost,
   type ApprovalRequest,
   type RuntimeFactory,
@@ -1305,6 +1306,38 @@ export default defineWidget({ mount(root) { root.textContent = 'board-7712' } })
     const leaked = await invoke('demo__echo', { text: 'sekret-99881' })
     expect(leaked.data).toBeUndefined()
     expect(leaked.content).not.toContain('sekret-99881')
+  })
+
+  it('says why data was left out: to the model, to the widget, and in the log', async () => {
+    writePlugin({ 'src/index.ts': DATA_INDEX })
+    await activate()
+    store.setSecret('demo', 'apiKey', 'sekret-99881')
+    const fine = await invoke('demo__echo', { text: 'you' })
+    expect(fine.dataDropped).toBeUndefined()
+    expect(fine.content).not.toMatch(/left out/)
+    const big = await invoke('demo__echo', { text: 'big' })
+    expect(big.dataDropped).toMatch(/KB and the limit is 64 KB/)
+    expect(big.content).toMatch(/data for widgets from this call was left out because it is \d+ KB/)
+    const leaked = await invoke('demo__echo', { text: 'sekret-99881' })
+    expect(leaked.dataDropped).toBe('it contained a saved credential')
+    expect(leaked.content).not.toContain('sekret-99881')
+    expect(leaked.content).toMatch(/left out because it contained a saved credential/)
+    expect(host.status('demo').log.join('\n')).toMatch(/left out because it is \d+ KB/)
+  })
+
+  it('widgetData reports every way data is refused, without repeating it', () => {
+    expect(widgetData(undefined, [])).toEqual({})
+    expect(widgetData({ a: 1 }, [])).toEqual({ data: { a: 1 } })
+    const cyclic: Record<string, unknown> = {}
+    cyclic.me = cyclic
+    expect(widgetData(cyclic, [])).toEqual({ dropped: "it can't be written as JSON" })
+    expect(widgetData(() => 1, [])).toEqual({ dropped: "it can't be written as JSON" })
+    expect(widgetData('x'.repeat(2048), [], 1024)).toEqual({
+      dropped: 'it is 3 KB and the limit is 1 KB'
+    })
+    expect(widgetData({ k: 'topsecret' }, ['topsecret'])).toEqual({
+      dropped: 'it contained a saved credential'
+    })
   })
 
   it('needs Use in Chat and Design outside Code', async () => {

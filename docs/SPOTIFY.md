@@ -28,7 +28,7 @@ Sources: [quota modes](https://developer.spotify.com/documentation/web-api/conce
    (Spotify doesn't allow `localhost`; the loopback IP is required.) Under APIs, tick **Web API**. Save.
 3. Open the app's **Settings** and copy the **Client ID**.
 4. If anyone other than the app owner will connect, add them under **User Management**.
-5. In Custard, open **Settings → Plugins → Spotify**. Click **Review and activate**, read the permissions, tick them and click **Activate**.
+5. In Custard, open **Plugins** mode → Spotify → **Manage**. Click **Review and activate**, read the permissions, tick them and click **Activate**.
 6. Under **Configuration**, paste the Client ID and click **Save configuration**. Then click **Connect** under Account. Your browser opens Spotify's consent page; approve it and come back. Account shows _connected_.
 7. Vaults made before this change may still have `Custard/Skills/music` and `Areas/Music Preferences.md` from the old starter vault. They are your files now: Custard doesn't update or remove them, and you can delete them in Obsidian.
 
@@ -38,14 +38,14 @@ Custard listens on port 43821 only while you're signing in. If something else us
 
 ## How it's built
 
-| Piece                                                                                 | File                                                                                        |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Manifest: tools, schemas, permissions, OAuth settings                                 | `plugin/spotify/plugin.json`                                                                |
-| Tools, validation, queue reporting                                                    | `plugin/spotify/src/tools.ts`                                                               |
-| API client: retry reads after 429, error messages                                     | `plugin/spotify/src/client.ts`                                                              |
-| Rules for the model while Spotify is enabled                                          | `plugin/spotify/instructions.md`                                                            |
-| Tests                                                                                 | `plugin/spotify/tests/`                                                                     |
-| PKCE sign-in, token storage and refresh, network policy (generic, used by any plugin) | `src/main/plugins/oauth.ts`, `host.ts`, `net.ts`                                            |
+| Piece                                                                                 | File                                             |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Manifest: tools, schemas, permissions, OAuth settings                                 | `plugin/spotify/plugin.json`                     |
+| Tools, validation, queue reporting                                                    | `plugin/spotify/src/tools.ts`                    |
+| API client: retry reads after 429, error messages                                     | `plugin/spotify/src/client.ts`                   |
+| Rules for the model while Spotify is enabled                                          | `plugin/spotify/instructions.md`                 |
+| Tests                                                                                 | `plugin/spotify/tests/`                          |
+| PKCE sign-in, token storage and refresh, network policy (generic, used by any plugin) | `src/main/plugins/oauth.ts`, `host.ts`, `net.ts` |
 
 **Scopes:** `user-read-playback-state` (player and devices), `user-read-currently-playing` (needed to read the queue back), `user-modify-playback-state` (queue and transfer). No listening history, library or profile email.
 
@@ -64,7 +64,7 @@ Custard listens on port 43821 only while you're signing in. If something else us
 
 Custard enforces these rules in code, not only in prompts:
 
-- **You approve each action that changes something.** Queueing, opening the app and moving playback are write tools: Custard shows an approval card (Allow, Allow for this chat, Don't allow) before the plugin runs, unless you turn that off for a tool in Settings → Plugins. Reading (search, now playing, devices) doesn't ask.
+- **You approve each action that changes something.** Queueing, opening the app and moving playback are write tools: Custard shows an approval card (Allow, Allow for this chat, Don't allow) before the plugin runs, unless you turn that off for a tool in Plugins mode (**Manage** on the plugin's card). Reading (search, now playing, devices) doesn't ask.
 - **Inputs are checked by the host** against the manifest's schemas before the plugin runs, e.g. track URIs must match `spotify:track:` plus 22 characters.
 
 - **Only real tracks are queued.** URIs must be valid track URIs _and_ must have been returned by `spotify__search` or `spotify__now_playing` while the plugin runs. A made-up or misremembered ID is refused before anything is sent.
@@ -86,7 +86,7 @@ npm test
 
 ## Manual end-to-end test
 
-1. Complete Setup with a Premium account. In Settings → Plugins → Spotify, check Account says _connected_.
+1. Complete Setup with a Premium account. In Plugins mode → Spotify → Manage, check Account says _connected_.
 2. Open Spotify on your computer or phone and play anything, then pause. This makes a device active.
 3. In Custard Chat, ask: **"What's playing on Spotify?"** You should see _Checked what is playing_ with the right track and device.
 4. Ask: **"Recommend three songs like this."** It should answer in chat with no queue or playback change, and say these are its own suggestions.
@@ -96,7 +96,7 @@ npm test
    - The reply names what was added and anything that wasn't. Check Spotify's queue: the songs are at the end, in that order, and nothing started playing.
 6. Close Spotify everywhere, then ask to queue two more songs. It should say there's no active device and offer to open Spotify. Say yes: Spotify opens, nothing plays.
 7. With Spotify open on two devices, ask **"Move playback to my phone."** It should list devices and move playback there. It only starts playing if you asked it to.
-8. In Settings → Plugins → Spotify, click **Disconnect**, then ask what's playing. It should say you need to connect Spotify again.
+8. In Plugins mode → Spotify → Manage, click **Disconnect**, then ask what's playing. It should say you need to connect Spotify again.
 9. Click **Disable**, then ask to queue a song. The Spotify tools are gone and nothing reaches Spotify.
 
 The full plugin walkthrough, including editing, review and rollback, is in [plugins/TESTING.md](plugins/TESTING.md).

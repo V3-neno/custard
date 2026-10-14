@@ -60,6 +60,8 @@ export type ToolOutcome = {
   outcome?: 'completed' | 'failed' | 'not-run' | 'unknown'
   // Structured data for the plugin's widgets. Never sent to the model.
   data?: unknown
+  // Why `data` was left out (too large, a credential, not JSON), when it was.
+  dataDropped?: string
 }
 
 export type RuntimeHandle = {
@@ -246,18 +248,27 @@ function submitDiffers(operation: string, input: unknown, r: MediaRequest): stri
 }
 
 // A tool's `data` for widgets: plain JSON, bounded, and dropped if it holds a
-// secret value (redaction would garble it, so it isn't attempted).
-function widgetData(data: unknown, secrets: string[], limit = WIDGET_LIMITS.dataBytes): unknown {
-  if (data === undefined) return undefined
+// secret value (redaction would garble it, so it isn't attempted). A drop
+// comes back with the reason, never silently; the reason never repeats the data.
+export function widgetData(
+  data: unknown,
+  secrets: string[],
+  limit = WIDGET_LIMITS.dataBytes
+): { data?: unknown; dropped?: string } {
+  if (data === undefined) return {}
   let json: string | undefined
   try {
     json = JSON.stringify(data)
   } catch {
-    return undefined
+    return { dropped: "it can't be written as JSON" }
   }
-  if (json === undefined || json.length > limit) return undefined
-  if (redact(json, secrets) !== json) return undefined
-  return JSON.parse(json)
+  if (json === undefined) return { dropped: "it can't be written as JSON" }
+  if (json.length > limit)
+    return {
+      dropped: `it is ${Math.ceil(json.length / 1024)} KB and the limit is ${Math.floor(limit / 1024)} KB`
+    }
+  if (redact(json, secrets) !== json) return { dropped: 'it contained a saved credential' }
+  return { data: JSON.parse(json) }
 }
 
 export class PluginHost {
@@ -455,6 +466,7 @@ export class PluginHost {
         effect: t.effect,
         askEveryTime: t.effect === 'write' && (st.askEveryTime[t.name] ?? this.d.askByDefault())
       })),
+      ...(m?.fills?.length ? { fills: m.fills } : {}),
       chatDesign: active ? chatDesignState(active, st.chatDesign) : 'off',
       ...(m?.widgets?.length
         ? { widgets: m.widgets.map((w) => ({ id: w.id, title: w.title })) }
@@ -1417,7 +1429,14 @@ export class PluginHost {
         controller.signal
       )
       const content = cutResult(redact(String(r.content), secrets))
-      const data = widgetData(r.data, secrets, o.dataLimit)
+      const { data, dropped } = widgetData(r.data, secrets, o.dataLimit)
+      // Said in the plugin's log, to the model and to a calling widget, so a
+      // widget that stops updating has a visible reason.
+      if (dropped)
+        this.log(id, `${tool.name}: the data for widgets was left out because ${dropped}`)
+      const shown = dropped
+        ? `${content}\n[The data for widgets from this call was left out because ${dropped}, so a widget showing it will not update.]`
+        : content
       if (r.isError) this.log(id, `${tool.name}: ${content.slice(0, 200)}`)
       const outcome = r.notSent
         ? 'not-run'
@@ -1428,7 +1447,13 @@ export class PluginHost {
           : r.isError
             ? 'failed'
             : 'completed'
-      return { content, isError: !!r.isError, outcome, ...(data !== undefined ? { data } : {}) }
+      return {
+        content: shown,
+        isError: !!r.isError,
+        outcome,
+        ...(data !== undefined ? { data } : {}),
+        ...(dropped ? { dataDropped: dropped } : {})
+      }
     } catch (err) {
       const msg = redact(message(err), secrets)
       this.d.store.addError(id, `${tool.name}: ${msg}`)
@@ -1584,7 +1609,10 @@ export class PluginHost {
     force: boolean
   ): Promise<string> {
     const raw = this.d.store.secrets(id)[OAUTH_KEY]
-    if (!raw) throw new AuthError('Not signed in. Connect the account in Settings → Plugins.')
+    if (!raw)
+      throw new AuthError(
+        'Not signed in. Connect the account with Manage on its card in Plugins mode.'
+      )
     const tokens = JSON.parse(raw) as Tokens
     if (!force && tokens.expiresAt - Date.now() > 60_000) return tokens.accessToken
     let p = this.refreshing.get(id)
@@ -1599,7 +1627,9 @@ export class PluginHost {
           })
           // Signed out while this was running: the new tokens are dropped.
           if (this.generation(id) !== started)
-            throw new AuthError('Not signed in. Connect the account in Settings → Plugins.')
+            throw new AuthError(
+              'Not signed in. Connect the account with Manage on its card in Plugins mode.'
+            )
           this.d.store.setSecret(id, OAUTH_KEY, JSON.stringify(next))
           return next.accessToken
         } catch (err) {

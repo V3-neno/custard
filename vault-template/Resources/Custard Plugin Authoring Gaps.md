@@ -1,8 +1,32 @@
 # Plugin authoring gaps
 
-Commit: `4261aed0b97fde28aed1be3cd22cc815a7c5f845` (branch `hostile-text`), verified with `git rev-parse HEAD` before and after the work. The working tree was clean (`git status --short` empty) after the probe file was removed.
+Original commit: `4261aed0b97fde28aed1be3cd22cc815a7c5f845` (branch `hostile-text`), verified with `git rev-parse HEAD` before and after the work. The working tree was clean (`git status --short` empty) after the probe file was removed. Probe results quoted below ([T] with a probe name) were taken at that commit; where the code has changed since, the text says so and the section was re-read against 7a23d19.
 
 This document answers nine questions about what a plugin author or reviewer cannot learn from `docs/plugins/*.md`. It does not repeat `API.md`, `MANIFEST.md`, `SECURITY.md`, `TESTING.md` or `WIDGETS.md`; it names them where it adds to them. Code paths are relative to the repo root.
+
+Describes Custard code at commit 7a23d19. Written against 4261aed; see 'Changes since 4261aed' below.
+
+## Changes since 4261aed
+
+Gap status below: fixed, partly fixed or still open, checked against the code at 7a23d19.
+
+- `plugin_validate` now type-checks (strict, in a worker) and lists type errors apart from validation errors. Before: types were never read. Sections 1.1, 1.2, 9.
+- Type errors do not block the build, review or activation, and the tool result is marked as an error when there are any. If the check cannot run, it is a warning. Section 1.1.
+- An unused import of a missing file used to pass validate; it now shows as a type error (the build still succeeds). Section 1.1.
+- `plugin_test` takes `file` and `name` to run less (the load check is skipped then). Before: always everything. Sections 1.4, 1.6.
+- `plugin_test` times every test, stops a test after 10 s and carries on, and keeps finished tests (naming the running one) when a run is stopped. Before: one 30 s limit, partial results lost. Section 1.4.
+- `plugin_test` says "No tests ran" instead of "All checks passed." when nothing ran; a name filter that matches nothing is a failure. Section 1.4.
+- Long test reports are cut with a count and long errors with a marker. Section 1.4.
+- The 50,000-character plugin result cut now ends with a marker, and redaction happens before the cut. Before: silent, cut first. Sections 4.1, 4.3, 4.7, 9, Appendix.
+- A widget tool's `data` that is left out (over 64 KB, not JSON, holds a saved credential) is now reported: a line at the end of `content`, a line in the plugin log, and `dataDropped` on a widget call result. Before: silent. Sections 4.1, 4.6, 4.7.
+- `fs_write` is atomic (writes beside the file, renames over it); a leftover temporary file is not read as plugin source. Section 1.1 (build hash).
+- Corrected: the 45 s tool timeout is Spotify's own; host default is 20 s, range 1 to 60 s (5.1, checked again; the old summary line was loose).
+- Corrected: the widget budget is 30 calls a minute per widget; "24" is Spotify-only code (5.2, unchanged and re-checked).
+- Corrected: Spotify has 114 tests in 11 files (115 checks with the load check); `docs/plugins/TESTING.md` still says 23 (8.3, still open).
+- Corrected: the test sandbox now has a console listener, but only for progress lines. `console.log` in a test still goes nowhere (1.4, 2.2).
+- Re-checked and unchanged: tsconfig is ignored (now also by the type check), no lint step, reference_list examples, review limits, 8,000-character instructions edge, automation prefix inconsistency.
+- Counts of other test suites in 8.3 and the full-suite count in the header are from 4261aed and were not re-counted.
+- Skill folder vs `name:` (automations) and the time-zone changes do not touch plugin authoring.
 
 ## Tag legend
 
@@ -12,50 +36,55 @@ This document answers nine questions about what a plugin author or reviewer cann
 - [NB] not built
 - [H] built, but only a heuristic
 - [U] unverified: needs a real model, the real Electron sandbox, Windows/macOS, or a live provider
+- Gap status words: **fixed**, **partly fixed**, **still open** (at 7a23d19)
 
 Probe: `/mnt/project-files/custard/reference/probes/zzgaps/zzgaps.test.ts` with its output in `probe-output.txt` (same folder). It uses the real host, store, bundler (esbuild), `TurnLog`, `fenceResult` and `capResult`, with the same Node `vm` stand-in for the sandbox that `src/main/plugins/host.test.ts` uses. The vm gives plugin code only `AbortController`, `setTimeout`, `clearTimeout`, `URL` and `console`. It is not the Electron sandbox, so every statement about what runs inside the real window is [C]/[I]/[U], not [T]. I could not run Electron here (the brief forbids e2e/electron runs). `console.log` is swallowed by this checkout's vitest reporter, so the probe writes to a file named by `PROBE_OUT`.
 
-Full suite at this commit, run once: 50 files, 951 tests, all passed (one of the 50 is another agent's temporary `zzmem.test.ts`, 1 test). [T]
+Full suite at 4261aed, run once: 50 files, 951 tests, all passed (one of the 50 is another agent's temporary `zzmem.test.ts`, 1 test). [T] At 7a23d19 the plugin tests (`plugin-tests.test.ts`) were run again: 114 passed. The pull requests report 1,028 unit tests passing after the type-check work; I did not run the full suite again.
 
 ## 1. Dev tooling
 
-### 1.1 `plugin_validate`: bundles, does not type-check
+### 1.1 `plugin_validate`: bundles and type-checks (fixed)
 
-- The two tools are defined in `src/main/workspace/index.ts` (`devTools`), only in Code mode's Plugins workspace (`internal(pluginId)`). Neither takes any input (`input_schema: { type: 'object', properties: {} }`). [C]
-- `plugin_validate` calls `PluginHost.validate(id)` (`src/main/plugins/host.ts`). It checks, in this order: sources readable (≤500 files, ≤5 MB), `plugin.json` parses and passes `parseManifest`, the id is not reserved (`vault`, `fs`, `reference`, `plugin`, `custard`, `core`), `entry` and each widget `entry` exist, `instructions` file exists and is ≤8000 characters, then the esbuild bundle (≤2 MB), one bundle per widget, then tool-name collisions with other active plugins. [C]
-- There is no TypeScript type check. esbuild strips types; it does not read them. Probe: a plugin with a `tsconfig.json` (`strict`, `noUnusedLocals`) and a file containing `export const n: number = 'not a number'` and `export const m: string = nope.missing` validates: `{"ok":true,"errors":[],"warnings":["There are no tests in tests/*.test.ts."]}`. [T] (probe `typeError.validate`)
-- The same loose TS semantics mean an import of a missing file whose binding is unused does not fail: `import { nothing } from './missing'` bundled with `ok:true`, because esbuild drops unused TS imports. A used missing import gives `Can't find ./missing`. [T] (probe `missingFile`) for the unused case; the used case is [C] (`build.ts`, last `onResolve` return).
+- The two tools are defined in `src/main/workspace/index.ts` (`devTools`), only in Code mode's Plugins workspace (`internal(pluginId)`). `plugin_validate` takes no input. `plugin_test` takes optional `file` and `name` (1.4, 1.6). [C]
+- `plugin_validate` calls `PluginHost.validate(id)` (`src/main/plugins/host.ts`). It checks, in this order: sources readable (≤500 files, ≤5 MB), `plugin.json` parses and passes `parseManifest`, the id is not reserved (`vault`, `fs`, `reference`, `plugin`, `custard`, `core`), `entry` and each widget `entry` exist, `instructions` file exists and is ≤8000 characters, then the esbuild bundle (≤2 MB), one bundle per widget, then tool-name collisions with other active plugins. `plugin_validate` (not the review screen) then asks for a type check (below). [C]
+- **Fixed:** the plugin is now type-checked. `src/main/plugins/typecheck.ts` runs the TypeScript compiler (strict, ES2022) in a worker (`typecheck.worker.ts`), with a host that reads only the plugin folder, the SDK and the compiler's own lib files. Plugin code is checked without the DOM; widget entries' folders and `tests/` are checked with it. At 4261aed there was no check: the probe plugin with `export const n: number = 'not a number'` validated with `ok:true`. [C] [T] the old probe (`typeError.validate`); the new check is [C] and per the pull request tested in a dev build and in the packaged Linux worker (Spotify clean in about 2.7 s). I did not run the worker here.
+- Type errors are listed apart from validation errors, as `Type errors (the build works, but fix these):` and `- <file>:<line> ...` lines (at most 30, `MAX_TYPE_ERRORS`), or `Types: no errors.`. They do not change `ok`, so build, review and activation do not depend on them; the tool result is still flagged as an error when there are type errors. If the check cannot run, `Types were not checked: ${reason}` is added as a warning. **Partly fixed** in the sense that type errors never block activation, by design. [C] (`host.ts` `validate`, `workspace/index.ts`)
+- A used import of a missing file fails the bundle (`Can't find ./missing`). An unused one still bundles (esbuild drops unused TS imports) [T] (probe `missingFile`, 4261aed), but the type check now reports it as a missing module. [C] [I]
 - Errors you do get are bundler errors and import-guard errors. Probe output, verbatim:
   - `../../../src/index.ts:1: "fs" can't be imported. Plugins can import files in their own folder and "custard-plugin-sdk" only; npm packages and Node modules are not available.` [T]
   - `../../../src/index.ts:1: Expected identifier but found "{"` [T]
   - The `../../../` file prefix is odd. The code strips only an absolute `root` from `location.file`. I did not determine why esbuild reports it that way for a plugin in a temp folder; the real prefix for a plugin under `plugin/` is [U]. [C] (`build.ts` catch block)
 - Outputs the model sees, verbatim from `workspace/index.ts`: `Valid. Build ${v.buildId} of version ${v.manifest?.version} is staged.`, `Validation failed:`, `- ${error}`, `- warning: ${warning}`, `Run plugin_test next. Only the user can activate it, in Settings → Plugins.` [C]
-- Warnings produced by validate: `There are no tests in tests/*.test.ts.` and, for `"*"` network, `This plugin may connect to any public website (private and local addresses stay blocked).` [C]; the first one [T] (probe `noTests.warnings`).
-- Side effect: each successful validate of new source writes a staged build under `<app data>/plugins/<id>/builds/<hash>/`. They are deleted only by `pruneBuilds` at activation (keeps active + previous). Staged builds from many edit/validate cycles accumulate until the next activation. [C] (`host.ts` `activate`, `store.ts` `pruneBuilds`)
+- Warnings produced by validate: `There are no tests in tests/*.test.ts.`, for `"*"` network `This plugin may connect to any public website (private and local addresses stay blocked).`, and `Types were not checked: …` when the type check could not run. [C]; the first one [T] (probe `noTests.warnings`).
+- Side effect: each successful validate of new source writes a staged build under `<app data>/plugins/<id>/builds/<hash>/`. They are deleted only by `pruneBuilds` at activation (keeps active + previous). Staged builds from many edit/validate cycles accumulate until the next activation (still open). [C] (`host.ts` `activate`, `store.ts` `pruneBuilds`)
+- `fs_write` in the Plugins workspace is now atomic (written beside the file, renamed over it), so a crash cannot leave half a plugin file, and a leftover temporary file is skipped by the source reader, so it cannot change the build hash. At 4261aed it was a plain write. [C] (`src/main/workspace/tools.ts`)
 
 ### 1.2 TS config used
 
 - esbuild options in `src/main/plugins/build.ts`: `bundle: true`, `format: 'iife'`, `platform: 'browser'`, `target: 'es2022'`, `tsconfigRaw: '{}'` (comment in code: "Ignore any tsconfig in the plugin folder."), loaders `.ts`, `.js`, `.json`. [C]
-- A `tsconfig.json` in the plugin folder is ignored by the build. It is still hashed and shown in the review diff like any file. [T] (probe: strict tsconfig, build `ok`)
+- A `tsconfig.json` in the plugin folder is ignored by the build. It is still hashed and shown in the review diff like any file. [T] (probe: strict tsconfig, build `ok`). The type check does not read it either: it always uses its own strict options (`typecheck.ts`), so `noUnusedLocals` and the like are not applied. [C]
 - Resolution tries `''`, `.ts`, `.js`, `.json`, `/index.ts`, `/index.js`. No `.tsx`, no JSX. [C]
 - Separately, the repo's own `tsconfig.node.json` includes `plugin/**/*.ts`, so `npm run typecheck:node` type-checks Spotify and its tests with the repo's strict config. This is a repo-maintainer step, not part of the plugin tools. [C] I ran `npx tsc --noEmit -p tsconfig.node.json --composite false`: no errors outside my own probe file (its only errors were two unused-variable lines in the probe, fixed before the final copy); after the fix it printed nothing. [T]
-- The Plugins workspace has no shell ("You can't activate, enable or install plugins, and you have no shell." in the workspace prompt), so an authoring thread working there cannot run `tsc`, `eslint` or `vitest`. [C] (`workspace/index.ts`)
+- The Plugins workspace has no shell ("You can't activate, enable or install plugins, and you have no shell." in the workspace prompt), so an authoring thread working there cannot run `eslint` or `vitest`. It no longer needs to run `tsc` for types, because `plugin_validate` does that (partly fixed: types yes, lint no). [C] (`workspace/index.ts`)
 
 ### 1.3 Linting
 
 - There is no lint step in `plugin_validate`, `plugin_test` or the review screen. [C]
 - The repo has ESLint (`npm run lint` = `eslint --cache .`, `eslint.config.mjs`, `@electron-toolkit/eslint-config-ts` + prettier + react plugins). It ignores only `node_modules`, `dist`, `out`, `out-test`, `test/e2e`; so `plugin/**` is linted. [C]
-- I ran `npx eslint plugin src/plugin-sdk`: exit 1, 545 problems, 14 errors, 531 warnings. All 14 errors are `Missing return type on function` in Spotify test support files (`plugin/spotify/tests/widget-support.ts`, `widget-refinements.test.ts`, `widget-refresh.test.ts`); the warnings are prettier formatting in 18 Spotify files. So the reference plugin does not pass the repo's own lint. [T]
+- I ran `npx eslint plugin src/plugin-sdk`: exit 1, 545 problems, 14 errors, 531 warnings. All 14 errors are `Missing return type on function` in Spotify test support files (`plugin/spotify/tests/widget-support.ts`, `widget-refinements.test.ts`, `widget-refresh.test.ts`); the warnings are prettier formatting in 18 Spotify files. So the reference plugin does not pass the repo's own lint. Re-run at 7a23d19: the same 545 problems, 14 errors. Still open. [T]
 
 ### 1.4 What `plugin_test` runs
 
 - `PluginHost.test(id, signal)` (`host.ts`) does, in order: (a) `validate`; if it fails, returns `{ ok:false, results:[], error: errors.join('\n') }`. (b) A load check: starts the built bundle in a real sandbox window with no capabilities (`onCap` returns `No capabilities during the load check.`), disposes it, and records one result named `Plugin loads and handles every tool in plugin.json` (error `No handler for ${names}` if a declared tool has no handler). It never calls any tool. (c) If any file matches `/^tests\/.+\.test\.(ts|js)$/`, bundles all of them into one script and runs it in a fresh sandbox window (`runTestsInSandbox`, partition `custard-plugin-tests`, no preload bridge, so no `custardPluginHost`). [C]
 - Runner: the SDK's own, not vitest. `test(name, fn)` pushes to a global registry (`globalThis.__custardTests`), `runRegisteredTests()` runs them in registration order, one at a time, `await`ing each; any throw is a failure with `String(err.message)`. Assertions: `assert`, `assert.equal` (strict `!==`), `assert.deepEqual` (compares `JSON.stringify`), `assert.match`, `assert.notMatch`. No `beforeEach`, no `describe`, no skip/only, no timers mocking. [C] (`src/plugin-sdk/testing.ts`)
-- Reporting: one flat list of `{ name, ok, error }`. No file names, no durations. Probe with `tests/a.test.ts` (passing), `tests/b.test.ts` (failing), `tests/sub.test.js`, `tests/helper.ts` (not a test file):
+- Reporting (changed): a flat list of `{ name, ok, error, ms }`. Every test now has a time in milliseconds. There are still no file names in the result. The probe below was taken at 4261aed and shows the old shape without `ms`. Probe with `tests/a.test.ts` (passing), `tests/b.test.ts` (failing), `tests/sub.test.js`, `tests/helper.ts` (not a test file):
   `{"ok":false,"results":[{"name":"Plugin loads and handles every tool in plugin.json","ok":true},{"name":"a1","ok":true},{"name":"b1","ok":false,"error":"Expected 2, got 1"},{"name":"js ok","ok":true}]}` [T]
-- The model sees (from `workspace/index.ts`): `All checks passed.` or `Some checks failed.`, then `- pass: ${name}` / `- FAIL: ${name} (${error})` lines, then `Error: ${error}` if the run itself failed. `isError` is true when not all passed. [C]
-- Timeouts and stops for the test run (verbatim from `runtime.ts`): `Tests took longer than ${n} seconds, so they were stopped.` (n=30, `TEST_TIMEOUT_MS`), `The tests were stopped.`, `The tests stopped responding, so they were stopped.`, `The test sandbox ended before the tests finished.`, `The tests were stopped before they started.` The 30 s is for the whole run, not per test. [C] [U] (the Electron e2e `test/electron/sandbox.e2e.ts` claims to cover "tests running in the sandbox without network"; I did not run it)
-- `console.log` inside tests goes nowhere visible (see 2.2). [C]
+- The model sees (from `src/main/workspace/report.ts`): a head line (`All ${n} checks passed.`, `${k} of ${n} checks failed.`, `Tests did not finish cleanly.`, or **fixed:** `No tests ran. Add tests in tests/*.test.ts; nothing was checked.`), then failures first and passes after as `- FAIL: ${name} [${ms} ms] (${error})` / `- pass: ${name} [${ms} ms]`, then `Error: ${error}`. At 4261aed a run with no tests said `All checks passed.`. A result list over 80 lines is cut with `[… N more results left out …]`, and an error over 400 characters with `[… N more characters left out …]`. `isError` is true when not all passed. [C]
+- Filters (**fixed**): `file` (a path in `tests/`, for example `tests/player.test.ts`) and `name` (part of a test's name, case-insensitive) run less. The load check is skipped when either is given. A `file` that does not exist fails with `There is no test file …. Test files: …`; a `name` that matches nothing fails with `No test name contains "…".`. Skipped tests are counted in `${n} tests did not match the filter and were skipped.` [C] (`host.ts` `test`, `testing.ts`)
+- Per-test limit (**fixed**): a test that never settles fails with `Took longer than 10 seconds.` (`TEST_LIMIT_MS` in `src/plugin-sdk/testing.ts`) and the rest still run. A test stuck in a busy loop cannot be interrupted this way; the whole-run limit ends it. [C]
+- Timeouts and stops for the test run (verbatim from `runtime.ts`): `Tests took longer than ${n} seconds, so they were stopped.` (n=30, `TEST_TIMEOUT_MS`), `The tests were stopped.`, `The tests stopped responding, so they were stopped.`, `The test sandbox ended before the tests finished.`, `The tests were stopped before they started.` The 30 s is still one limit for the whole run. **Partly fixed:** when a run is stopped, the tests that had finished are kept and the one that was running is named (the runner emits a progress line per test start and finish and the host reads them from the console). A test that loops after its last progress line cannot be told apart from one that hung earlier. [C] [U] (the pull request reports the Electron sandbox suite 29/29 with these checks; I did not run it)
+- `console.log` inside tests goes nowhere visible (see 2.2). The sandbox now has a console listener, but it only reads the runner's own progress lines. [C]
 
 ### 1.5 The 10-second load check
 
@@ -66,9 +95,9 @@ Full suite at this commit, run once: 50 files, 951 tests, all passed (one of the
 - A top-level infinite loop blocks the renderer; the 10 s timer lives in the main process, so it still fires and `dispose` calls `forcefullyCrashRenderer()` first. [C] [U] (claimed by the e2e "a busy loop being killed" in `TESTING.md`; not run here)
 - None of this is reachable under vitest: the vm stand-in never produces these strings. [C]
 
-### 1.6 Running a single test file
+### 1.6 Running a single test file (fixed inside Custard)
 
-- Inside Custard: no. `plugin_test` and **Run tests** take no input and always bundle every `tests/*.test.(ts|js)` file together. [C] [T] (probe `test.report`: all three test files ran)
+- Inside Custard: yes now, for the model. `plugin_test` accepts `file` and `name` (1.4). Without them it still bundles every `tests/*.test.(ts|js)` file together [T] (probe `test.report`: all three test files ran). The **Run tests** button in the review screen takes no filter (`plugins:test` passes only the id). [C]
 - Under vitest in the repo: the plugin tests are loaded by one file, `src/plugin-sdk/plugin-tests.test.ts`, which wraps each file in `describe('plugin/<id>/tests/<file>', …)`. Filtering by name works: `npx vitest run src/plugin-sdk/plugin-tests.test.ts -t "queue.test.ts"` ran 10 tests and skipped 104. [T]
 - A file named by vitest directly (`npx vitest run plugin/spotify/tests/queue.test.ts`) does not run: `vitest.config.ts` has `include: ['src/**/*.test.ts']`. [C]
 
@@ -91,7 +120,7 @@ No test in this repo enumerates the sandbox's globals. The table separates what 
 | `Date`, `JSON`, `Math`, `Promise`, `Map`, `Set`, `RegExp`, `Intl` | exists | ECMAScript built-ins of the renderer's V8 [I] |
 | `URL`, `URLSearchParams`, `TextEncoder`, `TextDecoder`, `structuredClone`, `queueMicrotask`, `atob`, `btoa`, `performance.now` | expected to exist | standard window globals in Chromium; nothing in the repo uses or probes them [I] [U] |
 | `crypto.getRandomValues`, `crypto.subtle`, `crypto.randomUUID` | unknown | the page is a `data:` URL; whether Chromium treats it as a secure context (which `subtle`/`randomUUID` need) was not checked [U] |
-| `console` | exists but output is discarded | `devTools:false`, and `runtime.ts` has no `console-message` listener. Use `ctx.log(message)` (300 chars, last 50 kept, redacted) [C] |
+| `console` | exists but output is discarded | `devTools:false`. The test window has a `console-message` listener, but it reads only the runner's progress lines. Use `ctx.log(message)` (300 chars, last 50 kept, redacted) [C] |
 | `fetch`, `XMLHttpRequest`, `WebSocket`, `Image`, `navigator.sendBeacon`, `document`, `location`, `window.open` | exist as globals, network is cancelled | the e2e probe plugin in `test/electron/sandbox.e2e.ts` calls all of them and expects them blocked: every non-`data:` request is cancelled in `onBeforeRequest`, the proxy is `http://0.0.0.0:9`, the CSP has no connect sources [C] [U] (e2e not run here) |
 | the page's own `fetch` vs `ctx.fetch` | different things | global `fetch` is the blocked browser one; `ctx.fetch` goes through the host (`fetchFor` in `host.ts`) [C] |
 | `require`, `process`, `electron`, `ipcRenderer` | `undefined` | `typeof` probe in `test/electron/sandbox.e2e.ts` [C] [U] |
@@ -137,14 +166,14 @@ One window per plugin (not per call, not per chat). Everything below is from `ho
 
 | Cap | Where | Value | Marker when exceeded |
 | --- | --- | --- | --- |
-| Hard cap on a plugin's `content` | `src/main/plugins/host.ts`, `MAX_RESULT_CHARS` | 50,000 characters, `String(r.content).slice(0, MAX_RESULT_CHARS)` before redaction | none |
-| Per-model context cap | `src/main/context.ts`, `capResult` / `maxResultChars` | `min(100000, floor(budget*0.1*3))`: 100,000 for `claude-opus-5-5`, `claude-sonnet-5-5`, `gpt-6-astra`; 38,760 for `claude-haiku-4-5` and for any model not in the table | see 4.3 |
+| Hard cap on a plugin's `content` | `src/main/plugins/host.ts`, `MAX_RESULT_CHARS`, `cutResult` | 50,000 characters, applied after redaction: `cutResult(redact(String(r.content), secrets))` | **fixed:** `\n[… N more characters are left out here: Custard keeps at most 50,000 characters of one plugin result]` (at 4261aed: none, and the cut came before redaction) |
+| Per-model context cap | `src/main/context.ts`, `capResult` / `maxResultChars` | `min(100000, floor(budget*0.1*3))`: 100,000 for the large-context models; 38,760 for the smallest-context model and for any model not in the table | see 4.3 |
 | Automation envelope cap | `src/main/automations/untrusted.ts`, `RESULT_CAPS = { vault: 40_000, plugin: 12_000 }` | 12,000 characters of the escaped text | see 4.3 |
-| Widget `data` | `host.ts` `widgetData`, `WIDGET_LIMITS.dataBytes` in `src/shared/widgets.ts` | 65,536 characters of `JSON.stringify(data)` (media jobs: `MEDIA_DATA_BYTES` = 48 MiB) | `data` is dropped, no marker |
+| Widget `data` | `host.ts` `widgetData`, `WIDGET_LIMITS.dataBytes` in `src/shared/widgets.ts` | 65,536 characters of `JSON.stringify(data)` (media jobs: `MEDIA_DATA_BYTES` = 48 MiB) | **fixed:** `data` is dropped but reported (4.6) |
 
-- All values [C]. [T]: probe `maxResultChars.*` (100000, 100000, 38760, 100000, 38760 for opus, sonnet, haiku, gpt-6-astra, unknown-model); probe `big`: a tool returning 60,000 characters came back with `len: 50000`, no marker, `isError:false`, `outcome:"completed"`; probe `exactly50k`: 50,000 passes whole; probe `dataBoundary`: JSON of exactly 65,536 characters kept, 65,537 dropped.
+- All values [C], re-read at 7a23d19. [T] at 4261aed: probe `maxResultChars.*` (100000, 100000, 38760, 100000, 38760 for the four named models and an unknown one); probe `big`: a tool returning 60,000 characters came back with `len: 50000`, no marker, `isError:false`, `outcome:"completed"` (the marker part is now fixed; per the pull request a unit test checks a 60,000-character result gets the marker with the right count and that a key straddling the cut leaves no fragment); probe `exactly50k`: 50,000 passes whole; probe `dataBoundary`: JSON of exactly 65,536 characters kept, 65,537 dropped (still the boundary).
 - The two caps in the question are two separate layers. 50,000 is applied in `PluginHost.run` for every mode (chat, code, design, skills, automations, widgets, media). 12,000 is applied only in the automation runner, after the 50,000 cut and after control-character removal and escaping. [C]
-- `docs/plugins/API.md` says "Results are capped at 50,000 characters and redacted". It does not say the cut is silent, and does not mention the 12,000 or the per-model cap.
+- `docs/plugins/API.md` says "Results are capped at 50,000 characters and redacted". It does not mention the marker, the 12,000 or the per-model cap.
 
 ### 4.2 How a result reaches the model, per mode
 
@@ -167,8 +196,8 @@ Chat, Design, Skills and Code's Plugins workspace share one code path (`src/main
 
 ### 4.3 Truncation markers (exact)
 
-- Host 50,000 cut: none. A plugin cannot tell the model it was cut, and the model cannot tell. [T] probe `big`, [C]
-- `capResult` (chat modes, and automations for non-fenced outcomes): appended after the cut text: `\n\n[Custard shortened this result from ${content.length.toLocaleString('en-US')} to ${max.toLocaleString('en-US')} characters so the chat stays within the model's context limit. Ask for a smaller part if you need the rest.]` Probe on Haiku: `[Custard shortened this result from 40,000 to 38,760 characters so the chat stays within the model's context limit. Ask for a smaller part if you need the rest.]` [T] (probe `capResult.haiku`). On Sonnet 5.5 a 50,000-character result is not marked, because the model cap (100,000) is above the host cap: probe `capResult.sonnet50k` returned length 50000. [T]
+- Host 50,000 cut (**fixed**): `\n[… ${n} more characters are left out here: Custard keeps at most 50,000 characters of one plugin result]` after the cut text, where n counts the redacted text beyond 50,000. The model can now tell, and a plugin still cannot stop it. The marker adds about 100 characters beyond 50,000; a dropped-`data` note (4.6) can follow it. [C] (`host.ts` `cutResult`)
+- `capResult` (chat modes, and automations for non-fenced outcomes): appended after the cut text: `\n\n[Custard shortened this result from ${content.length.toLocaleString('en-US')} to ${max.toLocaleString('en-US')} characters so the chat stays within the model's context limit. Ask for a smaller part if you need the rest.]` Probe on the smallest-context model: `[Custard shortened this result from 40,000 to 38,760 characters so the chat stays within the model's context limit. Ask for a smaller part if you need the rest.]` [T] (probe `capResult.haiku`). On a large-context model a result at the host cap is not cut again, because the model cap (100,000) is above the host cap: probe `capResult.sonnet50k` returned length 50000 (the marker added since can push a cut result a little over 50,000, still far under 100,000). [T]
 - Automation fence (`fenceResult`): `\n[… ${(body.length - cap).toLocaleString('en-US')} more characters are left out here]` inside the envelope, after the cut text. Probe with 13,016 escaped characters: `…zzz\n[… 1,016 more characters are left out here]\n</tool_result>` [T] (probe `fence`). The count is of escaped characters, and the cut can fall inside an entity such as `&lt;` [I].
 - The `source` attribute is stripped to `[\w.:/ -]`: `we"ird<>name` became `weirdname`. [T] (probe `fenceSource`)
 - An example of an escaped short result: `<tool_result source="demo__x" trust="data">\nhi &lt;script&gt;\n</tool_result>` [T] (probe `fenceShort`)
@@ -200,18 +229,18 @@ Both. The host decides an `outcome` for every call; the prefix text is added by 
 ### 4.6 What happens to `data`
 
 - The SDK runtime passes `data` through only if it is not `undefined` (`normalize`), and the Electron IPC handler forwards it unchanged. [C] (`src/plugin-sdk/runtime.ts`, `runtime.ts`)
-- The host (`widgetData`) keeps it only if it survives `JSON.stringify`, is ≤65,536 characters (`dataLimit` for media: 48 MiB), and `redact(json, secrets) === json`. Otherwise it is dropped silently and the call still succeeds. [C]
-- Probe: 65,000-character data kept; 70,000 dropped; `{ password: 'p' }` dropped. [T] (probe `data`)
-- Because `redact` also rewrites `Bearer <8+ chars>` and fields named `access_token|refresh_token|id_token|client_secret|api_key|apikey|password`, any `data` whose JSON contains such a key, or the phrase "Bearer authentication", is dropped. Probe on `content`: `The Bearer authentication scheme is described here` came back as `The Bearer [redacted] scheme is described here`. [T] (probe `bearerFalsePositive`) [H]
+- The host (`widgetData`) keeps it only if it survives `JSON.stringify`, is ≤65,536 characters (`dataLimit` for media: 48 MiB), and `redact(json, secrets) === json`. Otherwise it is dropped and the call still succeeds. **Fixed:** the drop is no longer silent (4261aed: silent). `widgetData` returns the reason (`it is 70 KB and the limit is 64 KB`, `it can't be written as JSON`, `it contained a saved credential`; the reason never repeats the data). The host then (1) ends `content` with `[The data for widgets from this call was left out because …, so a widget showing it will not update.]`, which the model sees, (2) writes `${tool}: the data for widgets was left out because …` to the plugin's log, and (3) adds `dataDropped` to the result, which `widgets/manager.ts` passes to the calling widget instead of `data`. [C] (`host.ts`, `src/shared/widgets.ts`, `docs/plugins/WIDGETS.md`; tests in `host.test.ts` and `manager.test.ts`). A widget must handle `dataDropped` itself; Spotify's does not yet (still open). [C]
+- Probe at 4261aed: 65,000-character data kept; 70,000 dropped; `{ password: 'p' }` dropped. The same cases still drop; they now say why. [T] (probe `data`) [C]
+- Because `redact` also rewrites `Bearer <8+ chars>` and fields named `access_token|refresh_token|id_token|client_secret|api_key|apikey|password`, any `data` whose JSON contains such a key, or the phrase "Bearer authentication", is dropped (still true, now reported as a saved credential; the false positive is still open). Probe on `content`: `The Bearer authentication scheme is described here` came back as `The Bearer [redacted] scheme is described here`. [T] (probe `bearerFalsePositive`) [H]
 - `chat.ts` and `automations/index.ts` strip `data` before the result goes on (`const { data, ...r } = await pluginHost().invoke(...)`). Only widgets and Design's media adapter see it. [C]
 
 ### 4.7 Recommended shape for large listings
 
 Nothing in the host helps here; the following is advice derived from the caps, not a built feature. [I]
 - Make the bound part of the tool: `limit` (and `offset` or a cursor) in `inputSchema` with a `maximum`, and a default well under the caps. Spotify's `search` does this: `limit` max 10, default 5, compact multi-line text per item (`plugin/spotify/plugin.json`, `src/tools.ts`). [C]
-- State the total yourself, for example "showing 20 of 134, call again with offset 20", because neither the 50,000 cut nor the host tells the model anything. [I]
+- State the total yourself, for example "showing 20 of 134, call again with offset 20". The host now adds a marker with the number of characters left out at 50,000, but it cannot say how many items that is. [I]
 - Keep the whole result under 12,000 characters if the tool will be used by an automation, and remember `<`, `>` and `&` grow to 4 to 5 characters there. Under 38,760 for the smallest-context models. [I]
-- Put structured copies for a widget in `data` (≤65,536 characters, no secret-looking keys), not in `content`; do not use `data` to give the model more, it never reaches it. [C]
+- Put structured copies for a widget in `data` (≤65,536 characters, no secret-looking keys), not in `content`; do not use `data` to give the model more, it never reaches it. If `data` is too large or holds a credential it is dropped, and the model sees a note about it. [C]
 
 ## 5. Write tools
 
@@ -359,8 +388,8 @@ TESTING.md counts that would change if built (see 8.3 for what it says now):
 ### 8.3 What TESTING.md claims vs reality
 
 Only one number appears in `docs/plugins/TESTING.md`: "Spotify: 23 tests".
-- Reality: `src/plugin-sdk/plugin-tests.test.ts` ran 114 tests, in 11 files: `back-intent` 2, `controls` 30, `metadata` 8, `playback` 6, `queue` 10, `read` 7, `readiness` 17, `reported-mismatches` 2, `widget-refinements` 7, `widget-refresh` 4, `widget` 21. The `tests/` folder has 13 files (the two extra, `helpers.ts` and `widget-support.ts`, hold no tests). The claim is stale. [T]
-- Other counts from the same run, not in TESTING.md: `host.test.ts` 67, `manifest.test.ts` 32, `net.test.ts` 38, `oauth.test.ts` 7, `store.test.ts` 4, `migrate.test.ts` 5, `schema.test.ts` 2, `open.security.test.ts` 6, `src/main/workspace/paths.test.ts` 23, `src/main/widgets/manager.test.ts` 27, `src/main/modes/policy.test.ts` 14, `src/main/automations/untrusted.test.ts` 17, `src/main/turn.test.ts` 18, `src/main/history.test.ts` 2. [T]
+- Reality: `src/plugin-sdk/plugin-tests.test.ts` ran 114 tests, in 11 files: `back-intent` 2, `controls` 30, `metadata` 8, `playback` 6, `queue` 10, `read` 7, `readiness` 17, `reported-mismatches` 2, `widget-refinements` 7, `widget-refresh` 4, `widget` 21. The `tests/` folder has 13 files (the two extra, `helpers.ts` and `widget-support.ts`, hold no tests). The claim is stale, and `docs/plugins/TESTING.md` at 7a23d19 still says 23. Re-run at 7a23d19: 114 tests (115 checks with the load check). Still open. [T]
+- Other counts from the 4261aed run (not re-counted at 7a23d19; the pull requests added tests to several of these files), not in TESTING.md: `host.test.ts` 67, `manifest.test.ts` 32, `net.test.ts` 38, `oauth.test.ts` 7, `store.test.ts` 4, `migrate.test.ts` 5, `schema.test.ts` 2, `open.security.test.ts` 6, `src/main/workspace/paths.test.ts` 23, `src/main/widgets/manager.test.ts` 27, `src/main/modes/policy.test.ts` 14, `src/main/automations/untrusted.test.ts` 17, `src/main/turn.test.ts` 18, `src/main/history.test.ts` 2. [T]
 - Suites that exist and bear on plugins but that the "`npm test` covers" list omits: `store.test.ts`, `schema.test.ts`, `open.security.test.ts`, `widgets/manager.test.ts`, `modes/policy.test.ts`, `automations/untrusted.test.ts`, `turn.test.ts`. [T] [C]
 - Statements I could check by reading: the files named for the Electron run and the Playwright demo exist (`test/electron/sandbox.e2e.ts`, `test/e2e/plugin-demo.mjs`, `test/e2e/mock.mjs`, `scripts/test-electron.mjs`). I did not run either. [C] [U]
 - The manual checklist step 11 quotes the failure as "1.0.2 failed to start … 1.0.1 is still the active version"; the code text is `Version 1.0.2 failed to start, so it was not activated. 1.0.1 is still the active version. <error>`. Close enough with the ellipsis, not a verbatim string. [C]
@@ -374,44 +403,70 @@ Each line says what to verify and where the behaviour comes from. All behaviours
 2. Every tool that sends, creates, changes or deletes something outside Custard is `effect: "write"`, including POST/PUT/PATCH/DELETE. Read tools can only GET/HEAD without a body in all modes (`fetchFor`, `host.ts`; test "read tools only GET or HEAD"). Also: a read tool with network access can still leak its query to its allowed hosts (`SECURITY.md`).
 3. Write-tool timeout is set deliberately (`timeoutMs`, 1000–60000, default 20000) and the handler honours `ctx.signal`. A timeout turns into `Outcome unknown:` for the model (`host.ts` `run`, `turn.ts`).
 4. Error returns follow the convention: before anything is sent, return `{ content: 'Not run: …', isError: true }`; after a send with an unreliable answer, `Outcome unknown: …` with a check-before-retry instruction. The host does not enforce this (4.4); Spotify's `playback.ts` is the model.
-5. Result size: tool bounds its output (limit, paging, count line) well under 12,000 characters if automations may use it, and never relies on `data` for the model (4.1–4.7). Silent 50,000 cut: confirm the tool can't legitimately exceed it.
+5. Result size: tool bounds its output (limit, paging, count line) well under 12,000 characters if automations may use it, and never relies on `data` for the model (4.1–4.7). The 50,000 cut now has a marker, but the tail is still lost: confirm the tool can't legitimately exceed it.
 6. No secrets in files, results, `ctx.log` or `data`. Secret settings are config fields with `secret: true`; redaction is a safety net only, and a secret-looking key in `data` drops the whole `data` (`redact.ts`, `widgetData`).
 7. `instructions.md`: under 8,000 characters (limit `> 8000`), says when to use each tool, contains no text meant to change approvals or permissions, no `</plugin>` (not escaped, 6.4). It is system-prompt text in chat modes (6.2); read it like code. Open the diff of it in review.
 8. Tool and widget descriptions (`description` fields) are what the model sees (`[${manifest.name} plugin] ${t.description}`); a change to them needs no approval and appears only as a `plugin.json` diff line (7.6).
 9. Updates: new permissions listed and ticked; scope change means the user will be signed out and must reconnect (7.1); "Use in Chat and Design" turns `changed` when network/open/account/action permissions grow (7.5); changed config defaults apply to users who never set the field (7.3).
 10. Review diff is readable: no file near the 4,000,000-cell limit shows `(too large to show)` (`diff.ts`); no meaningful change hidden in a denied-name file or a symlink (skipped, not built).
-11. Imports: only files in the plugin folder and `custard-plugin-sdk` (`build.ts` guard). No `fs`, no npm package; unused imports are dropped silently (1.1).
-12. Type safety and lint were checked outside the tools: `npm run typecheck:node` and `npx eslint plugin/<id>` (1.2–1.3). Validate does not do it, and Spotify itself currently has 14 lint errors.
-13. Tests: `tests/*.test.ts` exist (otherwise `There are no tests in tests/*.test.ts.`), cover refusal/`Not run:` paths, 4xx/5xx/timeouts, and do not depend on Node globals that the Custard test window lacks (2.2). `plugin_test` only proves the bundle loads and the listed tests pass; it never calls a tool in a real sandbox.
+11. Imports: only files in the plugin folder and `custard-plugin-sdk` (`build.ts` guard). No `fs`, no npm package; unused imports are dropped by the bundler (1.1), but the type check reports an unused import of a missing file.
+12. Type safety: read the `Type errors` part of `plugin_validate` (they do not block activation, so a reviewer must look). Lint is still checked outside the tools: `npx eslint plugin/<id>` (1.3). Spotify itself still has 14 lint errors.
+13. Tests: `tests/*.test.ts` exist (otherwise `There are no tests in tests/*.test.ts.`), cover refusal/`Not run:` paths, 4xx/5xx/timeouts, and do not depend on Node globals that the Custard test window lacks (2.2). `plugin_test` only proves the bundle loads and the listed tests pass; it never calls a tool in a real sandbox. `No tests ran` means nothing was checked.
 14. Load behaviour: top level does nothing slow or throwing; `start()` is reached within 10 s (`The plugin did not finish loading within 10 seconds.`); every tool in `plugin.json` has a handler (`No handler for …`).
 15. State: nothing assumes the sandbox lives longer than a call; anything that must persist is in `ctx.storage` (needs the permission, ≤1 MB). Module state is shared by all chats and survives until crash/update/disable (3).
-16. Widgets (if any): `widget:<id>` permission, tools listed in the widget spec are the minimum, a call budget below 30/min per instance (host limit) and a refresh interval that fits (`WIDGET_LIMITS`), writes only on a click (5 s gesture window) (5.2).
+16. Widgets (if any): `widget:<id>` permission, tools listed in the widget spec are the minimum, a call budget below 30/min per instance (host limit), and handling of `dataDropped` from a read tool and a refresh interval that fits (`WIDGET_LIMITS`), writes only on a click (5 s gesture window) (5.2).
 17. Opt-in scope: decide whether it should be turned on for Chat/Design/Skills/automations at all. That opt-in covers every network/open/account/action permission and records trust, not proof (`needsChatDesign`, `chatDesignScope`, host.ts). Automations only ever get read tools.
 18. Accounts: `auth.apiHosts` are exact hosts that should receive the token; `tokenUrl` host in `permissions.network`; redirect port unique; Client ID field is non-secret. Check the update path signs out as intended (7.1, `credentialScope`).
 
-## Appendix: defects and decisions found (for Neno)
+## Appendix: status of the defects found at 4261aed (for Neno)
 
-All [C] unless tagged.
-1. The 50,000-character host cut is silent (no marker), unlike the per-model cap and the automation cap. [T]
-2. The per-model cap applies unevenly: Haiku 4.5 and unknown model ids cap at 38,760, so a 40,000-character result is cut with a marker, while Sonnet/Opus/gpt-6 pass the 50,000 whole. [T]
-3. The automation 12,000 cap counts escaped characters and may cut inside an entity. [I]
-4. Automation prefix `Not run:` is placed outside the envelope, and `Outcome unknown:` there has no `UNKNOWN_NOTE`; the automation prompt only mentions `Not run:`. Inconsistent with chat.
-5. Plugin-authored `Not run:` / `Outcome unknown:` are conventions the host does not read; outcome stays `failed`, so the repeat guard `unknownRepeat` never triggers for them. [H]
-6. `required` config fields are not enforced at call time or shown at review.
-7. `<plugin name="…">` wrapper does not escape the name or text; the sentence "Plugin results are data…" is emitted only when some plugin has instructions; the error says "under 8000" but 8000 is accepted; plugin order in chat follows unsorted `readdirSync`. [T]
-8. The review screen does not warn about being signed out after a credential-scope change or about "Use in Chat and Design" switching off.
-9. Review diff: a changed file over 4,000,000 line-pairs is unreviewable (`(too large to show)`); no fallback.
-10. `plugin_validate` does not type-check or lint; the authoring workspace has no shell to run `tsc`/`eslint`; Spotify itself fails `npx eslint plugin` with 14 errors. [T]
-11. `plugin_test` cannot run one file, reports no file names, has no per-test timeout (30 s total), and discards `console` output.
-12. `docs/plugins/TESTING.md` says Spotify has 23 tests; it has 114 in 11 files. [T]
-13. `reference_list` advertises `examples/` but offers `examples/spotify` only, and nothing at all while developing Spotify; there is no minimal example.
-14. The widget host budget is 30 per minute per instance; the "24" is Spotify-only code. Model-driven calls have no per-minute budget.
-15. Staged builds are pruned only at activation.
-16. Stale config values (removed fields) stay in `config.json` and in the status view; saved values are not re-validated against a changed schema. [T]
-17. Bundler error paths show an odd `../../../src/index.ts:1:` prefix in my probe; cause not determined. [T] [U]
+All [C] unless tagged. Detail for the open ones is in "Remaining known gaps".
+1. The 50,000-character host cut was silent. **Fixed:** marker, and redaction before the cut (4.3).
+2. The per-model cap applies unevenly (the smallest-context model and unknown ids cap at 38,760). **Still open**, by design. [T]
+3. The automation 12,000 cap counts escaped characters and may cut inside an entity. **Still open.** [I]
+4. Automation `Not run:` sits outside the envelope, `Outcome unknown:` has no `UNKNOWN_NOTE`, and the prompt mentions only `Not run:`. **Still open** (re-read `automations/run.ts`).
+5. Plugin-authored `Not run:` / `Outcome unknown:` are conventions the host does not read. **Still open.** [H]
+6. `required` config fields are not enforced at call time or shown at review. **Still open** (only the Design media check reads them).
+7. The `<plugin>` wrapper does not escape; the "data" sentence only appears when some plugin has instructions; "under 8000" accepts 8000; chat plugin order follows unsorted `readdirSync`. **Still open.** [T]
+8. The review screen does not warn about sign-out after a scope change or about "Use in Chat and Design" switching off. **Still open.**
+9. A changed file over 4,000,000 line-pairs shows `(too large to show)`. **Still open.**
+10. `plugin_validate` did not type-check. **Fixed** (1.1). No lint step and no shell for `eslint`: **still open**; Spotify still has 14 lint errors. [T]
+11. `plugin_test` could not run one file, gave no timings, had no per-test limit and lost finished tests on a stop. **Fixed** for filters, timings, the 10 s per-test limit, partial results and `No tests ran`. **Still open:** no file names in results, `console` output discarded, one 30 s limit for the whole run.
+12. `docs/plugins/TESTING.md` says Spotify has 23 tests; it has 114. **Still open** (docs not changed).
+13. `reference_list` advertises `examples/` but offers `examples/spotify` only, and nothing while developing Spotify. **Still open.**
+14. The widget host budget is 30 per minute per instance; "24" is Spotify-only code. Documentation point, **checked again.** Model-driven calls still have no per-minute budget.
+15. Staged builds are pruned only at activation. **Still open.**
+16. Stale config values stay in `config.json` and the status view; saved values are not re-validated. **Still open.** [T]
+17. Bundler error paths show an odd `../../../src/index.ts:1:` prefix in my probe; cause not determined. **Still open.** [T] [U]
 
 ## Not verified
 
 - The real Electron sandbox: global list, secure-context behaviour of `crypto`, storage APIs, the 10-second timer, crash handling, the test-window timeouts. Needs `npm run test:electron` (xvfb exists on this machine; the brief forbade running it).
+- The type-check worker was not run here; the pull request reports it in a dev build and in the packaged Linux worker only.
 - Behaviour with a real model, the OpenAI path of tool results, Windows/macOS, a live provider, and the packaged build.
 - Whether `readdirSync` order differs on the user's Windows file system (it is typically name-sorted on NTFS; not checked).
+- The suite counts other than the plugin tests, as noted in 8.3.
+
+## Remaining known gaps
+
+Shared list (at 7a23d19), then gaps specific to plugin authoring.
+
+1. Memory: Memory.md is edited by the user only. Nothing in Custard writes or corrects a stored UTC offset in it; a stale "UTC+2" there stays. The chat is told the time zone by name with its current offset and to trust that over a note's offset, and `docs/vault-tools.md` says Memory should record a zone name, not an offset. Accepted by design.
+2. Captures made before the `outside` field existed (or with it missing) count as outside text, so a chat shown one asks for approval on granted-folder edits until newer clean captures replace them. Fail-closed on purpose.
+3. Hostile text: the controls limit damage, they do not remove it. A hostile note or plugin result can still make an automation write something wrong (not a link or key) inside its allowed folders. Notes inside an allowed folder are trusted when read. Plugin results in chat are not fenced or escaped (4.2); only the outside-text approval and prompt prose protect the model.
+4. The Obsidian unsaved-changes race was accepted; no Obsidian plugin exists.
+5. Type check: type errors are reported but do not block review or activation, and plugins other than Spotify may now show some. Verified in a dev build and the packaged Linux worker; the full packaged-app UI path and Windows/macOS packaging of the TypeScript lib resource are unverified.
+6. `plugin_test`: a test stuck in a busy loop is named by its start, not its progress; the 30 s limit is one limit for the whole run. Results still carry no file names; `console` output in tests is discarded; the **Run tests** button has no filter.
+7. A time that happens twice (clocks go back) runs once, at its first pass. Runs happen only while Custard is open; the scheduler tick is 20 s with a 10 minute grace.
+8. A widget must handle `dataDropped` itself; the Spotify widget does not yet show that its view is out of date. A widget's input over its limit is still refused rather than reported.
+9. Chat is told the date, weekday and zone but not the time of day (deliberate).
+10. Skills: an automation names its skill by folder; one saved by frontmatter name still runs only if exactly one skill has that name.
+11. Docs and starter-vault errors not fixed in code: `docs/plugins/TESTING.md` says 23 Spotify tests (there are 114); the `remember` starter skill mentions a Remembered list and Activity.md that do not exist.
+12. Not verified anywhere: Windows, macOS, live providers, a running Obsidian, real OS clock changes, rename-over-open-file behaviour with antivirus or Obsidian holding the file.
+13. The Design media tools' result sizes were not audited for cut markers.
+14. Plugin results: the 50,000-character cut now has a marker but the tail is lost; an automation cuts at 12,000 escaped characters, possibly inside an entity; the per-model cap differs by model (4.1).
+15. Lint: no lint step in the tools, no shell in the Plugins workspace, and Spotify has 14 lint errors (1.3).
+16. The Bearer redaction false positive still rewrites ordinary text such as "Bearer authentication" and drops widget `data` that contains it (4.6).
+17. Review and updates: no warning on the review screen about sign-out after a scope change or about "Use in Chat and Design" turning off; `required` config is not enforced at call time; a changed file over 4,000,000 line-pairs is not shown (7.1, 7.3, 7.5, 7.6).
+18. Reference material: `reference_list` offers `examples/spotify` only (nothing while developing Spotify); there is no minimal example (8.1). Staged builds are pruned only at activation (1.1).
+19. Plugin `Not run:` / `Outcome unknown:` text is a convention the host does not read, so the repeat guard does not apply to it (4.4).

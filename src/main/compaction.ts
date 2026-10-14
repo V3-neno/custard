@@ -6,7 +6,7 @@ import type {
   ResponseCompactionItem,
   ResponseInputItem
 } from 'openai/resources/responses/responses'
-import type { Conversation } from '../shared/chat'
+import { providerOf, type Conversation, type Provider } from '../shared/chat'
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { isContextError, limitsFor } from './context'
@@ -75,18 +75,20 @@ export function recordClaudeCompaction(
   return true
 }
 
-// Records an OpenAI compaction item. It stands for everything sent before
-// it, so it is placed before the assistant message the same response adds.
+// Records a Responses API compaction item. It stands for everything sent
+// before it, so it is placed before the assistant message the same response
+// adds.
 export function recordOpenAICompaction(
   c: Conversation,
   item: ResponseCompactionItem,
   model: string,
+  provider: Provider,
   now = Date.now()
 ): void {
   ;(c.compactions ??= []).push({
     after: c.messages.length,
     at: now,
-    provider: 'openai',
+    provider,
     model,
     item: { id: item.id, encrypted_content: item.encrypted_content }
   })
@@ -103,7 +105,11 @@ export function openaiStart(
   const k = [...(c.compactions ?? [])]
     .reverse()
     .find(
-      (x) => x.provider === 'openai' && x.model === model && x.item && x.after <= c.messages.length
+      (x) =>
+        x.provider === providerOf(model) &&
+        x.model === model &&
+        x.item &&
+        x.after <= c.messages.length
     )
   return k?.item
     ? { item: { type: 'compaction', ...k.item }, from: k.after }
