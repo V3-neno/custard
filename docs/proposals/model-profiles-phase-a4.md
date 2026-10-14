@@ -34,7 +34,7 @@ What the repository showed on 2026-10-14: `main` is still a2c934b. A1 (#52), A2 
 - **Docs.** New `docs/models-file.md` (format, fields, checks, failures). `providers.md` and `adding-a-provider.md` point to it.
 - **Tests.**
   - New `src/main/modelsFile.test.ts`, 17 tests.
-  - New e2e suite `test/e2e/models-file.mjs`, 26 checks.
+  - New e2e suite `test/e2e/models-file.mjs`, 27 checks.
   - One A3 test was changed: `chat.test` had expected the old silent move to the default model, and now expects the chat to keep its model.
 
 ## The file format
@@ -167,13 +167,13 @@ So only the user, outside Custard, writes models.json. This is checked by readin
 | | Base (A3, measured on 6862b3f) | A4 |
 | --- | --- | --- |
 | Unit | 1,245 pass | **1,262 pass** (+17 in `modelsFile.test.ts`; 79 files) |
-| e2e | 46 suites, 1,449 checks, 0 fail | E2E_RESULT |
+| e2e | 46 suites, 1,449 checks, 0 fail | **47 suites, 1,476 checks, 0 fail**: every old suite has the same count as on the base, plus `models-file` with 27 |
 | Typecheck, eslint | clean | clean |
 | Prettier (`src`, `test/e2e`) | 5 golden JSON files flagged | the same 5, unchanged; nothing new |
 
-**Goldens.** GOLDENS_RESULT
+**Goldens.** No golden file changed (`git diff model-profiles-a3` on `*.golden.json` and `src/main/__golden__` is empty), and every suite that compares against them passed: Claude Opus, Sonnet and Haiku turns (48 golden checks each, 61 checks per suite), Responses (64 of 98), requests (5 of 21) and the four A2 unit goldens.
 
-**With no models.json, is it identical to A3?** NO_FILE_RESULT
+**With no models.json, is it identical to A3?** Yes, as far as the tests show. No old suite writes a models.json, so all 46 ran with no file and kept their counts, and the goldens are unchanged. In the code, with no file the registry gets no extra profiles; no built-in has `origin`, so capabilities are unchanged; and every built-in is priced, so the `priceOf` change gives the same prices. Nothing else had to differ.
 
 ## Surprises
 
