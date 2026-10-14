@@ -460,6 +460,41 @@ try {
     `with all of it (${after.body.messages.length} messages)`
   )
 
+  step('The Automations model list follows the same rules')
+  await w.click('button[title=Settings]')
+  await w.click('button:text-is("New automation")')
+  const autoModels = await w
+    .locator('select[aria-label="Model for the automation"] optgroup')
+    .evaluateAll((gs) =>
+      gs.map((g) => [
+        g.label,
+        [...g.querySelectorAll('option')].map((o) => [o.value, o.disabled, o.textContent])
+      ])
+    )
+  check(
+    JSON.stringify(autoModels.map(([g]) => g)) === '["Claude","OpenAI","DeepSeek"]',
+    `grouped by provider (${autoModels.map(([g]) => g)})`
+  )
+  const openaiAuto = autoModels.find(([g]) => g === 'OpenAI')[1]
+  check(
+    openaiAuto.length === 3 && openaiAuto.every(([, d, t]) => d && /No OpenAI key/.test(t)),
+    `OpenAI's models can't be picked, with the reason (${openaiAuto.map(([, , t]) => t)})`
+  )
+  check(
+    autoModels.filter(([g]) => g !== 'OpenAI').every(([, os]) => os.every(([, d]) => !d)),
+    "Claude's and DeepSeek's can"
+  )
+  check(
+    (await w.inputValue('select[aria-label="Model for the automation"]')) === 'claude-opus-5-5',
+    'a new automation starts on the first usable model'
+  )
+  await w.locator('[data-default-model]').scrollIntoViewIfNeeded()
+  await w.locator('select[aria-label="Model for the automation"]').screenshot({
+    path: `${SHOTS}/picker-07-automation-models.png`
+  })
+  await w.click('button:text-is("Cancel")')
+  await w.click('button:text-is("Done")')
+
   step('No keys at all: it points to Settings')
   await w.evaluate(async () => {
     for (const p of ['claude', 'deepseek']) await window.custard.apiKey.clear(p)
