@@ -4,7 +4,7 @@ Investigation only. No app code changed. This file is the only file added.
 
 ## Base branch
 
-**`automation-thinking-p3` (draft PR #58, head `cb8fd15`).** I branched `dropdown-redesign` from it, and the draft PR for this review goes into it.
+**`automation-thinking-p3` (draft PR #58, head `cb8fd15`).** I branched `dropdown-redesign-8lcr5u` from it, and the draft PR for this review goes into it.
 
 Why: it is the tip of the only live stack. I checked on 2026-10-14 at about 14:45 UTC:
 
@@ -125,7 +125,7 @@ By group, with the controls it applies to.
 | C. One custom React Select | button + `listbox` popover | large: arrows, Home/End, type-ahead, Escape, focus return, scrolling, clipping inside the Settings dialog's scroll box, screen reader checks, and every e2e `selectOption` call rewritten | everything we hand-write; about 33 e2e call sites in 16 suites |
 | D. Pills for short lists | one `PillGroup` for 2 to 5 short fixed choices | small | e2e that drive those selects must click instead |
 
-Custard ships only in Electron, so Chromium is known. Electron 39.8.10 bundles **Chromium 142.0.7444.265** (checked with `process.versions.chrome`). `appearance: base-select` shipped in Chrome 135, so B is available. I did not render it in this phase.
+Custard ships only in Electron, so Chromium is known. Electron 39.8.10 bundles **Chromium 142.0.7444.265** (checked with `process.versions.chrome`). `appearance: base-select` shipped in Chrome 135, so B is available. I checked it in a throwaway probe outside the repo (a bare Electron window from this repo's `node_modules`, Linux under xvfb, not the Custard app): `CSS.supports('appearance', 'base-select')` is true, Space opens it, and the open list renders in the page with forge colours, a styled picked row, provider group labels and a disabled row. Screenshot: `custard/ui/d1-base-select-probe.png` (the "Â·" in it is the probe page's missing charset, not a Chromium bug; the white ring is Chromium's default option focus, which we would style).
 
 **Recommendation: B + D.** One `Select` that is still a native `<select>`, styled with `base-select` to match the forge (panel, rows, picked row, focus ring), plus one `PillGroup` for short fixed lists. B keeps native keyboard behaviour, type-ahead, form semantics, screen reader roles, and Playwright's `selectOption`, so most e2e suites don't change. Its picker renders in the top layer, so the Settings dialog's scroll box won't clip it (a custom C would need a portal). If the pilot shows B misbehaving on Windows, fall back to C for `Select` only.
 
@@ -229,7 +229,7 @@ Each phase is one draft PR, behaviour-preserving, with e2e updates, and a stop f
 
 Risks:
 
-- `base-select` is new; it has not been rendered in this repo. Windows and macOS behaviour need your eyes.
+- `base-select` is new. I rendered it only in the Linux probe above, not inside Custard. Windows and macOS behaviour need your eyes.
 - React and rich `<option>` content: not checked. Start with text-only options.
 - `color-scheme: dark` also changes number spinners and any remaining native widget; intended, but visible.
 - Fixing `ash-200` changes text colour in 12 places slightly.
@@ -254,15 +254,15 @@ Container set up with `npm ci --ignore-scripts` then `node node_modules/electron
 | Typecheck (`npm run typecheck`) | clean |
 | ESLint `src` and `test` | clean (0 problems) |
 | ESLint whole repo | 545 problems (14 errors, 531 warnings), all in `plugin/spotify` (known, out of scope) |
-| e2e | E2E_RESULT |
+| e2e (one suite at a time, counting ✓/✕ lines) | 48 suites, 1,528 checks: 1,527 passed, 1 failed (see below) |
 
-E2E_DETAIL
+The one failure was in `media-sizes`: "the app window never stalled for a second" (1,082 ms against a 1,000 ms limit). That is a timing check. Rerun alone, it failed again (1,648 ms); a third run alone passed 41/41, with the slowest case at 590 ms. Nothing else was running during those runs. I read it as this container being slow at times, not a product fault, but it is not proven. The 1,528 total matches the Phase 3 review's count for this commit. No golden file changed.
 
 ## 10. Not verified
 
 - Windows and macOS: how native selects and their open lists look, and whether `base-select` renders and behaves the same there.
-- `base-select` itself in Custard: only the Chromium version was checked.
+- `base-select` inside Custard (with Tailwind, the provider tints and the Settings dialog): only the bare Linux probe was run.
 - A screen reader (NVDA, VoiceOver) and Windows high-contrast mode.
 - The packaged build.
-- New screenshots: I took none. The descriptions of the automation form and the model picker come from the earlier shots `custard/automations/phase-3-shots/effort-01-new-opus.png` and `custard/providers/phase-6/picker-01-claude-tab.png` (the latter predates the effort row moving into the panel), plus the code.
+- Screenshots of the current controls: I took none. The only new screenshot is the base-select probe. The descriptions of the automation form and the model picker come from the earlier shots `custard/automations/phase-3-shots/effort-01-new-opus.png` and `custard/providers/phase-6/picker-01-claude-tab.png` (the latter predates the effort row moving into the panel), plus the code.
 - Contrast ratios were not measured.
