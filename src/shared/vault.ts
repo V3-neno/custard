@@ -1,6 +1,43 @@
 export const MEMORY_NOTE = 'Custard/Memory.md'
 
+// One line of the activity list for Claude's changes to notes.
+export type VaultEditEntry = {
+  id: string
+  time: number
+  kind: 'create' | 'append' | 'edit'
+  path: string
+  // Who made it: a chat, or an automation.
+  source: string
+  change?: { removed: string; added: string; truncated: boolean }
+  undoable: boolean
+  undone: boolean
+}
+
 export type VaultInfo = { path: string; isObsidian: boolean; skills: string[] } | null
+
+// One skill on the Skills hub: a folder under Custard/Skills.
+export type SkillEntry = {
+  // The folder's name; automations and the hub refer to a skill by it.
+  folder: string
+  // The frontmatter's name, or the folder's when there is none.
+  name: string
+  description: string
+  // Mode ids it is listed in; empty means every mode. Plugins mode is `code`.
+  modes: string[]
+  // Vault path of its SKILL.md.
+  path: string
+  // Other files in the folder, vault paths, first ones only.
+  files: string[]
+  moreFiles: number
+  // A folder of the same name ships in the starter vault.
+  starter: boolean
+  updatedAt: number | null
+  // Why chats can't use it (no SKILL.md, or no description), when they can't.
+  problem?: string
+}
+
+// A skill's SKILL.md as the hub shows it.
+export type SkillText = { path: string; text: string; truncated: boolean }
 
 // A short human-readable line for a tool call, used in the chat UI.
 export function toolLabel(name: string, input: unknown, labels?: Record<string, string>): string {
@@ -17,6 +54,24 @@ export function toolLabel(name: string, input: unknown, labels?: Record<string, 
       return `Created ${str(i.path)}`
     case 'vault_append':
       return str(i.path) === MEMORY_NOTE ? 'Saved to memory' : `Added to ${str(i.path)}`
+    case 'vault_edit':
+      return `Edited ${str(i.path)}`
+    case 'chats_search':
+      return str(i.query).trim()
+        ? `Searched earlier chats for "${str(i.query)}"`
+        : 'Listed earlier chats'
+    case 'chats_read':
+      return "Read an earlier chat's summary"
+    case 'workspace_propose':
+      return i.action === 'create'
+        ? `Offered to create ${str(i.name)}`
+        : i.skill
+          ? `Offered to open the ${str(i.skill)} skill workspace`
+          : `Offered to open the ${str(i.plugin)} workspace`
+    case 'automation_question':
+      return i.action === 'dismiss'
+        ? 'Dropped a question from an automation'
+        : 'Answered a question from an automation'
     case 'fs_list':
       return `Looked in ${str(i.path) || 'the workspace'}`
     case 'fs_read':

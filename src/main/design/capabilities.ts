@@ -24,7 +24,9 @@ const CHAT_IMAGE_OUTPUT: Record<Provider, { ok: false; reason: string }> = {
   claude: { ok: false, reason: "Claude's API answers in text and can't return images." },
   // What the model could do elsewhere doesn't matter: Custard's OpenAI chat
   // connection only handles text output.
-  openai: { ok: false, reason: "Custard's OpenAI chat connection handles text output only." }
+  openai: { ok: false, reason: "Custard's OpenAI chat connection handles text output only." },
+  // DeepSeek's Responses API returns text, reasoning and function calls.
+  deepseek: { ok: false, reason: "DeepSeek's API answers in text and can't return images." }
 }
 
 export type Failure = {

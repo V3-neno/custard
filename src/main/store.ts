@@ -17,11 +17,15 @@ import {
   type ChatSettings,
   type Conversation,
   type ConversationSummary,
-  type Mode
+  type Mode,
+  type UsageMonth
 } from '../shared/chat'
+import { charger, normalizeBudget, UsageLedger, type Charge } from './usage'
 import type { SecurityDefaults } from '../shared/plugins'
 import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import { defaultMemorySettings, type MemorySettings } from '../shared/memory'
+import { normalizeGrants, type VaultGrant } from '../shared/vaultGrants'
+import { normalizeAutomations, type Automation } from '../shared/automations'
 
 // Conversations are plain JSON files in the app's data folder, one per chat.
 const dir = (): string => {
@@ -35,20 +39,32 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // Conversations saved before modes existed belong to Chat.
 const withMode = (c: Conversation): Conversation => ({ ...c, mode: c.mode ?? 'chat' })
 
-export function listConversations(mode: Mode): ConversationSummary[] {
+// Every mode's when `mode` is null.
+export function listConversations(mode: Mode | null): ConversationSummary[] {
   return readdirSync(dir())
     .filter((f) => f.endsWith('.json'))
     .flatMap((f) => {
       try {
         const c = withMode(JSON.parse(readFileSync(join(dir(), f), 'utf8')))
-        return c.mode === mode
+        return mode === null || c.mode === mode
           ? [
               {
                 id: c.id,
                 mode: c.mode,
                 title: c.title,
                 updatedAt: c.updatedAt,
-                ...(c.memory?.temporary ? { temporary: true } : {})
+                ...(c.memory?.temporary ? { temporary: true } : {}),
+                ...(c.workspace?.kind === 'internal' ? { pluginId: c.workspace.pluginId } : {}),
+                ...(c.skill ? { skill: c.skill } : {}),
+                // Where the chat stands, from its note in Custard/Chats.
+                ...(c.chatNote && (c.chatNote.status === 'saved' || c.chatNote.status === 'edited')
+                  ? {
+                      ...(c.chatNote.state ? { summary: c.chatNote.state } : {}),
+                      ...(c.chatNote.title ? { noteTitle: c.chatNote.title } : {}),
+                      ...(c.chatNote.goal ? { goal: c.chatNote.goal } : {}),
+                      ...(c.chatNote.tags?.length ? { tags: c.chatNote.tags } : {})
+                    }
+                  : {})
               }
             ]
           : []
@@ -146,6 +162,10 @@ type Config = {
   vaultPath: string | null
   security: SecurityDefaults
   memory: MemorySettings
+  vaultGrants: VaultGrant[]
+  automations: Automation[]
+  // Monthly spending budget in dollars, or null for none.
+  budget: number | null
 }
 
 const defaultSecurity: SecurityDefaults = { askBeforeWriteTools: true }
@@ -161,7 +181,10 @@ function readConfig(): Config {
     design: normalizeDesignSettings(raw.design),
     vaultPath: raw.vaultPath ?? null,
     security: { ...defaultSecurity, ...raw.security },
-    memory: { ...defaultMemorySettings, ...raw.memory }
+    memory: { ...defaultMemorySettings, ...raw.memory },
+    vaultGrants: normalizeGrants(raw.vaultGrants).grants,
+    automations: normalizeAutomations(raw.automations),
+    budget: normalizeBudget(raw.budget)
   }
 }
 
@@ -170,6 +193,21 @@ function writeConfig(patch: Partial<Config>): void {
   const raw = readSettingsFile(settingsFile())
   writeSettingsFile(settingsFile(), { ...raw, ...readConfig(), ...patch })
 }
+
+export const getBudget = (): number | null => readConfig().budget
+export const setBudget = (budget: unknown): number | null => {
+  const b = normalizeBudget(budget)
+  writeConfig({ budget: b })
+  return b
+}
+
+// What model calls used and cost (see usage.ts).
+let ledger: UsageLedger | null = null
+export const usageLedger = (): UsageLedger =>
+  (ledger ??= new UsageLedger(join(app.getPath('userData'), 'usage.json')))
+export const charge: Charge = (chat, model, u) =>
+  charger(usageLedger(), updateConversation)(chat, model, u)
+export const usageThisMonth = (): UsageMonth => usageLedger().thisMonth(getBudget())
 
 export const getDesignSettings = (): DesignSettings => readConfig().design
 export const setDesignSettings = (design: unknown): void =>
@@ -182,3 +220,22 @@ export const getSecurityDefaults = (): SecurityDefaults => readConfig().security
 export const setSecurityDefaults = (security: SecurityDefaults): void => writeConfig({ security })
 export const getMemorySettings = (): MemorySettings => readConfig().memory
 export const setMemorySettings = (memory: MemorySettings): void => writeConfig({ memory })
+
+// Folders the user lets Claude change without asking about each edit.
+export const getVaultGrants = (): VaultGrant[] => readConfig().vaultGrants
+export const setVaultGrants = (grants: unknown): VaultGrant[] => {
+  const vaultGrants = normalizeGrants(grants).grants
+  writeConfig({ vaultGrants })
+  return vaultGrants
+}
+
+// Where the record of Claude's changes to notes is kept: app data, not the vault.
+export const vaultEditsDir = (): string => join(app.getPath('userData'), 'vault-edits')
+
+// Automations the user created in Settings, and where their run records go.
+export const getAutomations = (): Automation[] => readConfig().automations
+export const setAutomations = (automations: Automation[]): void =>
+  writeConfig({ automations: normalizeAutomations(automations) })
+export const automationRunsDir = (): string => join(app.getPath('userData'), 'automation-runs')
+export const automationQuestionsFile = (): string =>
+  join(app.getPath('userData'), 'automation-questions.json')

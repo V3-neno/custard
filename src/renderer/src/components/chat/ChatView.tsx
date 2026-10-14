@@ -1,9 +1,13 @@
+import { clearPluginWorkspace, peekPluginWorkspace } from './workspaceEntry'
+import { chatHasOutsideText } from '../../../../shared/outsideText'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import {
+  chatSettingsOf,
   modes,
   providerNames,
   providerOf,
+  type ModelAvailability,
   type ActionRecord,
   type ChatLink,
   type WebSource,
@@ -16,7 +20,9 @@ import HistoryDrawer from '../HistoryDrawer'
 import ModeBubbles from '../ModeBubbles'
 import Orb, { type OrbState } from '../Orb'
 import Composer from './Composer'
+import ModelNotice from './ModelNotice'
 import MessageView, { NoticeLine, SourcesList, UserBubble } from './MessageView'
+import { SentReferences } from './References'
 import { SentFiles } from './Attachments'
 import {
   acceptsAttachments,
@@ -24,8 +30,16 @@ import {
   type DraftAttachment
 } from '../../../../shared/attachments'
 import Working, { type Approval, type Segment } from './Working'
-import WorkspaceBar from './WorkspaceBar'
+import PathBar, { type Crumb } from './PathBar'
+import ProposalCard from './ProposalCard'
+import SkillsHub from '../hubs/SkillsHub'
+import PluginsHub from '../hubs/PluginsHub'
+import PluginWorkspace from '../hubs/PluginWorkspace'
+import SkillWorkspace from '../hubs/SkillWorkspace'
 import WidgetSlot from './WidgetSlot'
+import UsageMeter from './UsageMeter'
+import { formatCost } from '../../../../shared/pricing'
+import type { UsageMonth } from '../../../../shared/chat'
 import { cleanError } from '../settings/ui'
 import {
   CompactionLine,
@@ -45,6 +59,8 @@ type Live = {
   segments: Segment[]
   approvals: Approval[]
 }
+
+const folderName = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?? p
 
 const isToolResults = (m: BetaMessageParam | undefined): boolean =>
   !!m && typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
@@ -67,8 +83,8 @@ function upsertTool(segments: Segment[], tool: Extract<Segment, { kind: 'tool' }
 const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState }> = {
   chat: { headline: "What's on your mind?", placeholder: 'Message {provider}…', orb: 'breathing' },
   code: {
-    headline: 'What are we building?',
-    placeholder: 'Describe the code you need…',
+    headline: 'Which plugin are we building?',
+    placeholder: 'Brainstorm, or ask to open or create a plugin…',
     orb: 'connecting'
   },
   design: {
@@ -78,7 +94,7 @@ const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState 
   },
   skills: {
     headline: 'What should Custard learn?',
-    placeholder: 'Teach a skill, or ask to tidy up your vault…',
+    placeholder: 'Brainstorm, or ask to open or create a skill…',
     orb: 'weaving'
   }
 }
@@ -86,9 +102,12 @@ const copy: Record<Mode, { headline: string; placeholder: string; orb: OrbState 
 type Props = {
   mode: Mode
   onModeChange: (mode: Mode) => void
-  hasKey: boolean
+  // The default model (Settings → General): new chats start on it.
   settings: ChatSettings
-  onSettings: (s: ChatSettings) => void
+  // The model of the chat on screen (or the next new one), for the colours.
+  onShownModel: (model: ChatSettings['model']) => void
+  // Bumped when keys or their checks may have changed (Settings closed).
+  statusTick: number
   onOpenSettings: () => void
   historyOpen: boolean
   onCloseHistory: () => void
@@ -96,10 +115,22 @@ type Props = {
   temporary: boolean
   onTemporary: (temporary: boolean) => void
   newChat: number
+  // Clicking the shown mode again: back to its start page (Plugins: the hub).
+  home: number
   onBusy: (busy: boolean) => void
+  onOutsideText: (outside: boolean) => void
 }
 
 const unsent = new Map<Mode, { text: string; draftId: string; files: DraftAttachment[] }>()
+// The chat open in each mode, so leaving a mode (say, to manage a plugin in
+// Plugins mode) and coming back returns to it.
+const openChats = new Map<Mode, string>()
+// Plugins mode: the workspace entered (null: the hub), kept across modes.
+let openWorkspace: Workspace | null = null
+// Skills mode: the skill folder entered (null: the hub), kept across modes.
+let openSkill: string | null = null
+// History's mode filter (null: every mode), kept across modes.
+let historyFilter: Mode | null = null
 
 const NARROW = 900
 const PANE_MIN = 320
@@ -135,20 +166,87 @@ function SideSwitch({
 }
 
 function ChatView(props: Props): React.JSX.Element {
-  const { mode, onModeChange, hasKey, settings, onSettings, onOpenSettings } = props
-  const { historyOpen, onCloseHistory, temporary, onTemporary, newChat, onBusy } = props
+  const { mode, onModeChange, settings, onShownModel, statusTick, onOpenSettings } = props
+  const { historyOpen, onCloseHistory, temporary, onTemporary, newChat, home, onBusy } = props
+  const { onOutsideText } = props
   const [list, setList] = useState<ConversationSummary[]>([])
+  const [filter, setFilter] = useState<Mode | null>(historyFilter)
   const [current, setCurrent] = useState<Conversation | null>(null)
+  // A model picked here: for the next new chat (chat null), or for the open
+  // chat, whose next message uses it. Picking never asks a provider.
+  const [picked, setPicked] = useState<{ chat: string | null; s: ChatSettings } | null>(null)
+  const chatSettings: ChatSettings =
+    picked && picked.chat === (current?.id ?? null)
+      ? picked.s
+      : current
+        ? chatSettingsOf(current, settings)
+        : settings
+  useEffect(() => onShownModel(chatSettings.model), [chatSettings.model, onShownModel])
+  // Which models can be used now, from the saved keys and the last check;
+  // read when the view opens, when the chat changes and after Settings.
+  const [availability, setAvailability] = useState<ModelAvailability[] | null>(null)
+  const availabilityChat = current?.id ?? null
+  useEffect(() => {
+    let gone = false
+    window.custard.models
+      .availability()
+      .then((a) => !gone && setAvailability(a))
+      .catch(() => {})
+    return () => {
+      gone = true
+    }
+  }, [statusTick, availabilityChat])
+  const [pickerSignal, setPickerSignal] = useState(0)
+  const pickModel = (s: ChatSettings): void => {
+    const chat = current?.id ?? null
+    setPicked({ chat, s })
+    // Saved on the chat now, so reopening it keeps the pick; while it is
+    // answering, the next message saves it instead.
+    if (chat && !live)
+      window.custard.conversations
+        .setModel(chat, s)
+        .then((c) =>
+          setCurrent((x) => (x && x.id === c.id ? { ...x, model: c.model, effort: c.effort } : x))
+        )
+        .catch((e) => setError(cleanError(e)))
+  }
+  // Start building (Settings → Capabilities): a new chat in that plugin's
+  // workspace instead of the chat that was open here.
+  const [entered] = useState(() => (mode === 'code' ? peekPluginWorkspace() : null))
+  useEffect(() => {
+    if (entered) clearPluginWorkspace(entered)
+  }, [entered])
+  const restoring = useRef(!entered && openChats.has(mode))
+  useEffect(() => {
+    const id = entered ? undefined : openChats.get(mode)
+    if (!id) return
+    window.custard.conversations
+      .get(id)
+      .then((c) => {
+        restoring.current = false
+        if (c) setCurrent(c)
+        else openChats.delete(mode)
+      })
+      .catch(() => {
+        restoring.current = false
+        openChats.delete(mode)
+      })
+  }, [mode, entered])
+  useEffect(() => {
+    if (restoring.current) return
+    if (current) openChats.set(mode, current.id)
+    else openChats.delete(mode)
+  }, [mode, current])
   const [live, setLive] = useState<Live | null>(null)
   const [error, setError] = useState<string | null>(null)
   // The unsent message (and its files) of each mode, kept when switching
   // mode, which mounts a new view.
   const saved = unsent.get(mode)
-  const [draft, setDraft] = useState(saved?.text ?? '')
+  const [draft, setDraft] = useState(entered?.request ?? saved?.text ?? '')
   // Chat mode: files for the next message. They live in a draft folder in
   // app data until sent (see main/attachments).
   const [draftId, setDraftId] = useState<string>(() => saved?.draftId ?? crypto.randomUUID())
-  const [files, setFiles] = useState<DraftAttachment[]>(saved?.files ?? [])
+  const [files, setFiles] = useState<DraftAttachment[]>(entered ? [] : (saved?.files ?? []))
   useEffect(() => {
     unsent.set(mode, { text: draft, draftId, files })
   }, [mode, draft, draftId, files])
@@ -159,8 +257,52 @@ function ChatView(props: Props): React.JSX.Element {
   // Both belong to the chat they were made for.
   const [handoffFor, setHandoffFor] = useState<{ id: string; state: HandoffState } | null>(null)
   const [linksFor, setLinksFor] = useState<{ id: string; links: ChatLink[] } | null>(null)
-  // Code mode: the workspace for the next new conversation.
-  const [workspace, setWorkspace] = useState<Workspace | null>(null)
+  // Plugins mode: the workspace entered, where new chats start (null: the
+  // hub). An open chat's own workspace decides it, so going back from a chat
+  // lands in its workspace.
+  const [workspace, setWorkspace] = useState<Workspace | null>(() =>
+    entered
+      ? { kind: 'internal', pluginId: entered.pluginId }
+      : mode === 'code'
+        ? openWorkspace
+        : null
+  )
+  useEffect(() => {
+    if (mode === 'code') openWorkspace = workspace
+  }, [mode, workspace])
+  const [seenChat, setSeenChat] = useState<string | null>(null)
+  if (mode === 'code' && current && current.id !== seenChat) {
+    setSeenChat(current.id)
+    const w = current.workspace
+    setWorkspace(w?.kind === 'internal' ? { kind: 'internal', pluginId: w.pluginId } : null)
+  }
+  // Skills mode: the skill entered, the same way.
+  const [skill, setSkill] = useState<string | null>(() => (mode === 'skills' ? openSkill : null))
+  useEffect(() => {
+    if (mode === 'skills') openSkill = skill
+  }, [mode, skill])
+  if (mode === 'skills' && current && current.id !== seenChat) {
+    setSeenChat(current.id)
+    setSkill(current.skill ?? null)
+  }
+  // Plugin names, for the path bar and History.
+  const [pluginNames, setPluginNames] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (mode !== 'code' && !historyOpen) return
+    window.custard.plugins
+      .list()
+      .then((l) => setPluginNames(Object.fromEntries(l.map((p) => [p.id, p.name]))))
+      .catch(() => {})
+  }, [mode, historyOpen, workspace])
+  // Skill names by folder, likewise.
+  const [skillNames, setSkillNames] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (mode !== 'skills' && !historyOpen) return
+    window.custard.skills
+      .list()
+      .then((l) => setSkillNames(Object.fromEntries((l ?? []).map((s) => [s.folder, s.name]))))
+      .catch(() => {})
+  }, [mode, historyOpen, skill])
   const bottom = useRef<HTMLDivElement>(null)
   // The request in flight, read by the event listener without re-subscribing.
   const pending = useRef<{
@@ -168,16 +310,34 @@ function ChatView(props: Props): React.JSX.Element {
     userText: string
     files: DraftAttachment[]
     draft: string
+    refs: ChatLink[]
   } | null>(null)
+  // Earlier chats picked for the next message.
+  const [refs, setRefs] = useState<ChatLink[]>([])
 
   const refreshList = useCallback(
-    () => window.custard.conversations.list(mode).then(setList),
-    [mode]
+    () => window.custard.conversations.list(filter).then(setList),
+    [filter]
   )
 
+  // Also on opening History: chat notes finish after a turn, with the
+  // summary each row shows.
   useEffect(() => {
     refreshList()
-  }, [refreshList])
+  }, [refreshList, historyOpen])
+
+  // This month's estimated spend, for the budget line. Read again after
+  // each turn.
+  const [month, setMonth] = useState<UsageMonth | null>(null)
+  const refreshMonth = useCallback(
+    () =>
+      void window.custard.usage
+        .month()
+        .then(setMonth)
+        .catch(() => {}),
+    []
+  )
+  useEffect(() => refreshMonth(), [refreshMonth])
 
   useEffect(
     () =>
@@ -239,11 +399,13 @@ function ChatView(props: Props): React.JSX.Element {
             pending.current = null
             setCurrent(e.conversation)
             setLive(null)
+            refreshMonth()
             // When the turn was kept, what happened is in the chat with a
             // notice, and the message isn't put back to be sent twice.
             if (e.type === 'error' && !e.kept) {
               setError(e.message)
               setDraft(p.userText)
+              setRefs(p.refs)
               // The files went back to their draft; show them again.
               if (p.files.length) {
                 setDraftId(p.draft)
@@ -255,7 +417,7 @@ function ChatView(props: Props): React.JSX.Element {
             break
         }
       }),
-    [refreshList]
+    [refreshList, refreshMonth]
   )
 
   // Memory capture finishes after the turn; its status comes separately.
@@ -274,6 +436,8 @@ function ChatView(props: Props): React.JSX.Element {
   }
 
   useEffect(() => onBusy(!!live), [live, onBusy])
+  const outsideText = chatHasOutsideText(current)
+  useEffect(() => onOutsideText(outsideText), [outsideText, onOutsideText])
 
   // The header's Temporary switch: a chat that has started gives way to a
   // new one of the chosen kind.
@@ -281,8 +445,15 @@ function ChatView(props: Props): React.JSX.Element {
   useEffect(() => {
     if (newChat === firstNewChat.current) return
     setCurrent(null)
+    setPicked(null)
     setError(null)
   }, [newChat])
+  const firstHome = useRef(home)
+  useEffect(() => {
+    if (home === firstHome.current) return
+    setWorkspace(null)
+    setSkill(null)
+  }, [home])
 
   // An opened chat decides the switch; a new one keeps what was chosen.
   const currentTemporary = current ? !!current.memory?.temporary : null
@@ -372,7 +543,8 @@ function ChatView(props: Props): React.JSX.Element {
     setDraft('')
     setFiles([])
     setFileErrors([])
-    pending.current = { requestId, userText: text, files: sending, draft: draftId }
+    pending.current = { requestId, userText: text, files: sending, draft: draftId, refs }
+    setRefs([])
     // The next message gets a new draft; this one is consumed by the send.
     if (sending.length) setDraftId(crypto.randomUUID())
     setLive({ requestId, userText: text, files: sending.length, segments: [], approvals: [] })
@@ -382,9 +554,11 @@ function ChatView(props: Props): React.JSX.Element {
       conversationId: current?.id ?? null,
       mode,
       text,
-      settings,
+      settings: chatSettings,
       ...(mode === 'code' && !current && workspace ? { workspace } : {}),
-      ...(!current && temporary ? { temporary: true } : {})
+      ...(mode === 'skills' && !current && skill ? { skill } : {}),
+      ...(!current && temporary ? { temporary: true } : {}),
+      ...(refs.length ? { references: refs.map((r) => r.id) } : {})
     })
   }
 
@@ -393,13 +567,27 @@ function ChatView(props: Props): React.JSX.Element {
     setError(null)
     setOverflow(false)
     setCurrent(await window.custard.conversations.get(id))
+    setPicked(null)
     onCloseHistory()
+  }
+
+  // A chat from another mode opens in that mode.
+  const openIn = (id: string, other: Mode | undefined): void => {
+    if (!other || other === mode) {
+      void open(id)
+      return
+    }
+    if (live) return
+    openChats.set(other, id)
+    onCloseHistory()
+    onModeChange(other)
   }
 
   const startNew = (): void => {
     if (live) return
     onTemporary(false)
     setCurrent(null)
+    setPicked(null)
     setError(null)
     setOverflow(false)
     onCloseHistory()
@@ -456,6 +644,39 @@ function ChatView(props: Props): React.JSX.Element {
     })
     return out
   }, [current])
+
+  // Hub chat offers to enter a workspace, shown where their turn ends.
+  const turnProposals = useMemo(() => {
+    const out = new Map<number, NonNullable<Conversation['proposals']>>()
+    const msgs = current?.messages ?? []
+    const all = current?.proposals ?? []
+    if (!all.length) return out
+    let start = -1
+    msgs.forEach((m, i) => {
+      if (m.role === 'user' && !isToolResults(m)) start = i
+      const next = msgs[i + 1]
+      const ends = !next || (next.role === 'user' && !isToolResults(next))
+      if (!ends || start < 0) return
+      const here = all.filter((p) => p.turn === start)
+      if (here.length) out.set(i, here)
+    })
+    return out
+  }, [current])
+  const [proposalError, setProposalError] = useState<{ id: string; error: string } | null>(null)
+  const answerProposal = async (id: string, yes: boolean): Promise<void> => {
+    if (!current || live) return
+    setProposalError(null)
+    const r = await window.custard.chat.proposal(current.id, id, yes)
+    if (!r.ok) return setProposalError({ id, error: r.error })
+    if (!r.enter) return setCurrent(r.conversation)
+    // A new chat in the workspace, with the request to check and send.
+    setCurrent(null)
+    setError(null)
+    if (r.enter.skill) setSkill(r.enter.skill)
+    else if (r.enter.pluginId) setWorkspace({ kind: 'internal', pluginId: r.enter.pluginId })
+    fillBox(r.enter.request)
+    refreshList()
+  }
 
   const notices = current?.notices ?? []
   const lastNotice = notices[notices.length - 1]
@@ -518,17 +739,128 @@ function ChatView(props: Props): React.JSX.Element {
       return next
     })
   }
+  // Puts a request from a hub in the message box, cursor at its end.
+  const fillBox = (text: string): void => {
+    setDraft(text)
+    setTimeout(() => {
+      const box = document.querySelector<HTMLTextAreaElement>('textarea')
+      box?.focus()
+      box?.setSelectionRange(text.length, text.length)
+    })
+  }
+  const shownProvider = providerOf(chatSettings.model)
+  const providerName = providerNames[shownProvider]
+  const shownStatus = availability?.find((a) => a.id === chatSettings.model)
+  // Nothing can go to a model that can't be used now.
+  const unavailable = shownStatus?.available === false ? shownStatus : null
+  const noKeys = !!availability?.length && availability.every((a) => a.reason === 'no-key')
+  const providerOut =
+    !!availability &&
+    availability.filter((a) => providerOf(a.id) === shownProvider).every((a) => !a.available)
+  // Plugins mode's path: the hub, then the workspace, then the chat.
+  const toHub = (): void => {
+    if (live) return
+    setCurrent(null)
+    setError(null)
+    setWorkspace(null)
+    setSkill(null)
+  }
+  const toWorkspace = (): void => {
+    if (live) return
+    const w = current?.workspace
+    if (w?.kind === 'internal') setWorkspace({ kind: 'internal', pluginId: w.pluginId })
+    if (current?.skill) setSkill(current.skill)
+    setCurrent(null)
+    setError(null)
+  }
+  const chatTitle = live && !current ? live.userText : (current?.chatNote?.title ?? current?.title)
+  const crumbs: Crumb[] | null = (() => {
+    if (mode === 'skills') {
+      if (empty && !skill) return null
+      const out: Crumb[] = [
+        { label: 'All skills', onClick: toHub, title: 'Back to the Skills hub' }
+      ]
+      const s = current ? current.skill : skill
+      if (s)
+        out.push({ label: skillNames[s] ?? s, title: `Custard/Skills/${s}`, onClick: toWorkspace })
+      else out.push({ label: 'Hub chat (brainstorm only)' })
+      if (chatTitle) out.push({ label: chatTitle })
+      return out
+    }
+    if (mode !== 'code' || (empty && !workspace)) return null
+    const out: Crumb[] = [
+      { label: 'All plugins', onClick: toHub, title: 'Back to the Plugins hub' }
+    ]
+    const w = current ? current.workspace : workspace
+    if (w?.kind === 'internal')
+      out.push({
+        label: pluginNames[w.pluginId] ?? w.pluginId,
+        title: `plugin/${w.pluginId}`,
+        onClick: toWorkspace
+      })
+    else if (w) out.push({ label: `General Code (removed) · ${folderName(w.root)} · read only` })
+    else out.push({ label: 'Hub chat (brainstorm only)' })
+    if (chatTitle) out.push({ label: chatTitle })
+    return out
+  })()
+  const inPlugin =
+    mode !== 'code'
+      ? null
+      : current
+        ? current.workspace?.kind === 'internal'
+          ? current.workspace.pluginId
+          : null
+        : workspace?.kind === 'internal'
+          ? workspace.pluginId
+          : null
+  const inSkill = mode !== 'skills' ? null : current ? (current.skill ?? null) : skill
+  const placeholder = inPlugin
+    ? `Describe a change to ${pluginNames[inPlugin] ?? inPlugin}…`
+    : inSkill
+      ? `Describe a change to ${skillNames[inSkill] ?? inSkill}…`
+      : copy[mode].placeholder.replace('{provider}', providerName)
   const split = showPane && !narrow
   const chatHidden = showPane && narrow && side === 'outputs'
   const modeLabel = modes.find((m) => m.id === mode)?.label ?? 'Chat'
-  const providerName = providerNames[providerOf(settings.model)]
 
   return (
     <div className="relative flex min-h-0 flex-1">
       <div className={`min-h-0 min-w-0 flex-1 flex-col ${chatHidden ? 'hidden' : 'flex'}`}>
         {showPane && narrow && <SideSwitch side={side} onSide={setSide} count={outputs.length} />}
         <div className="flex-1 overflow-y-auto">
-          {empty ? (
+          {crumbs && <PathBar crumbs={crumbs} />}
+          {empty && mode === 'code' && workspace?.kind === 'internal' ? (
+            <PluginWorkspace
+              key={workspace.pluginId}
+              pluginId={workspace.pluginId}
+              onOpen={(id) => void open(id)}
+              onBack={toHub}
+            />
+          ) : empty && mode === 'code' ? (
+            <PluginsHub
+              onEnter={(pluginId) => {
+                setWorkspace({ kind: 'internal', pluginId })
+                fillBox('')
+              }}
+            />
+          ) : empty && mode === 'skills' ? (
+            skill ? (
+              <SkillWorkspace
+                key={skill}
+                folder={skill}
+                onOpen={(id) => void open(id)}
+                onBack={toHub}
+              />
+            ) : (
+              <SkillsHub
+                onOpenSettings={onOpenSettings}
+                onEnter={(folder) => {
+                  setSkill(folder)
+                  fillBox('')
+                }}
+              />
+            )
+          ) : empty ? (
             <div className="flex h-full flex-col items-center justify-center gap-6 px-6 pb-10">
               <Orb size={128} state={copy[mode].orb} />
               <div className="text-center">
@@ -536,7 +868,7 @@ function ChatView(props: Props): React.JSX.Element {
                   {copy[mode].headline}
                 </h1>
                 <p className="mt-2 text-sm text-ash-400">
-                  {hasKey ? (
+                  {unavailable?.reason !== 'no-key' ? (
                     modes.find((m) => m.id === mode)?.hint
                   ) : (
                     <button onClick={onOpenSettings} className="text-molten-300 hover:underline">
@@ -565,8 +897,22 @@ function ChatView(props: Props): React.JSX.Element {
                         chat={current.id}
                         files={(current.attachments ?? []).filter((a) => a.message === i)}
                       />
+                      <SentReferences
+                        items={(current.references ?? []).filter((r) => r.message === i)}
+                        onOpen={openIn}
+                      />
                     </div>
                   )}
+                  {turnProposals.get(i)?.map((p) => (
+                    <ProposalCard
+                      key={p.id}
+                      p={p}
+                      names={p.target === 'skill' ? skillNames : pluginNames}
+                      busy={!!live}
+                      error={proposalError?.id === p.id ? proposalError.error : undefined}
+                      onAnswer={(yes) => void answerProposal(p.id, yes)}
+                    />
+                  ))}
                   {turnSources.has(i) && (
                     <SourcesList
                       sources={turnSources.get(i)!.sources}
@@ -630,26 +976,48 @@ function ChatView(props: Props): React.JSX.Element {
           <WidgetSlot
             conversationId={current?.id ?? null}
             requestId={live?.requestId ?? null}
-            provider={providerOf(settings.model)}
+            provider={shownProvider}
           />
-          {mode === 'code' && (
-            <WorkspaceBar
-              fixed={current ? current.workspace : null}
-              value={workspace}
-              onChange={setWorkspace}
-              disabled={!!live}
+          <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
+          {unavailable && (
+            <ModelNotice
+              model={chatSettings.model}
+              status={unavailable}
+              noKeys={noKeys}
+              providerOut={providerOut}
+              onPick={() => setPickerSignal((n) => n + 1)}
+              onOpenSettings={onOpenSettings}
             />
           )}
-          <ModeBubbles mode={mode} disabled={!!live} onChange={onModeChange} />
+          {month?.budget && month.cost >= month.budget * 0.8 && (
+            <p
+              className={`mb-2 text-center text-xs ${month.cost >= month.budget ? 'text-molten-300' : 'text-ash-400'}`}
+              data-budget-line
+            >
+              {month.cost >= month.budget
+                ? `This month's estimated spend, ${formatCost(month.cost)}, is over your ${formatCost(month.budget)} budget. Custard keeps working; change the budget in Settings.`
+                : `This month's estimated spend is ${formatCost(month.cost)} of your ${formatCost(month.budget)} budget.`}
+            </p>
+          )}
           <Composer
+            meter={<UsageMeter usage={current?.usage} context={current?.context} />}
             busy={!!live}
-            placeholder={copy[mode].placeholder.replace('{provider}', providerName)}
-            settings={settings}
-            onSettings={onSettings}
+            placeholder={placeholder}
+            settings={chatSettings}
+            onSettings={pickModel}
+            availability={availability}
+            pickerSignal={pickerSignal}
+            blocked={!!unavailable}
             onSend={send}
             onStop={() => live && window.custard.chat.stop(live.requestId)}
             draft={draft}
             setDraft={setDraft}
+            references={{
+              current: current?.id ?? null,
+              items: refs,
+              onAdd: (c) => setRefs((x) => (x.some((r) => r.id === c.id) ? x : [...x, c])),
+              onRemove: (id) => setRefs((x) => x.filter((r) => r.id !== id))
+            }}
             {...(acceptsAttachments(mode)
               ? {
                   files: {
@@ -702,8 +1070,15 @@ function ChatView(props: Props): React.JSX.Element {
         <HistoryDrawer
           modeLabel={modeLabel}
           conversations={list}
+          pluginNames={pluginNames}
+          skillNames={skillNames}
+          filter={filter}
+          onFilter={(f) => {
+            historyFilter = f
+            setFilter(f)
+          }}
           currentId={current?.id ?? null}
-          onOpen={open}
+          onOpen={(id) => openIn(id, list.find((c) => c.id === id)?.mode)}
           onNew={startNew}
           onDelete={remove}
           onForget={forgetChat}

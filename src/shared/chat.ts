@@ -1,10 +1,10 @@
+import type { TokenUsage } from './pricing'
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { Workspace } from './plugins'
 import type { Attachment, AttachmentKind } from './attachments'
+import { providers, type Provider, type ProviderApi } from './providers'
 
-export type Provider = 'claude' | 'openai'
-
-export const providerNames: Record<Provider, string> = { claude: 'Claude', openai: 'OpenAI' }
+export { providerNames, type Provider } from './providers'
 
 // Picking a model picks its provider; the app's tint follows it.
 export const chatModels = [
@@ -25,12 +25,37 @@ export const chatModels = [
   },
   { id: 'gpt-6-astra', label: 'GPT-6 Astra', provider: 'openai', effort: true, fallbacks: false },
   { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', provider: 'openai', effort: true, fallbacks: false },
-  { id: 'gpt-6-luna', label: 'GPT-6 Luna', provider: 'openai', effort: true, fallbacks: false }
+  { id: 'gpt-6-luna', label: 'GPT-6 Luna', provider: 'openai', effort: true, fallbacks: false },
+  // DeepSeek takes low, high and max (see deepseekEffort).
+  {
+    id: 'deepseek-v4-pro',
+    label: 'DeepSeek V4 Pro',
+    provider: 'deepseek',
+    effort: true,
+    fallbacks: false
+  },
+  {
+    id: 'deepseek-flash',
+    label: 'DeepSeek Flash',
+    provider: 'deepseek',
+    effort: true,
+    fallbacks: false
+  }
 ] as const
 
 export type ChatModel = (typeof chatModels)[number]['id']
 export const providerOf = (model: string): Provider =>
   chatModels.find((m) => m.id === model)?.provider ?? 'claude'
+
+// The API a model is reached through (see providers.ts).
+export const apiOf = (model: string): ProviderApi => providers[providerOf(model)].api
+
+// How the model is named in its own instructions: "You are Claude", or
+// "You are GPT-6 Astra, an OpenAI model".
+export const introduce = (model: { label: string; provider: Provider }): string => {
+  const maker = providers[model.provider].maker
+  return maker ? `You are ${model.label}, ${maker}` : 'You are Claude'
+}
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -40,10 +65,67 @@ export type ChatSettings = { model: ChatModel; effort: Effort }
 
 export const defaultChatSettings: ChatSettings = { model: 'claude-opus-5-5', effort: 'medium' }
 
+export const isChatModel = (id: unknown): id is ChatModel => chatModels.some((m) => m.id === id)
+export const isEffort = (e: unknown): e is Effort => efforts.includes(e as Effort)
+
+// The model and effort a chat is bound to: its own (picked in the chat, or
+// the one it last used), else the one its last request used, else the
+// default model from Settings. Chats from before Custard kept a model per
+// chat have only the last two.
+export function chatSettingsOf(c: Conversation | null, fallback: ChatSettings): ChatSettings {
+  const model = [c?.model, c?.context?.model].find(isChatModel) ?? fallback.model
+  const effort = isEffort(c?.effort) ? c.effort : fallback.effort
+  return { model, effort }
+}
+
+// DeepSeek's effort levels as its model list names them, shown as three
+// buttons. Each is stored and sent as the value DeepSeek's Create Response
+// docs list for reasoning.effort (Neno's call, 2026-10-13): Fast sends low,
+// Balanced high, Thorough max. The names themselves are never sent.
+export const deepseekEfforts: { effort: Effort; label: string }[] = [
+  { effort: 'low', label: 'Fast' },
+  { effort: 'high', label: 'Balanced' },
+  { effort: 'max', label: 'Thorough' }
+]
+// Balanced is the default, and stands in for any other level (medium and
+// xhigh are DeepSeek aliases of high anyway).
+export const deepseekEffort = (e: Effort): Effort => (e === 'low' || e === 'max' ? e : 'high')
+
+// The effort buttons the model picker shows for a provider, and the value
+// each one stores and sends. Claude and OpenAI take every level as it is;
+// DeepSeek has its own three (above).
+const EFFORT_LABELS: Record<Effort, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'X-High',
+  max: 'Max'
+}
+export const effortChoices = (provider: Provider): { effort: Effort; label: string }[] =>
+  provider === 'deepseek'
+    ? deepseekEfforts
+    : efforts.map((effort) => ({ effort, label: EFFORT_LABELS[effort] }))
+// The level a provider's buttons show as picked for a stored effort.
+export const shownEffort = (provider: Provider, e: Effort): Effort =>
+  provider === 'deepseek' ? deepseekEffort(e) : e
+
+// Whether a model can be picked now, from what Custard already knows (the
+// saved keys and the last Save/Refresh check). Asking costs no request.
+//   no-key: the provider's key isn't saved.
+//   rejected: the last check said the provider rejected the key.
+//   removed: the last check's list didn't include this model.
+export type ModelAvailability = {
+  id: ChatModel
+  available: boolean
+  reason?: 'no-key' | 'rejected' | 'removed'
+}
+
 export const modes = [
   { id: 'chat', label: 'Chat', hint: 'Talk anything through' },
-  { id: 'code', label: 'Code', hint: 'Write, debug and explain code' },
   { id: 'design', label: 'Design', hint: 'Shape interfaces and visuals' },
+  // Was "Code". The id stays `code` so saved chats and skills' `modes:` keep
+  // working.
+  { id: 'code', label: 'Plugins', hint: 'Build and improve plugins' },
   { id: 'skills', label: 'Skills', hint: 'Teach Custard skills and improve your vault' }
 ] as const
 
@@ -56,8 +138,19 @@ export type ConversationSummary = {
   mode: Mode
   title: string
   updatedAt: number
+  // Where the chat stands, from its summary note (found by History's search).
+  summary?: string
+  // From its summary note: a title for the whole chat, what it was for, and
+  // what it worked on. History and the workspace cards show these.
+  noteTitle?: string
+  goal?: string
+  tags?: string[]
   // A temporary chat: never remembered.
   temporary?: boolean
+  // Plugins mode: the plugin whose workspace the chat works in.
+  pluginId?: string
+  // Skills mode: the skill (its folder in Custard/Skills) the chat works on.
+  skill?: string
 }
 
 // What became of one tool call. Saved as it changes, so a chat reloaded after
@@ -152,6 +245,28 @@ export type ChatMemory = {
   job?: CaptureJob
 }
 
+// Each chat's compacted summary, kept as one note in Custard/Chats that
+// Custard rewrites as the chat goes on (see main/chatNotes).
+export type ChatNote = {
+  // Not written (yet), written, couldn't be written, not for this chat, or
+  // changed or deleted outside Custard, so Custard leaves it alone for good.
+  status: 'pending' | 'saved' | 'failed' | 'off' | 'edited' | 'deleted'
+  // Vault path, once written.
+  path?: string
+  // Messages the note covers.
+  upTo: number
+  // Of the text Custard last wrote, to tell when someone else changed it.
+  hash?: string
+  at: number
+  reason?: string
+  goal?: string
+  state?: string
+  // The summary's own title for the chat, and what it worked on.
+  title?: string
+  tags?: string[]
+  provider?: Provider
+}
+
 // A chat that continues an earlier one that grew too long. The earlier chat
 // is left exactly as it was.
 export type Continuation = {
@@ -180,9 +295,18 @@ export type Continuation = {
 
 export type Conversation = ConversationSummary & {
   createdAt: number
-  // Code mode only: which folder the file tools may touch. Fixed when the
-  // conversation starts.
+  // The model and effort this chat uses: picked in the chat (or set by the
+  // message that started it), and changed only by picking another. The next
+  // message goes to it. See chatSettingsOf.
+  model?: ChatModel
+  effort?: Effort
+  // Plugins mode only: which plugin's folder the file tools may touch. Fixed
+  // when the conversation starts.
   workspace?: Workspace
+  // Skills mode only: the skill whose folder (Custard/Skills/<skill>) is the
+  // only place the chat may write. None: the Skills hub chat, which writes
+  // nothing. Fixed when the conversation starts.
+  skill?: string
   // Exactly what is sent to the API, so assistant turns keep their thinking
   // blocks unchanged between requests.
   messages: BetaMessageParam[]
@@ -191,7 +315,21 @@ export type Conversation = ConversationSummary & {
   notices?: Notice[]
   sources?: WebSource[]
   memory?: ChatMemory
+  // Its summary note in Custard/Chats.
+  chatNote?: ChatNote
+  // What its model calls used and cost, background summaries included.
+  usage?: ChatUsage
   continuedFrom?: Continuation
+  // Open questions from automation runs shown to the model in this chat (ids).
+  // Their text came from a run that read notes and plugin text.
+  questions?: string[]
+  // Why the chat holds text Custard can't vouch for besides web and plugin
+  // results, which show in `actions`: it read notes it can't vouch for, or
+  // was shown captures made from chats that held outside text.
+  outside?: ('notes' | 'memory' | 'chats')[]
+  // Plugins hub chats: workspaces the assistant offered to open or create.
+  // Nothing happens until the user presses Yes on the card.
+  proposals?: WorkspaceProposal[]
   // Where a provider's compaction summarized everything before message
   // `after`. The messages themselves are kept and shown in full.
   compactions?: Compaction[]
@@ -200,6 +338,22 @@ export type Conversation = ConversationSummary & {
   // Files sent with user messages (Chat mode). The bytes are in app data;
   // each request builds the provider's blocks from them.
   attachments?: Attachment[]
+  // Earlier chats the user referenced from the message box: their summary
+  // notes as they were when sent, shown to the model for the rest of this
+  // chat (see main/earlierChats).
+  references?: ChatReference[]
+}
+
+export type ChatReference = {
+  chat: string
+  title: string
+  mode: Mode
+  // The user message it was sent with.
+  message: number
+  // The note's text, bounded.
+  text: string
+  // The note says its chat held web or plugin text (or doesn't say).
+  outside: boolean
 }
 
 // Claude's compaction block is part of the assistant message at `after`, as
@@ -218,6 +372,21 @@ export type ContinueResult =
 
 export type ChatLink = { id: string; title: string; mode: Mode }
 
+// A chat's token use and estimated cost (see shared/pricing). `unpriced`:
+// calls to a model with no known price, left out of `cost`.
+export type ChatUsage = TokenUsage & { cost: number; calls: number; unpriced: number }
+
+// This month's estimated spend across every chat and automation, for the
+// budget in Settings.
+export type UsageMonth = {
+  month: string
+  cost: number
+  calls: number
+  unpriced: number
+  // Dollars a month, or null for no budget.
+  budget: number | null
+}
+
 export type ContextUse = {
   tokens: number
   budget: number
@@ -228,6 +397,35 @@ export type ContextUse = {
   warn: boolean
   model: string
 }
+
+// A hub chat's offer to enter a plugin's or skill's workspace, or to create
+// one and enter it. `request` is put in the new chat's message box, unsent, so
+// the user reads it before anything acts on it.
+export type WorkspaceProposal = {
+  id: string
+  // The turn it was made in (index of that turn's first message).
+  turn: number
+  kind: 'open' | 'create'
+  // A skill's workspace (Skills hub); otherwise a plugin's.
+  target?: 'skill'
+  // open: the plugin; create: set once it is made.
+  pluginId?: string
+  // Skills: open: the skill's folder; create: set once it is made.
+  skill?: string
+  // create: the name for the new plugin or skill.
+  name?: string
+  request: string
+  status: 'pending' | 'accepted' | 'declined'
+}
+
+export type ProposalResult =
+  // enter: the workspace to open and the new chat's message (null: Not now).
+  | {
+      ok: true
+      enter: { pluginId?: string; skill?: string; request: string } | null
+      conversation: Conversation
+    }
+  | { ok: false; error: string }
 
 export type ChatEvent =
   | { requestId: string; type: 'thinking'; text: string }
@@ -279,10 +477,14 @@ export type SendChatRequest = {
   settings: ChatSettings
   // For a new Code-mode conversation.
   workspace?: Workspace
+  // For a new Skills-mode conversation: the skill's workspace.
+  skill?: string
   // Start the new conversation as a temporary chat, never remembered.
   temporary?: boolean
   // Chat mode: the files picked for this message, from its draft, in order.
   attachments?: { draft: string; ids: string[] }
+  // Earlier chats (ids) whose summary notes go with this message.
+  references?: string[]
 }
 
 export type ApprovalDecision = 'once' | 'chat' | 'deny'

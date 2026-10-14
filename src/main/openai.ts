@@ -4,7 +4,6 @@ import type {
   BetaTool,
   BetaToolResultBlockParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import OpenAI from 'openai'
 import type {
   FunctionTool,
   ResponseInputContent,
@@ -23,16 +22,25 @@ import {
   usesCompaction
 } from './compaction'
 import { compactTrigger, estimateTokens, openaiCounter } from './context'
-import { openaiEndpoint } from './endpoints'
+import { responsesClient } from './providers'
+import { providerNames, responsesFeatures, type Provider } from '../shared/providers'
+import type { TokenUsage } from '../shared/pricing'
+import { fromOpenAI } from './usage'
 
 type Emit = (e: ChatEvent) => void
 
+const searchesIn = (output: ResponseOutputItem[]): number =>
+  output.filter((o) => o.type === 'web_search_call').length
+
 type Turn = {
   requestId: string
+  // A Responses API provider (see shared/providers.ts).
+  provider: Provider
   maxSteps: number
   apiKey: string
   model: string
-  effort: Effort
+  // None for a model that takes no effort.
+  effort?: Effort
   instructions: string
   // The history as sent this time (calls to unavailable tools turned into text).
   history: BetaMessageParam[]
@@ -41,6 +49,8 @@ type Turn = {
   // when it is too large to send.
   fits: (estimate: number, count: () => Promise<number>) => Promise<boolean>
   tools: BetaTool[]
+  // What each model call used (see usage.ts).
+  onUsage?: (model: string, u: TokenUsage) => void
   signal: AbortSignal
   emit: Emit
   // Records the reply and each tool call as it happens (see turn.ts).
@@ -53,7 +63,7 @@ type Turn = {
 // How the turn ended, when not with a normal final answer.
 export type OpenAIEnd = 'done' | 'cut-off' | 'cut-off-tool' | 'step-limit' | 'too-long'
 
-const toFunctionTool = (t: BetaTool): FunctionTool => ({
+export const toFunctionTool = (t: BetaTool): FunctionTool => ({
   type: 'function',
   name: t.name,
   description: t.description ?? null,
@@ -137,7 +147,7 @@ export function toInput(messages: BetaMessageParam[]): ResponseInputItem[] {
 }
 
 // The parts of an OpenAI reply that are worth keeping, as Claude-format blocks.
-function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
+export function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
   const blocks: BetaContentBlockParam[] = []
   for (const item of output) {
     if (item.type === 'message') {
@@ -159,7 +169,8 @@ function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
 
 export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
   const { emit, requestId, log } = turn
-  const client = new OpenAI({ apiKey: turn.apiKey, ...openaiEndpoint() })
+  const client = responsesClient(turn.provider, turn.apiKey)
+  const features = responsesFeatures(turn.provider)
   // From the newest compaction this model made, if there is one.
   const start = openaiStart(turn.conversation, turn.model)
   let input: ResponseInputItem[] = [
@@ -167,11 +178,10 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
     ...toInput(turn.history.slice(start.from))
   ]
   const tools = turn.tools.length ? { tools: turn.tools.map(toFunctionTool) } : {}
-  const count = openaiCounter(client, {
-    model: turn.model,
-    instructions: turn.instructions,
-    ...tools
-  })
+  // Without a counting endpoint the estimate decides (see context.measure).
+  const count = features.tokenCount
+    ? openaiCounter(client, { model: turn.model, instructions: turn.instructions, ...tools })
+    : () => Promise.reject(new Error('No token counting'))
 
   for (let step = 0; step < turn.maxSteps; step++) {
     const sent = input
@@ -183,11 +193,17 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
           model: turn.model,
           instructions: turn.instructions,
           input,
-          reasoning: { effort: turn.effort, summary: 'auto' },
-          // Nothing is stored at OpenAI; reasoning is passed back encrypted so
-          // the model keeps its train of thought across tool calls.
+          reasoning: {
+            ...(turn.effort ? { effort: turn.effort } : {}),
+            ...(features.reasoningSummary ? { summary: 'auto' as const } : {})
+          },
+          // Nothing is stored at the provider; reasoning is passed back
+          // encrypted so the model keeps its train of thought across tool
+          // calls.
           store: false,
-          include: ['reasoning.encrypted_content'],
+          ...(features.encryptedReasoning
+            ? { include: ['reasoning.encrypted_content' as const] }
+            : {}),
           ...tools,
           // The server compacts once the input passes the threshold and
           // returns an encrypted compaction item; works with store: false.
@@ -229,16 +245,24 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
         emit({ requestId, type: 'thinking', text: event.delta })
       } else if (event.type === 'response.reasoning_summary_part.done') {
         emit({ requestId, type: 'thinking', text: '\n\n' })
+      } else if (event.type === 'response.reasoning_text.delta') {
+        // A provider without summaries (DeepSeek) streams its reasoning itself.
+        emit({ requestId, type: 'thinking', text: event.delta })
       } else if (event.type === 'response.output_text.delta') {
         log.text(event.delta)
         emit({ requestId, type: 'text', text: event.delta })
       } else if (event.type === 'response.completed') {
         output = event.response.output
+        turn.onUsage?.(turn.model, fromOpenAI(event.response.usage, searchesIn(output)))
       } else if (event.type === 'response.incomplete') {
         output = event.response.output
         incomplete = true
+        turn.onUsage?.(turn.model, fromOpenAI(event.response.usage, searchesIn(output)))
       } else if (event.type === 'response.failed') {
-        throw new Error(event.response.error?.message ?? 'OpenAI could not finish the reply.')
+        throw new Error(
+          event.response.error?.message ??
+            `${providerNames[turn.provider]} could not finish the reply.`
+        )
       } else if (event.type === 'error') {
         throw new Error(event.message)
       }
@@ -246,7 +270,7 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
 
     const calls = output.filter((o) => o.type === 'function_call')
     const compaction = output.findLast((o) => o.type === 'compaction')
-    if (compaction) recordOpenAICompaction(turn.conversation, compaction, turn.model)
+    if (compaction) recordOpenAICompaction(turn.conversation, compaction, turn.model, turn.provider)
     if (incomplete && calls.length > 0) return 'cut-off-tool'
     const blocks = toBlocks(output)
     log.addAssistant(blocks)

@@ -4,16 +4,25 @@ import { dirname, isAbsolute, join, relative, sep } from 'path'
 import { resolveInVault, VaultPathError } from './memory/paths'
 import { CAPTURES, readCaptures } from './memory/write'
 import { MEMORY_NOTE } from '../shared/vault'
+import { localParts, systemTimezone } from './automations/schedule'
 import { modes, type Mode } from '../shared/chat'
 import { SKILLS_DIR } from './modes/extensions'
 import type { ToolRun } from './turn'
 import { FsafeError, makeDirs, writeNew, type Guard } from './fsafe'
 import { search, SearchError, SEARCH_LIMITS } from './vault/search'
 import { ReadError, readPart, toVaultPath, READ_LIMITS } from './vault/read'
+import {
+  changeNote,
+  createGranted,
+  recordCreated,
+  VaultEditError,
+  type EditContext
+} from './vault/edit'
 
-// Claude may read anything in the vault, but can only create new notes or
-// append to existing ones: nothing is ever overwritten or deleted. Editing a
-// passage in place is deferred (see docs/vault-tools.md).
+// Claude may read anything in the vault and create new notes (each shown and
+// approved, unless the folder is one the user granted). Existing notes can be
+// changed only through vault_append and vault_edit, only in granted folders:
+// nothing is ever overwritten wholesale, deleted or renamed.
 export const vaultTools: BetaTool[] = [
   {
     name: 'vault_search',
@@ -70,7 +79,7 @@ export const vaultTools: BetaTool[] = [
   {
     name: 'vault_create_note',
     description:
-      'Create a new note. The user sees its path and full content and must allow it first. Fails if a note already exists at that path: changing existing notes is turned off. Missing folders are created.',
+      'Create a new note. Unless the folder is one the user has allowed you to write in, the user sees its path and full content and must allow it first. Fails if a note already exists at that path: it never overwrites. Missing folders are created.',
     input_schema: {
       type: 'object',
       properties: {
@@ -86,12 +95,64 @@ export const vaultTools: BetaTool[] = [
   }
 ]
 
+// Offered only when the user has granted a folder that allows them.
+export const vaultChangeTools: BetaTool[] = [
+  {
+    name: 'vault_append',
+    description:
+      'Add text to the end of an existing note, on a new line. Only in a folder the user has allowed you to add to; elsewhere it is refused. No version is needed. Use vault_create_note for a new note.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Note path relative to the vault root' },
+        text: { type: 'string', description: 'Markdown to add at the end' }
+      },
+      required: ['path', 'text']
+    }
+  },
+  {
+    name: 'vault_edit',
+    description: [
+      'Change an existing note in place. Only in a folder the user has allowed you to edit; elsewhere it is refused.',
+      'First read the note with vault_read and pass its version. If the note changed since, nothing is written and you must read it again.',
+      'Give a list of edits. All are applied together, or none are (one that cannot be applied fails the whole call). Each edit is matched against the note as you read it, and edits must not overlap.',
+      'Edit types: {"type":"replace","old_text","new_text"} replaces text that appears exactly once; {"type":"insert_after_heading","heading":"## Log","text"} adds text at the end of that heading\'s section, just before the next heading of the same or a higher level (the heading must appear exactly once); {"type":"append","text"} adds text at the end of the note.',
+      "The note's frontmatter (--- block) must stay valid."
+    ].join(' '),
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Note path relative to the vault root' },
+        version: { type: 'string', description: "The note's version from vault_read" },
+        edits: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 20,
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: ['replace', 'insert_after_heading', 'append'] },
+              old_text: { type: 'string' },
+              new_text: { type: 'string' },
+              heading: { type: 'string' },
+              text: { type: 'string' }
+            },
+            required: ['type']
+          }
+        }
+      },
+      required: ['path', 'version', 'edits']
+    }
+  }
+]
+
 // Skills listed in the prompt; the rest are counted and can be listed.
 const MAX_SKILLS = 60
 // Memory.md in the prompt: the start and the newest end, up to this much.
 export const MEMORY_LIMITS = { chars: 12_000, head: 4_000 }
 
-type Skill = { name: string; description: string; path: string; modes: Mode[] }
+// folder is the name under Custard/Skills; name is the frontmatter's and may differ.
+type Skill = { name: string; folder: string; description: string; path: string; modes: Mode[] }
 
 // Skills are folders in the vault with a SKILL.md whose frontmatter has a name
 // and description, and optionally the modes it applies to. Only those fields
@@ -128,17 +189,31 @@ export function listSkills(vault: string): Skill[] {
       const skillModes = field('modes')
         .toLowerCase()
         .split(/[\s,[\]]+/)
+        // Plugins mode's id is still `code`; skills may use either name.
+        .map((m) => (m === 'plugins' ? 'code' : m))
         .filter((m): m is Mode => modes.some((x) => x.id === m))
       return description
-        ? [{ name: field('name') || e.name, description, path, modes: skillModes }]
+        ? [{ name: field('name') || e.name, folder: e.name, description, path, modes: skillModes }]
         : []
     })
 }
 
-// YYYY-MM-DD in the user's own time zone, for daily notes and memory entries.
-const localDate = (): string => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// The date, and the zone it is in, as the chat model is told them. The zone is
+// the computer's, by name: an offset ("UTC+2") goes out of date when the clocks
+// change, and a note that gives one is not to be trusted over this. No time of
+// day: it would change the prompt every minute (and its cache) for little use,
+// and the model is told it does not know it rather than left to guess.
+export function todayLine(now = new Date(), tz = systemTimezone()): string {
+  const l = localParts(now.getTime(), tz)
+  const pad = (x: number): string => String(x).padStart(2, '0')
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(now)
+  const offset =
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
+      .formatToParts(now)
+      .find((p) => p.type === 'timeZoneName')
+      ?.value.replace('GMT', 'UTC') ?? 'UTC'
+  const shown = offset === 'UTC' ? 'UTC+00:00' : offset
+  return `Today's date is ${l.y}-${pad(l.m)}-${pad(l.d)} (${weekday}). The user's time zone is ${tz}, UTC${shown.slice(3)} now; offsets change with daylight saving time, so trust this zone over an offset written in a note or memory. You are not told the time of day.`
 }
 
 const n = (x: number): string => x.toLocaleString('en-US')
@@ -155,7 +230,14 @@ export function boundMemory(text: string): string {
   return `${text.slice(0, cutAt)}\n[… characters ${n(cutAt)}–${n(resume)} of ${n(text.length)} are left out here for length. Read them with vault_read, path "${MEMORY_NOTE}", offset ${cutAt} …]\n\n${text.slice(resume)}`
 }
 
-export function vaultSystemPrompt(vault: string, mode: Mode, memoryAuto = true): string {
+// `recall.outside` is set when a capture shown in the prompt was made from a
+// chat that held text from the web or a plugin (or from before captures said).
+export function vaultSystemPrompt(
+  vault: string,
+  mode: Mode,
+  memoryAuto = true,
+  recall?: { outside: boolean }
+): string {
   // Skills mode sees every skill so it can maintain them; other modes only
   // get the skills meant for them.
   const all = listSkills(vault).filter(
@@ -169,10 +251,11 @@ export function vaultSystemPrompt(vault: string, mode: Mode, memoryAuto = true):
   } catch {
     // Not there yet, or a link out of the vault.
   }
-  const none = { remembered: [], activity: [], notes: 0, cut: 0 }
+  const none = { remembered: [], activity: [], notes: 0, cut: 0, outside: false }
   let captured: ReturnType<typeof readCaptures> = none
   try {
     if (memoryAuto) captured = readCaptures(vault)
+    if (recall && captured.outside) recall.outside = true
   } catch {
     // Unreadable capture folder: nothing from it this turn.
   }
@@ -192,9 +275,9 @@ export function vaultSystemPrompt(vault: string, mode: Mode, memoryAuto = true):
       ? `Left out above for length: ${[captured.cut ? `${captured.cut} more remembered or activity ${captured.cut === 1 ? 'item' : 'items'}` : '', capturesLeft ? `${capturesLeft} older capture ${capturesLeft === 1 ? 'note' : 'notes'}` : ''].filter(Boolean).join(' and ')}. Find them with vault_search folder:${CAPTURES} or vault_list ${CAPTURES}.`
       : '',
     'When you create notes, write clean Obsidian Markdown and use [[wikilinks]] to related notes you know exist.',
-    `Today's date is ${localDate()}.`,
+    todayLine(),
     skills.length
-      ? `Skills are instructions for specific tasks in this vault. When a request matches a skill's description, read its SKILL.md with vault_read before doing anything else, then follow it.\n<skills>\n${skills.map((s) => `- ${s.name} (${s.path})${mode === 'skills' && s.modes.length ? ` [modes: ${s.modes.join(', ')}]` : ''}: ${s.description}`).join('\n')}\n</skills>${all.length > skills.length ? `\n${all.length - skills.length} more skills aren't listed here; vault_list ${SKILLS_DIR} shows them all.` : ''}`
+      ? `Skills are instructions for specific tasks in this vault. When a request matches a skill's description, read its SKILL.md with vault_read before doing anything else, then follow it.\n<skills>\n${skills.map((s) => `- ${s.name} (${s.path})${mode === 'skills' && s.modes.length ? ` [modes: ${s.modes.map((m) => (m === 'code' ? 'plugins' : m)).join(', ')}]` : ''}: ${s.description}`).join('\n')}\n</skills>${all.length > skills.length ? `\n${all.length - skills.length} more skills aren't listed here; vault_list ${SKILLS_DIR} shows them all.` : ''}`
       : '',
     memory.trim()
       ? `<memory>\n${boundMemory(memory)}\n</memory>`
@@ -378,7 +461,12 @@ export async function runVaultTool(
   name: string,
   input: unknown,
   // Checked against the real place a new note lands, just before creating it.
-  guard?: Guard
+  guard?: Guard,
+  // The user's granted folders and where edit records go; without it, existing
+  // notes can't be changed.
+  editing?: Omit<EditContext, 'guard'>,
+  // Characters per vault_read part, when the caller's results are capped.
+  readChars?: number
 ): Promise<ToolRun> {
   const i = (input ?? {}) as Record<string, unknown>
   if (!(await reachable(vault)))
@@ -394,17 +482,24 @@ export async function runVaultTool(
       case 'vault_list':
         return { content: await list(vault, i.folder), isError: false }
       case 'vault_read':
-        return { content: await readPart(vault, i), isError: false }
-      case 'vault_create_note':
-        return await create(vault, i.path, i.content, guard)
+        return { content: await readPart(vault, i, readChars), isError: false }
+      case 'vault_create_note': {
+        const r = await create(vault, i.path, i.content, guard)
+        // A note made in a granted folder had no approval card, so it is kept
+        // in the activity list.
+        if (!r.isError && editing && createGranted(vault, i.path, editing.grants))
+          recordCreated(editing, String(i.path), String(i.content).length)
+        return r
+      }
       case 'vault_append':
-        // Off for now: changing shared notes is deferred.
-        return {
-          content:
-            'Adding to existing notes is turned off, so nothing was done. Offer to save it as a new note instead.',
-          isError: true,
-          outcome: 'not-run'
-        }
+      case 'vault_edit':
+        if (!editing)
+          return {
+            content: `${name} can't be used here, so nothing was done.`,
+            isError: true,
+            outcome: 'not-run'
+          }
+        return await changeNote(vault, name, i, { ...editing, guard })
       default:
         return { content: `Unknown tool ${name}`, isError: true, outcome: 'not-run' }
     }
@@ -414,7 +509,8 @@ export async function runVaultTool(
       err instanceof VaultError ||
       err instanceof VaultPathError ||
       err instanceof SearchError ||
-      err instanceof ReadError
+      err instanceof ReadError ||
+      err instanceof VaultEditError
     )
       return {
         content: errorText(err),
