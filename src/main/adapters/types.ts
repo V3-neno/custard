@@ -55,13 +55,18 @@ export type OneShotRequest = {
   // Tools the model may call; the calls come back in `calls`, unrun.
   tools?: BetaTool[]
   // The output limit. Without one, Claude gets 16,000 (its API needs a
-  // limit) and a Responses provider gets none.
+  // limit; automation steps ask for more) and a Responses provider gets
+  // none.
   maxTokens?: number
   // Claude: wait for the reply over a stream, as long replies need (the SDK
   // refuses a plain request it expects to run past its timeout). A Responses
   // provider sends one plain request either way.
   stream?: boolean
-  // Responses providers only; Claude's one-shot model (Haiku 4.5) takes none.
+  // Sent as the model's profile says (sentLevel), and only for a model that
+  // takes effort: summaries pass low (Claude's summary model, Haiku 4.5,
+  // takes none), automation steps their own level when one is set. Claude
+  // also turns adaptive thinking on for a model whose profile thinks,
+  // whatever the effort.
   effort?: Effort
   timeoutMs?: number
   retries?: number

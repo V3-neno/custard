@@ -67,6 +67,9 @@ function onlyKeys(o: Raw, allowed: readonly string[], where: string): void {
     )
 }
 
+// The Claude model whose profile may not take effort (see checkEntry).
+const HAIKU_45 = 'claude-haiku-4-5'
+
 const providerApi = (p: Provider): 'anthropic' | 'responses' => providers[p].api
 
 // The effort levels a provider's built-in models take. The picker shows one
@@ -213,6 +216,12 @@ function checkEntry(raw: Raw, base: ModelProfile | null): ModelProfile {
       : d.prices && checkPrices(d.prices, null, limits.window)
 
   const effort = raw.effort !== undefined ? checkEffort(raw.effort, provider) : d.effort
+  // Haiku 4.5 takes no effort parameter (Anthropic's API rejects it), and a
+  // summary or automation request would carry one. Known by its id: the
+  // built-in, or a customisation of it. The same model under another id
+  // can't be told apart.
+  if (effort && provider === 'claude' && id === HAIKU_45)
+    reject('Haiku 4.5 takes no effort level: Anthropic\'s API rejects one. Leave "effort" out.')
 
   let files = d.files
   if (raw.files !== undefined) {

@@ -268,6 +268,47 @@ describe('ids', () => {
   })
 })
 
+describe('Haiku 4.5 takes no effort', () => {
+  // Anthropic's API rejects effort on Haiku 4.5, and summaries and
+  // automation steps would send it (automation thinking, Phase 2).
+  it('a customisation of Haiku 4.5 that gives it effort is rejected', () => {
+    const reason =
+      'Haiku 4.5 takes no effort level: Anthropic\'s API rejects one. Leave "effort" out.'
+    expect(why({ id: 'claude-haiku-4-5', provider: 'claude', effort: true })).toBe(reason)
+    expect(
+      why({
+        id: 'claude-haiku-4-5',
+        provider: 'claude',
+        effort: profileOf('claude-opus-5-5')!.effort
+      })
+    ).toBe(reason)
+  })
+
+  it('Haiku 4.5 without effort, other changes, and effort off still load', () => {
+    expect(one({ id: 'claude-haiku-4-5', provider: 'claude', effort: false }).effort).toBeNull()
+    expect(one({ id: 'claude-haiku-4-5', provider: 'claude', effort: null }).effort).toBeNull()
+    expect(one({ id: 'claude-haiku-4-5', provider: 'claude', prices: { input: 2 } })).toMatchObject(
+      { effort: null, changed: ['prices'] }
+    )
+  })
+
+  it('other Claude models still take effort, by id only', () => {
+    expect(one({ id: 'claude-sonnet-5-5', provider: 'claude', effort: true }).effort).toEqual(
+      profileOf('claude-opus-5-5')!.effort
+    )
+    // A model added under another id is not known to be Haiku 4.5.
+    expect(
+      one({
+        id: 'claude-haiku-4-5-alias',
+        provider: 'claude',
+        label: 'Haiku alias',
+        limits: { window: 200_000, maxOutput: 64_000 },
+        effort: true
+      }).effort
+    ).not.toBeNull()
+  })
+})
+
 describe('the registry with the file', () => {
   it('customised built-ins keep their place; added models follow', () => {
     const r = parse([

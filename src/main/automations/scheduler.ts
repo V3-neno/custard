@@ -189,7 +189,11 @@ export class Scheduler {
       startedAt: this.d.now(),
       status: 'running',
       calls: [],
-      changes: []
+      changes: [],
+      // What it runs with, as the automation is now: a later edit doesn't
+      // change what this record says.
+      model: a.model,
+      ...(a.effort ? { effort: a.effort } : {})
     }
     addRun(this.d.dir, id, run)
     this.active.add(id)

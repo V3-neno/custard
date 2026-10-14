@@ -49,6 +49,8 @@ The first entry adds a model. The second customises the built-in Haiku 4.5: only
 | `thinking`   | no                   | Claude's adaptive thinking. OpenAI and DeepSeek models always reason, so it changes nothing there                                                                                                            | off                                                    |
 | `fallbacks`  | no                   | Claude's server-side fallback. Claude only                                                                                                                                                                   | off                                                    |
 
+**Haiku 4.5 takes no effort.** A customisation of `claude-haiku-4-5` that gives it `effort` is rejected: Anthropic's API refuses an effort on that model, and Claude summaries and automation steps would send one. It is known by its id only; the same model added under another id can't be told apart.
+
 **Effort names.** Effort levels use only Custard's five names: `low`, `medium`, `high`, `xhigh` and `max`, both as stored and as sent. The file can't add other names (Qwen's `none`, say). The picker shows one set of effort buttons per provider, so a model's levels must be its provider's.
 
 ## What is checked

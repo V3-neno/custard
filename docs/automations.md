@@ -10,7 +10,8 @@ against a mock provider.
 | Setting     | Meaning                                                                                                                                     |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name, skill | The skill is a folder under `Custard/Skills`; its `SKILL.md` is the run's instructions.                                                     |
-| Model       | Any model Custard offers (Claude or OpenAI). Its API key must be saved.                                                                     |
+| Model       | Any model Custard offers (Claude, OpenAI or DeepSeek). Its API key must be saved.                                                           |
+| Effort      | Stored per automation (`effort`: low, medium, high, xhigh or max). Not set: no effort is sent and the provider uses its own default.        |
 | Times, days | Daily local times (`07:30, 19:00`); optionally days of the month (`1, 15`). Empty days means every day.                                     |
 | Time zone   | Empty = the computer's. DST keeps local times (see below).                                                                                  |
 | Folders     | Chosen from the folders already allowed under Editable folders.                                                                             |
@@ -179,8 +180,34 @@ Settings under each automation. A run still marked running when Custard starts
 was cut off by closing: it is marked failed and is not repeated; what it had
 already written stays.
 
+Each run record also keeps the automation's model and effort when the run
+started (`model`, `effort`; no effort when none was set). Records written
+before these were kept, and skipped slots, have neither. Settings doesn't
+show them yet.
+
 The list of edits that Undo uses is shared with chat and now keeps the newest
 200 (it was 50), because a busy automation would otherwise push chat's out.
+
+## Effort and thinking
+
+Each step sends the automation's effort as its model's profile says, the
+same rule as a chat (`sentLevel`):
+
+- **Claude** (`adapters/anthropic.ts`, `sendMessage`): adaptive thinking
+  (`thinking: {type: "adaptive"}`) for a model whose profile thinks (Opus 5.5,
+  Sonnet 5.5), whether or not an effort is set, and `output_config.effort`
+  when one is. Haiku 4.5 gets neither. The output limit is 64,000 tokens,
+  thinking and text together (a model with a lower limit gets its own).
+  Thinking text isn't asked for (no `display`) and isn't kept: each step's
+  thinking is dropped before the next, as before.
+- **OpenAI and DeepSeek** (`adapters/responses.ts`): `reasoning.effort` when an
+  effort is set (DeepSeek's levels: a stored medium or xhigh sends high). No
+  output limit, as before.
+- **Not set** (every automation saved before there was a choice): no effort is
+  sent. Claude still gets adaptive thinking and the 64,000 limit.
+
+The form doesn't offer the choice yet; an effort is stored only when one is
+saved. An older Custard that saves settings drops it.
 
 ## Not in this step
 

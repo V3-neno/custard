@@ -137,6 +137,24 @@ describe('what a run does', () => {
     expect(m.seen[0].system).toContain('leave_question')
     expect(m.seen[0].system).toContain('Notes/ (edit)')
   })
+  // Automation thinking, Phase 2: the step is asked for with the
+  // automation's model and effort (none when it has none).
+  it("asks for the step with the automation's model and effort", async () => {
+    const asked: unknown[][] = []
+    const m = script([{ text: 'Done.', calls: [] }])
+    const d = deps(m.step, {
+      step: (...args) => {
+        asked.push(args)
+        return m.step
+      }
+    })
+    await run(auto({ effort: 'xhigh' }), d)
+    await run(auto(), d)
+    expect(asked).toEqual([
+      ['claude-opus-5-5', 'xhigh'],
+      ['claude-opus-5-5', undefined]
+    ])
+  })
   it('edits atomically with a version, like chat', async () => {
     const v = versionOf(text('Notes/a.md'))
     const m = script([

@@ -5,7 +5,7 @@ import type {
   BetaMessageParam,
   MessageCreateParamsStreaming
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import { requireProfile, sentLevel, type ModelProfile } from '../../shared/models'
+import { profileOf, requireProfile, sentLevel, type ModelProfile } from '../../shared/models'
 import { claudeFilesFrom } from '../attachments/request'
 import {
   claudeHistory,
@@ -166,8 +166,12 @@ async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
   }
 }
 
-// Effort isn't sent: the one-shot calls use Haiku 4.5, which doesn't take
-// it.
+// Thinking and effort as the chat turn sends them, from the model's profile:
+// adaptive thinking for a model whose profile thinks (no `display`: nobody
+// reads a one-shot call's thinking, so it stays the API's default), and
+// `output_config.effort` only when the caller asks for one and the model
+// takes effort. Haiku 4.5 (the Claude summary model) takes neither, so its
+// requests are unchanged; automation steps on Opus and Sonnet get both.
 async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
   const api = client(req.apiKey, {
     ...(req.timeoutMs !== undefined ? { timeout: req.timeoutMs } : {}),
@@ -179,6 +183,10 @@ async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
       : (req.messages as Anthropic.MessageParam[])
   const maxTokens = req.maxTokens ?? 16000
   const tools = req.tools?.length ? { tools: req.tools } : {}
+  const profile = profileOf(req.model)
+  const thinking = profile?.thinking ? { thinking: { type: 'adaptive' as const } } : {}
+  const effort =
+    profile?.effort && req.effort ? { effort: sentLevel(profile.effort, req.effort) } : null
   const m = req.stream
     ? await api.beta.messages
         .stream(
@@ -187,7 +195,9 @@ async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
             max_tokens: maxTokens,
             system: req.system,
             messages: messages as BetaMessageParam[],
-            ...tools
+            ...tools,
+            ...thinking,
+            ...(effort ? { output_config: effort } : {})
           },
           { signal: req.signal }
         )
@@ -199,8 +209,16 @@ async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
           system: req.system,
           messages,
           ...(tools as { tools?: Anthropic.Tool[] }),
-          ...(req.schema
-            ? { output_config: { format: { type: 'json_schema', schema: req.schema.schema } } }
+          ...thinking,
+          ...(req.schema || effort
+            ? {
+                output_config: {
+                  ...(req.schema
+                    ? { format: { type: 'json_schema' as const, schema: req.schema.schema } }
+                    : {}),
+                  ...effort
+                }
+              }
             : {})
         },
         { signal: req.signal }
