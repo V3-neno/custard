@@ -129,7 +129,7 @@ Custard ships only in Electron, so Chromium is known. Electron 39.8.10 bundles *
 
 **Recommendation: B + D.** One `Select` that is still a native `<select>`, styled with `base-select` to match the forge (panel, rows, picked row, focus ring), plus one `PillGroup` for short fixed lists. B keeps native keyboard behaviour, type-ahead, form semantics, screen reader roles, and Playwright's `selectOption`, so most e2e suites don't change. Its picker renders in the top layer, so the Settings dialog's scroll box won't clip it (a custom C would need a portal). If the pilot shows B misbehaving on Windows, fall back to C for `Select` only.
 
-The model picker stays custom: it is a panel with tabs and an effort row, not a select. It gets fixed, not replaced (focus ring on the chip, focus into the panel, arrow keys, focus return, correct roles).
+**The model picker in the chat box is out of scope** (your decision, 2026-10-14: don't change it). It stays as it is: no restyle, no behaviour change. Its keyboard and role findings above are reported only. The new rules and components are not applied to it, and its effort row stays the reference for the PillGroup look.
 
 **Search and grouping.** Keep provider groups for models (base-select styles `optgroup` labels). Add no search for now: the longest lists today are 8 models and the vault's skills, and type-ahead covers them. The References panel keeps its search box and gains arrow keys. Time zone stays a text box; turning it into a list of `Intl.supportedValuesOf('timeZone')` (about 400 zones) would need search and is a behaviour change, so it is your call, not part of this plan.
 
@@ -219,7 +219,7 @@ Each phase is one draft PR, behaviour-preserving, with e2e updates, and a stop f
 
 1. **D2: foundation and pilot.** Add `docs/ui-dropdowns.md`; `color-scheme: dark` on `:root`; a focus-ring utility; decide `ash-200` (add the token or replace the 12 uses; your call); `Select` and `PillGroup` components; convert the **pilot**.
 2. **D3: Settings.** Default effort, Editable folders grant mode (to pills, help shown), automation Skill and Model (Select), automation effort (PillGroup), Design tab's three selects.
-3. **D4: Chat.** Model picker chip focus, panel focus and arrows, roles; References keyboard and focus return.
+3. **D4: Chat.** References keyboard and focus return only. The model picker is not touched.
 4. **D5: Plugins.** Plugin config enum (Select), and the "Choose…" placeholder (see Other findings).
 5. **D6: Other pill groups.** History filter, Capabilities view, Design view/width/versions/outputs, mode bubbles: same PillGroup states (look can stay where it's a deliberate accent, such as mode bubbles).
 
