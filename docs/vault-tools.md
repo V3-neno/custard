@@ -110,6 +110,19 @@ code units).
 The version check only detects a change between parts. It doesn't stop the note
 changing afterwards, and nothing is written based on it.
 
+**Parts that fit the cap.** A part is at most 40,000 characters, and a chat or a
+run cuts a result that is too long (a chat at the model's limit, 38,760
+characters for some models; a run at 40,000 characters after escaping `&`, `<`
+and `>`). A cut would lose the part's last characters and its footer with the
+offset to continue from, and the next part starts after them. So the caller asks
+for a part that fits (`partSizeFor` in chat; a run reads again with a smaller
+part until the escaped result fits), and no part is cut.
+
+**Every cut says so.** A result Custard shortens ends with a note saying what was
+left out: the chat and run caps, a plugin result over 50,000 characters, `fs_read`,
+`fs_list`, `fs_search` (30 matches, or 5,000 files scanned), a web search (results
+past 20, a long passage or summary) and a web page (links past 50).
+
 ## Safeguards
 
 - **One path check** (`resolveInVault`) is used by:
@@ -130,7 +143,10 @@ changing afterwards, and nothing is written based on it.
 - **Injected memory is bounded, never silently cut:**
   - **`Memory.md`** over 12,000 characters keeps its first ~4,000 and its newest
     end. A marker gives the exact character range left out and the `vault_read`
-    offset to read it.
+    offset to read it. **`Memory.md` should record a time zone name
+    (`Europe/Stockholm`), not an offset (`UTC+2`)**: an offset goes out of date
+    when the clocks change, and nothing in Custard rewrites a stored one (the
+    chat is told the zone by name and trusts that over a note's offset).
   - **Capture items and older capture notes** left out for length are counted,
     with how to find them (`vault_search folder:Custard/Captures`).
   - **Skills** beyond 60 are counted, with how to list them.
@@ -165,10 +181,20 @@ cover. The mode's own protection still applies: Chat and Design can't change
 skills or plugin files, whatever the grants say.
 
 **Protected places.** A grant on a parent folder does not cover
-`Custard/Skills`, `Custard/Captures`, `Custard/Plugins/<plugin>/Activity` or
-`Custard/Memory.md`. A grant covers one of the folders only when it names that
-folder (or something inside it). `Memory.md` is a file, so no folder grant can
-name it.
+`Custard/Skills`, `Custard/Captures`, `Custard/Chats`, `Custard/Plugins/<plugin>/Activity`,
+`Custard/Plugins/<plugin>/Overview.md` or `Custard/Memory.md`. A grant covers a
+folder among them only when it names that folder (or something inside it).
+`Memory.md` and `Overview.md` are files, so no folder grant can name them.
+
+**One reading of a path.** A backslash means a folder boundary on every system
+(`resolveInVault` turns it into `/` first), so the grant check, the protected
+places and the file system all see the same folders; on Linux and macOS a
+backslash used to be a letter of a name that the grant check read as a boundary.
+A folder or note name that ends in a dot or a space is refused everywhere
+(Windows drops them). Protected places are matched without case. A grant covers
+a path by its exact spelling where the vault's file system tells `Notes` from
+`notes` apart (found by trying it on the vault, `caseSensitiveVault`), and
+without case where it doesn't (Windows, usually macOS).
 
 **`vault_edit`.** The model reads the note, then sends its `version` and a list
 of at most 20 edits: replace text that appears exactly once, insert after a
@@ -206,6 +232,18 @@ edit) shows the approval card with what would change, for the rest of that chat:
   plugin tool. A call that never ran doesn't count. Calls in the same round as
   such a call count, because they run together.
 - A chat continued from another one counts, because it carries that chat's text.
+- Reading a note counts, unless the note is `Custard/Memory.md`, a skill, a
+  plugin's `Overview.md`, or in an allowed folder: any other note may hold
+  something the user pasted. A search that finds something counts. This is a rule
+  about where a note is, not about what it says; a granted folder the user pastes
+  web text into is still trusted by it. Listing a folder doesn't count (names
+  only). Captures, chat notes and plugin activity always count, even under a
+  grant that names them.
+- A chat shown captures that were made from a chat with outside text counts.
+  New captures say so in their frontmatter (`outside: "true"` or `"false"`); a
+  capture without the field (made before it existed, or edited) is treated as
+  made from outside text, because nothing says it wasn't. Only captures that
+  contribute a line to the prompt count.
 - Chats without outside text keep no-card changes.
 - A top-bar pill, "Outside text", shows when the chat on screen has some. A new
   chat clears it.
@@ -213,8 +251,14 @@ edit) shows the approval card with what would change, for the rest of that chat:
   the whole chat, and a call that would be refused is refused without a card.
 - Unattended automations are not chats and stay card-free; they rely on the
   hostile-text controls of Step 5.
-- `Custard/Memory.md` can't be allowed (it is a file), and Skills and Captures
-  stay protected under a parent grant. There is no way to grant them by accident.
+- `Custard/Memory.md` can't be allowed (it is a file), and Skills, Captures and
+  Chats stay protected under a parent grant. There is no way to grant them by accident.
+
+**Capture text.** What the summarizer writes into a capture note (preferences,
+decisions, titles, uncertainties, and action labels, which are cut at 300
+characters) has links, `[[wikilinks]]`, HTML tags and key-shaped text removed
+(`plain` in `src/main/memory/render.ts`). This is a heuristic: it removes the
+address syntaxes it knows, not every way to write one.
 
 The indicator reads the saved chat, so it can show up once the turn that brought
 the text has finished. The card doesn't wait for that: it already applies within

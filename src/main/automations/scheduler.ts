@@ -179,7 +179,7 @@ export class Scheduler {
       id: randomUUID(),
       automationId: id,
       kind,
-      ...(slot ? { slot: slot.label } : {}),
+      ...(slot ? { slot: slot.label, slotAt: slot.instant } : {}),
       ...(how.catchUp ? { catchUp: true } : {}),
       startedAt: this.d.now(),
       status: 'running',

@@ -11,14 +11,15 @@ import { DESIGN_TOOLS } from '../../shared/design'
 
 // What a tool can do, by where it comes from.
 export type ToolKind =
-  | 'vault-read' // vault_search, vault_list, vault_read
+  | 'vault-read' // vault_search, vault_list, vault_read, chats_search, chats_read
   | 'vault-write' // vault_create_note, vault_append, vault_edit
   | 'web' // web_search, web_read
   | 'plugin' // an enabled plugin's tool, <plugin>__<tool>
   | 'widget' // widget_show, widget_hide
   | 'questions' // automation_question: closes an automation's open question
-  | 'workspace' // Code mode's file tools
+  | 'workspace' // Plugins mode's file tools
   | 'design' // design_html, design_media, design_jobs: Design's outputs
+  | 'navigate' // workspace_propose: a hub chat's offer to enter a workspace
   | 'unknown' // anything else: never allowed
 
 // Extensions are plugins (code that adds capabilities) and skills
@@ -28,14 +29,20 @@ export type ModePolicy = {
   tools: ReadonlySet<ToolKind>
   // May write into the skills folder (through vault_create_note).
   authorSkills: boolean
-  // May change plugin source (Code's Plugins workspace, through its file
+  // May change plugin source (Plugins mode's workspace, through its file
   // tools). No mode may write plugin files through the vault tools.
   authorPlugins: boolean
+  // A skill's workspace: the only vault folder its notes may be written in.
+  writeRoot?: string
 }
 
 const USE: ToolKind[] = ['vault-read', 'vault-write', 'web', 'plugin', 'widget']
 
-export function modePolicy(mode: Mode, workspace?: Workspace): ModePolicy {
+// The hubs' chats (Plugins or Skills with no workspace) brainstorm and
+// navigate: they read, and offer to enter a workspace, but change nothing.
+const HUB: ToolKind[] = ['vault-read', 'web', 'navigate']
+
+export function modePolicy(mode: Mode, workspace?: Workspace, skill?: string): ModePolicy {
   switch (mode) {
     // Chat and Design use extensions; they never make or change them.
     case 'chat':
@@ -53,18 +60,34 @@ export function modePolicy(mode: Mode, workspace?: Workspace): ModePolicy {
         authorPlugins: false
       }
     case 'skills':
+      // A skill's chat writes only in that skill's folder.
+      if (!skill) return { mode, tools: new Set(HUB), authorSkills: false, authorPlugins: false }
       return {
         mode,
-        tools: new Set<ToolKind>([...USE, 'questions']),
+        tools: new Set<ToolKind>(USE),
         authorSkills: true,
-        authorPlugins: false
+        authorPlugins: false,
+        writeRoot: `Custard/Skills/${skill}`
       }
     case 'code': {
-      // General Code gets no plugin tools: only the Plugins workspace does.
-      const internal = workspace?.kind === 'internal'
-      const tools: ToolKind[] = ['vault-read', 'vault-write', 'web', 'workspace']
-      if (internal) tools.push('plugin', 'widget')
-      return { mode, tools: new Set(tools), authorSkills: true, authorPlugins: internal }
+      // The hub chat (no plugin's workspace) brainstorms and navigates: it
+      // reads, and offers to enter a workspace, but changes nothing. Old
+      // General Code chats fall here too, and can't send anyway.
+      if (workspace?.kind !== 'internal')
+        return { mode, tools: new Set(HUB), authorSkills: false, authorPlugins: false }
+      return {
+        mode,
+        tools: new Set<ToolKind>([
+          'vault-read',
+          'vault-write',
+          'web',
+          'workspace',
+          'plugin',
+          'widget'
+        ]),
+        authorSkills: true,
+        authorPlugins: true
+      }
     }
   }
 }
@@ -75,12 +98,14 @@ export type ToolSources = {
 }
 
 export function toolKind(name: string, sources: ToolSources): ToolKind {
-  if (/^vault_(search|list|read)$/.test(name)) return 'vault-read'
+  if (/^vault_(search|list|read)$/.test(name) || /^chats_(search|read)$/.test(name))
+    return 'vault-read'
   if (/^vault_(create_note|append|edit)$/.test(name)) return 'vault-write'
   if (sources.isWorkspace(name)) return 'workspace'
   if (sources.isWeb(name)) return 'web'
   if (name === 'widget_show' || name === 'widget_hide') return 'widget'
   if (name === 'automation_question') return 'questions'
+  if (name === 'workspace_propose') return 'navigate'
   if ((DESIGN_TOOLS as readonly string[]).includes(name)) return 'design'
   if (/^[a-z][a-z0-9-]{1,30}__[a-z][a-z0-9_]{0,40}$/.test(name)) return 'plugin'
   return 'unknown'
@@ -88,7 +113,7 @@ export function toolKind(name: string, sources: ToolSources): ToolKind {
 
 const MODE_NAMES: Record<Mode, string> = {
   chat: 'Chat',
-  code: 'Code',
+  code: 'Plugins',
   design: 'Design',
   skills: 'Skills'
 }

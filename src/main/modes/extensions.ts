@@ -34,6 +34,20 @@ const inside = (child: string, parent: string): boolean => {
   return c === p || c.startsWith(p.endsWith(sep) ? p : p + sep)
 }
 
+// Whether a write to `full` lands inside `root`, by the path as written and
+// by where it really lands (links resolved).
+export function writesInside(full: string, root: string): boolean {
+  return inside(full, root) && inside(realTarget(full), realTarget(root))
+}
+
+// Whether the real path is one of root's parent folders: creating a note
+// walks through them (vault makeDirs checks each one), and they are only
+// passed through, never written.
+export function aboveRoot(real: string, root: string): boolean {
+  const r = realTarget(root)
+  return inside(r, real) && norm(r) !== norm(real)
+}
+
 // The real location a path would have: the deepest part that exists, with
 // its links resolved, plus the parts that don't exist yet.
 export function realTarget(p: string): string {
@@ -89,6 +103,6 @@ export function extensionRefusal(kind: ExtensionKind, modeLabel: string): string
   if (kind === 'skill')
     return `${modeLabel} mode can't create or change skills, so nothing was done. Skills are made in Skills mode; you can draft the skill's text here for the user to copy.`
   if (kind === 'plugin')
-    return `${modeLabel} mode can't write plugin files, so nothing was done. Plugins are built in Code mode's Plugins workspace; you can draft a development prompt here for the user to copy.`
+    return `${modeLabel} mode can't write plugin files, so nothing was done. Plugins are built in Plugins mode; you can draft a development prompt here for the user to copy.`
   return "That path is inside Custard's own files, which notes can't be written to, so nothing was done."
 }

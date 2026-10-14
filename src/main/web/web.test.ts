@@ -77,6 +77,14 @@ describe('isolated search', () => {
     expect(webTools({ id: 'claude-3-opus', provider: 'claude' }).prompt).toMatch(
       /Web search isn't available/
     )
+    // DeepSeek has no hosted search; OpenAI does.
+    expect(
+      webTools({ id: 'deepseek-flash', provider: 'deepseek' }).tools.map((t) => t.name)
+    ).toEqual(['web_read'])
+    expect(webTools({ id: 'gpt-6-luna', provider: 'openai' }).tools.map((t) => t.name)).toEqual([
+      'web_search',
+      'web_read'
+    ])
   })
 
   it('sends Claude only the query, and keeps results and citations', async () => {
@@ -214,6 +222,31 @@ describe('isolated search', () => {
     })
   })
 
+  it('says what it left out: results past 20, a long passage, a long summary', () => {
+    const hits = Array.from({ length: 23 }, (_, i) => ({
+      url: `https://x.example.com/${i}`,
+      title: `T${i}`,
+      citedText: i === 0 ? 'p '.repeat(400) : undefined
+    }))
+    const { content } = formatResults('q', {
+      hits,
+      ran: [],
+      summary: 's'.repeat(3500),
+      error: undefined
+    } as never)
+    expect(content).toContain('[3 more results are not listed]')
+    expect(content).toContain('… [shortened]"')
+    expect(content).toContain('\n[… the rest of the summary is left out]')
+    const small = formatResults('q', {
+      hits: hits.slice(1, 3),
+      ran: [],
+      summary: 'short',
+      error: undefined
+    } as never).content
+    expect(small).not.toContain('not listed')
+    expect(small).not.toContain('left out')
+  })
+
   it('reads OpenAI sources and url citations', async () => {
     const seen: Record<string, unknown>[] = []
     const client = {
@@ -294,6 +327,9 @@ describe('running the web tools', () => {
     signal: new AbortController().signal,
     turn: 0,
     injected: [],
+    search: async () => {
+      throw new Error('no search in this test')
+    },
     approve: async (label, _input, warning) => {
       approvals.push(label)
       warnings.push(warning)
