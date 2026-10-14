@@ -20,6 +20,10 @@
   --color-molten-500: #e08a1e;
   --color-ember-600: #b4531a;
   --color-ember-700: #6e2f0e;
+  /* Settings → Capabilities: supported, in an oxidised-copper green that sits
+     with the forge rather than a signal green. */
+  --color-patina-300: #a9c98f;
+  --color-patina-800: #233019;
 
   --font-sans: 'Space Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', Consolas, monospace;
@@ -55,6 +59,29 @@
   --glow-ember: 79 107 140;
 }
 
+/* DeepSeek tint: the same forge at night, in deep blue. */
+:root[data-provider='deepseek'] {
+  --color-forge-950: #05070f;
+  --color-forge-900: #090d1a;
+  --color-forge-850: #0d1324;
+  --color-forge-800: #121a30;
+  --color-forge-700: #1b2644;
+  --color-forge-600: #27365e;
+  --color-ash-500: #5f6b8a;
+  --color-ash-400: #7c88a8;
+  --color-ash-300: #a0abc8;
+  --color-ash-100: #e1e6f5;
+  --color-molten-200: #d6e0ff;
+  --color-molten-300: #aec2ff;
+  --color-molten-400: #7d9bff;
+  --color-molten-500: #4d72f0;
+  --color-ember-600: #2f4fc2;
+  --color-ember-700: #1c2f7a;
+  --glow: 125 155 255;
+  --glow-deep: 77 114 240;
+  --glow-ember: 47 79 194;
+}
+
 html,
 body,
 #root {
@@ -71,6 +98,12 @@ body {
 
 ::selection {
   background: rgb(var(--glow) / 0.3);
+}
+
+/* Checkboxes and radios in the accent, not the system blue. */
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: rgb(var(--glow));
 }
 
 * {
@@ -142,6 +175,16 @@ body {
 }
 .drawer-in {
   animation: drawer-in 180ms ease-out;
+}
+/* The floating Manage panel, sliding in from the right. */
+@keyframes panel-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+.panel-in {
+  animation: panel-in 200ms ease-out;
 }
 
 /* ---------- Message Markdown ---------- */

@@ -14,7 +14,7 @@ Create `Custard/Skills/<skill-name>/SKILL.md`:
 ---
 name: skill-name
 description: One sentence saying when Claude should use this skill.
-modes: code, design
+modes: plugins, design
 ---
 
 # Skill name
@@ -22,6 +22,6 @@ modes: code, design
 Step-by-step instructions for Claude.
 ```
 
-The description matters most, because it's how Claude decides when to use the skill. `modes` is optional: list the Custard modes the skill is for (chat, code, design), or leave it out to use the skill everywhere.
+The description matters most, because it's how Claude decides when to use the skill. `modes` is optional: list the Custard modes the skill is for (chat, design, plugins, skills), or leave it out to use the skill everywhere.
 
 You can also open the **Skills** mode in Custard and ask it to write skills for you, or to look over the vault and suggest improvements.

@@ -1,7 +1,14 @@
 import { readdirSync, readFileSync, realpathSync, statSync, unlinkSync } from 'fs'
 import { createHash, randomUUID } from 'crypto'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'path'
-import { FsafeError, FsafeExistsError, makeDirs, writeNewSync, type Guard } from '../fsafe'
+import {
+  FsafeError,
+  FsafeExistsError,
+  makeDirs,
+  writeNewSync,
+  writeReplaceSync,
+  type Guard
+} from '../fsafe'
 import { resolveInVault, safeName } from './paths'
 
 // Where automatic memory goes. Each capture is a new note, created only if
@@ -63,6 +70,15 @@ export function createNote(vault: string, full: string, text: string): void {
     insideOf(realVault, real) ? null : 'That path leads outside the vault, so nothing was written.'
   makeDirs(vault, relative(vault, dirname(full)).split(sep).filter(Boolean), { guard })
   writeNewSync(full, text, { guard })
+}
+
+// Replaces a note Custard wrote (a chat note), the same way: the new text goes
+// into a fresh file beside it that is renamed over it, inside the real vault.
+export function replaceNote(vault: string, full: string, text: string): void {
+  const realVault = realpathSync(vault)
+  const guard: Guard = (real) =>
+    insideOf(realVault, real) ? null : 'That path leads outside the vault, so nothing was written.'
+  writeReplaceSync(full, text, { guard })
 }
 
 // Creates `folder/name.md` (or "name (2).md", …) with exclusive create, so
@@ -146,13 +162,20 @@ const bullets = (s = ''): string[] =>
 
 const dateOf = (rel: string): string => /(\d{4}-\d{2}-\d{2})[^/]*$/.exec(rel)?.[1] ?? ''
 
+// Whether a capture note was made from a chat that held text from the web or
+// a plugin. New notes say so in their frontmatter (`outside: "true"`); a note
+// that doesn't say (made before captures recorded it, or edited) counts as
+// made from outside text, because nothing says it wasn't.
+export const madeFromOutside = (noteText: string): boolean =>
+  frontmatter(noteText).outside !== 'false'
+
 // What later chats are shown: preferences and decisions from the newest
 // capture notes, and the newest activity. Read as the notes are now, so an
 // edit or deletion in Obsidian is what the assistant sees next time.
 export function readCaptures(
   vault: string,
   folder = CAPTURES
-): { remembered: string[]; activity: string[]; notes: number; cut: number } {
+): { remembered: string[]; activity: string[]; notes: number; cut: number; outside: boolean } {
   const notes = captureNotes(vault, folder)
   const remembered: string[] = []
   const activity: string[] = []
@@ -160,11 +183,14 @@ export function readCaptures(
   // Entries left out for length, so the prompt can say so.
   let cut = 0
   let full = false
+  // Some note shown was made from a chat that held outside text.
+  let outside = false
   for (const [n, rel] of notes.slice(0, RETRIEVAL.notes).entries()) {
     const text = read(resolveInVault(vault, rel))
     if (!text) continue
     const s = sections(text)
     const date = dateOf(rel)
+    const fromOutside = madeFromOutside(text)
     for (const line of [
       ...bullets(s.get('Preferences')),
       ...bullets(s.get('Decisions')).map((d) => `Decided: ${d}`)
@@ -177,8 +203,10 @@ export function readCaptures(
       }
       chars += entry.length
       remembered.push(entry)
+      if (fromOutside) outside = true
     }
-    if (n < RETRIEVAL.activity)
+    if (n < RETRIEVAL.activity) {
+      const before = activity.length
       activity.push(
         ...(s.get('Activity') ?? '')
           .split('\n')
@@ -186,18 +214,22 @@ export function readCaptures(
           .map((l) => `${date} · ${l.slice(4).trim()}`),
         ...bullets(s.get('Still open')).map((u) => `${date} · Open: ${u}`)
       )
+      if (fromOutside && activity.length > before) outside = true
+    }
   }
   const shown = activity.slice(0, RETRIEVAL.activity * 3)
   return {
     remembered,
     activity: shown,
     notes: notes.length,
-    cut: cut + activity.length - shown.length
+    cut: cut + activity.length - shown.length,
+    outside
   }
 }
 
 // Every capture note Custard saved from one chat, wherever it is under
 // Custard/ (plugin folders included), found by its frontmatter. Bounded.
+// (Its summary note in Custard/Chats too, which says `custard-chat`.)
 export function chatCaptures(vault: string, chatId: string): string[] {
   const found: string[] = []
   let budget = 5000
@@ -220,7 +252,8 @@ export function chatCaptures(vault: string, chatId: string): string[] {
           continue
         }
         const fm = frontmatter(read(full) ?? '')
-        if (fm['custard-capture'] && fm.chat === chatId) found.push(child)
+        if ((fm['custard-capture'] && fm.chat === chatId) || fm['custard-chat'] === chatId)
+          found.push(child)
       }
     }
   }

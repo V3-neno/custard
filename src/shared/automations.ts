@@ -10,6 +10,9 @@ export type AutomationLimits = {
   minutes: number
   // Failed runs in a row before the automation pauses itself.
   failuresBeforePause: number
+  // Missed slots run on opening, at most this many (the newest), oldest
+  // first. Older ones are folded into one summary. 0 turns catch-up off.
+  catchUpRuns: number
 }
 
 export type Automation = {
@@ -39,13 +42,15 @@ export const DEFAULT_LIMITS: AutomationLimits = {
   runsPerDay: 24,
   toolCalls: 30,
   minutes: 5,
-  failuresBeforePause: 3
+  failuresBeforePause: 3,
+  catchUpRuns: 3
 }
 export const LIMIT_BOUNDS: Record<keyof AutomationLimits, [number, number]> = {
   runsPerDay: [1, 96],
   toolCalls: [1, 100],
   minutes: [1, 30],
-  failuresBeforePause: [1, 10]
+  failuresBeforePause: [1, 10],
+  catchUpRuns: [0, 10]
 }
 export const MAX_AUTOMATIONS = 50
 
@@ -119,7 +124,8 @@ export function checkAutomation(raw: unknown): AutomationCheck {
           l.failuresBeforePause,
           LIMIT_BOUNDS.failuresBeforePause,
           DEFAULT_LIMITS.failuresBeforePause
-        )
+        ),
+        catchUpRuns: clamp(l.catchUpRuns, LIMIT_BOUNDS.catchUpRuns, DEFAULT_LIMITS.catchUpRuns)
       }
     }
   }
@@ -149,10 +155,15 @@ export type RunRecord = {
   kind: 'scheduled' | 'manual'
   // The slot it ran for, as local "YYYY-MM-DDTHH:MM" (scheduled runs).
   slot?: string
+  // The same slot as an instant (epoch ms); older records only have the label.
+  slotAt?: number
+  // The slot was missed and this is its late run.
+  catchUp?: boolean
   startedAt: number
   endedAt?: number
   status: RunStatus
-  // Why it was skipped, stopped or failed, in plain words.
+  // Why it was skipped, stopped or failed, in plain words; on a completed
+  // run, that its last reply was cut off (CUT_OFF_REASON).
   reason?: string
   // What it did, in order: the call label and how it ended.
   calls: { label: string; outcome: string }[]
@@ -160,6 +171,8 @@ export type RunRecord = {
   changes: { path: string; kind: 'create' | 'append' | 'edit' }[]
   // The end of its last message, capped.
   summary?: string
+  // Questions it left for the user (ids).
+  questions?: string[]
 }
 
 // Automation state kept apart from settings.
@@ -179,4 +192,65 @@ export type AutomationView = {
   running: boolean
   // Newest first.
   runs: RunRecord[]
+}
+
+// What a run is told about itself, as JSON, in the names the user confirmed.
+// The skill decides what a window means and can record "data unavailable".
+// `local` is ISO 8601 with the offset then ("2026-10-25T02:30+01:00"), so a
+// repeated hour when clocks go back is two different values; `utc` is the same
+// instant.
+export type When = { local: string; utc: string }
+export type RunContext = {
+  scheduled_for: When
+  // The slot before this one (null if there is none) and this one.
+  window_start: When | null
+  window_end: When
+  last_successful_run: { slot: string | null; finished_at: string } | null
+  // Older slots that were not run at all and are folded into this run.
+  missed_slots: When[]
+  missed_slots_omitted?: number
+  catch_up: boolean
+  time_zone: string
+  // Set when the time of day this slot was configured for does not exist on
+  // that date (the clocks jump over it). The run is at the moment they jump,
+  // which is what scheduled_for says; this is the time that was configured,
+  // with the offset in force just before the jump.
+  configured_local_time?: string
+}
+
+// --- questions from unattended runs -----------------------------------------
+
+// A run can't ask anything, so it can leave a question. The next chat shows
+// Claude the open ones; Claude asks briefly and applies the answer.
+export const QUESTION_LIMITS = {
+  question: 300,
+  context: 500,
+  option: 60,
+  options: 4,
+  answer: 500,
+  // Per run, open in total, and kept in total.
+  perRun: 3,
+  open: 50,
+  kept: 200,
+  // Shown to one chat at a time.
+  shown: 5
+}
+
+export type PendingQuestion = {
+  id: string
+  automationId: string
+  automationName: string
+  runId: string
+  // The slot of the run that left it.
+  slot?: string
+  created: number
+  question: string
+  // Why it is asked, in the run's words.
+  context?: string
+  // The note the answer is for, if any.
+  path?: string
+  options?: string[]
+  status: 'open' | 'answered' | 'dismissed'
+  answer?: string
+  closed?: number
 }

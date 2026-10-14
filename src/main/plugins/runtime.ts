@@ -266,6 +266,7 @@ export const createRuntime =
 // killed first, because destroying a window whose renderer is stuck can
 // block the main process.
 const TEST_TIMEOUT_MS = 30_000
+const PROGRESS = 'custard-test:'
 
 export const runTestsInSandbox: TestRunner = async (code, o = {}) => {
   const timeoutMs = o.timeoutMs ?? TEST_TIMEOUT_MS
@@ -280,8 +281,32 @@ export const runTestsInSandbox: TestRunner = async (code, o = {}) => {
   let fail: (err: Error) => void = () => {}
   const ended = new Promise<never>((_, reject) => (fail = reject))
   ended.catch(() => {})
+  // Stopping a run still reports the tests that had finished and the one that
+  // was running. They come from lines the runner emits as it goes, so they
+  // survive a test that never lets the page answer.
+  const done: unknown[] = []
+  let current: string | null = null
+  wc.on('console-message', (...args: unknown[]) => {
+    const e = args[0] as { message?: string }
+    const text = String(e?.message ?? args[2] ?? '')
+    if (!text.startsWith(PROGRESS)) return
+    try {
+      const m = JSON.parse(text.slice(PROGRESS.length)) as { start?: string; done?: unknown }
+      if (m.start) current = String(m.start).slice(0, 200)
+      else if (m.done && done.length < 2000) done.push(m.done)
+    } catch {
+      // Not a progress line.
+    }
+  })
+  let stopping = false
   const end = (message: string): void => {
-    fail(new Error(message))
+    if (stopping) return
+    stopping = true
+    const err = new Error(
+      current ? `${message} It was running "${current}".` : message
+    ) as Error & { partial?: unknown[] }
+    err.partial = done
+    fail(err)
     kill()
   }
   const timer = setTimeout(
@@ -295,18 +320,24 @@ export const runTestsInSandbox: TestRunner = async (code, o = {}) => {
   wc.on('render-process-gone', () => end('The test sandbox ended before the tests finished.'))
   try {
     await Promise.race([wc.loadURL(PAGE), ended])
-    const run = wc.executeJavaScript(`${code}\n;globalThis.__custardRunTests()`)
+    const run = wc.executeJavaScript(
+      `globalThis.__custardEmit = (s) => console.debug(${JSON.stringify(PROGRESS)} + s);\n${code}\n;globalThis.__custardRunTests(${JSON.stringify(o.name ?? null)})`
+    )
     run.catch(() => {})
     const results = (await Promise.race([run, ended])) as {
       name: string
       ok: boolean
       error?: string
+      ms?: number
+      skipped?: boolean
     }[]
     return Array.isArray(results)
       ? results.map((r) => ({
           name: String(r.name),
           ok: r.ok === true,
-          error: r.error ? String(r.error) : undefined
+          error: r.error ? String(r.error) : undefined,
+          ms: typeof r.ms === 'number' ? r.ms : undefined,
+          ...(r.skipped ? { skipped: true } : {})
         }))
       : []
   } finally {

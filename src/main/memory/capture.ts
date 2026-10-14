@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import type { CaptureJob, ChatMemory, Conversation, Provider } from '../../shared/chat'
 import type { MemorySettings } from '../../shared/memory'
+import { chatHasOutsideText } from '../../shared/outsideText'
 import {
   buildEvidence,
   eligible,
@@ -34,7 +35,8 @@ export type CaptureDeps = {
   update: (id: string, change: (c: Conversation) => void) => Conversation | null
   vaultPath: () => string | null
   settings: () => MemorySettings
-  summarizer: (provider: Provider) => Summarizer | null
+  // `chatId`: whose summary it is, for its cost.
+  summarizer: (provider: Provider, chatId: string) => Summarizer | null
   queueFile: string
   pluginName: (id: string) => string
   // The folder for a plugin's own capture notes (plugin knowledge); null to
@@ -49,6 +51,7 @@ const localDate = (t: number): string => {
   const d = new Date(t)
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
+const zone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone
 const localTime = (t: number): string => {
   const d = new Date(t)
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
@@ -349,7 +352,7 @@ export class Capture {
         })
         return false
       }
-      const summarize = this.deps.summarizer(job.provider ?? 'claude')
+      const summarize = this.deps.summarizer(job.provider ?? 'claude', id)
       if (!summarize) {
         const why = "There's no API key to summarize it with; it will be saved once there is."
         if (job.reason !== why)
@@ -432,6 +435,7 @@ export class Capture {
       title,
       date: localDate(at),
       time: localTime(at),
+      zone: zone(),
       chatId: c.id,
       ...(filesInContext(c, to) ? { fileSafe: true } : {})
     }
@@ -456,6 +460,9 @@ export class Capture {
           'custard-capture': jobId,
           chat: c.id,
           date: from.date,
+          ...(from.zone ? { time_zone: from.zone } : {}),
+          // Later chats shown this note count as holding outside text.
+          outside: chatHasOutsideText(c) ? 'true' : 'false',
           ...(plugin ? { plugin } : {})
         }),
         { job: jobId, plugin }

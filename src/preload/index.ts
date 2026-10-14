@@ -1,23 +1,27 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { MemorySettings } from '../shared/memory'
+import type { Capability, ListedModel, ModelCheck } from '../shared/adapter'
+import type { CapabilityScan } from '../shared/capabilityScan'
 import type {
   ChatLink,
   ChatEvent,
   ChatMemory,
   ChatSettings,
   ContinueResult,
+  ProposalResult,
   Conversation,
   ConversationSummary,
   Mode,
   Provider,
-  SendChatRequest
+  SendChatRequest,
+  UsageMonth
 } from '../shared/chat'
-import type { VaultEditEntry, VaultInfo } from '../shared/vault'
+import type { SkillEntry, SkillText, VaultEditEntry, VaultInfo } from '../shared/vault'
 import type { VaultGrant } from '../shared/vaultGrants'
-import type { AutomationView } from '../shared/automations'
+import type { AutomationView, PendingQuestion } from '../shared/automations'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
-import type { ApprovalDecision } from '../shared/chat'
+import type { ApprovalDecision, ModelAvailability } from '../shared/chat'
 import type {
   Artifact,
   ArtifactSummary,
@@ -29,13 +33,7 @@ import type {
   ProviderListing,
   SkillChange
 } from '../shared/design'
-import type {
-  PluginReview,
-  PluginStatus,
-  SecurityDefaults,
-  TestReport,
-  Workspace
-} from '../shared/plugins'
+import type { PluginReview, PluginStatus, SecurityDefaults, TestReport } from '../shared/plugins'
 
 // API exposed to the renderer as window.custard. The renderer never sees the
 // API keys; all model calls happen in the main process.
@@ -45,6 +43,28 @@ const custard = {
     has: (p: Provider): Promise<boolean> => ipcRenderer.invoke('apiKey:has', p),
     set: (p: Provider, key: string): Promise<void> => ipcRenderer.invoke('apiKey:set', p, key),
     clear: (p: Provider): Promise<void> => ipcRenderer.invoke('apiKey:clear', p)
+  },
+  models: {
+    // Every provider's models, from its adapter.
+    list: (): Promise<ListedModel[]> => ipcRenderer.invoke('models:list'),
+    // Asks the provider, with the saved key. Settings' Save and Refresh only.
+    check: (p: Provider): Promise<ModelCheck | null> => ipcRenderer.invoke('models:check', p),
+    // From saved keys and the last check only; asks no provider.
+    availability: (): Promise<ModelAvailability[]> => ipcRenderer.invoke('models:availability'),
+    lastCheck: (p: Provider): Promise<ModelCheck | null> =>
+      ipcRenderer.invoke('models:lastCheck', p)
+  },
+  // Settings → Capabilities. Read from Custard's own rules and files; asks no
+  // provider.
+  capabilities: {
+    scan: (): Promise<CapabilityScan> => ipcRenderer.invoke('capabilities:scan'),
+    // Start building: makes a new plugin for a gap and returns the starter
+    // prompt for its workspace's message box.
+    startPlugin: (
+      provider: Provider,
+      capability: Capability
+    ): Promise<{ pluginId: string; name: string; request: string }> =>
+      ipcRenderer.invoke('capabilities:startPlugin', provider, capability)
   },
   settings: {
     get: (): Promise<ChatSettings> => ipcRenderer.invoke('settings:get'),
@@ -58,6 +78,9 @@ const custard = {
     setEnabled: (id: string, enabled: boolean): Promise<void> =>
       ipcRenderer.invoke('automations:setEnabled', id, enabled),
     resume: (id: string): Promise<void> => ipcRenderer.invoke('automations:resume', id),
+    questions: (): Promise<PendingQuestion[]> => ipcRenderer.invoke('automations:questions'),
+    dismissQuestion: (id: string): Promise<void> =>
+      ipcRenderer.invoke('automations:dismissQuestion', id),
     runNow: (id: string): Promise<boolean> => ipcRenderer.invoke('automations:runNow', id),
     onChanged: (cb: () => void): (() => void) => {
       const h = (): void => cb()
@@ -78,6 +101,13 @@ const custard = {
     edits: (): Promise<VaultEditEntry[]> => ipcRenderer.invoke('vault:edits'),
     undoEdit: (id: string): Promise<{ ok: boolean; message: string }> =>
       ipcRenderer.invoke('vault:undoEdit', id)
+  },
+  skills: {
+    // null when no vault is connected.
+    list: (): Promise<SkillEntry[] | null> => ipcRenderer.invoke('skills:list'),
+    read: (folder: string): Promise<SkillText> => ipcRenderer.invoke('skills:read', folder),
+    // A new skill's folder with a draft SKILL.md; returns the folder.
+    create: (name: string): Promise<string> => ipcRenderer.invoke('skills:create', name)
   },
   plugins: {
     list: (): Promise<PluginStatus[]> => ipcRenderer.invoke('plugins:list'),
@@ -101,10 +131,15 @@ const custard = {
     disconnect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disconnect', id),
     resetSecrets: (id: string): Promise<PluginStatus> =>
       ipcRenderer.invoke('plugins:resetSecrets', id),
-    create: (id: string, name: string): Promise<PluginStatus> =>
-      ipcRenderer.invoke('plugins:create', id, name),
+    create: (name: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:create', name),
     labels: (): Promise<Record<string, string>> => ipcRenderer.invoke('plugins:labels'),
     sourceRoot: (): Promise<string> => ipcRenderer.invoke('plugins:sourceRoot')
+  },
+  // Estimated spend this month, and the monthly budget.
+  usage: {
+    month: (): Promise<UsageMonth> => ipcRenderer.invoke('usage:month'),
+    setBudget: (dollars: number | null): Promise<UsageMonth> =>
+      ipcRenderer.invoke('usage:setBudget', dollars)
   },
   memory: {
     getSettings: (): Promise<MemorySettings> => ipcRenderer.invoke('memory:getSettings'),
@@ -193,16 +228,17 @@ const custard = {
     get: (): Promise<SecurityDefaults> => ipcRenderer.invoke('security:get'),
     set: (s: SecurityDefaults): Promise<void> => ipcRenderer.invoke('security:set', s)
   },
-  workspace: {
-    pickGeneral: (): Promise<Workspace | null> => ipcRenderer.invoke('workspace:pickGeneral')
-  },
   conversations: {
-    list: (mode: Mode): Promise<ConversationSummary[]> =>
+    // Every mode's chats when `mode` is null.
+    list: (mode: Mode | null): Promise<ConversationSummary[]> =>
       ipcRenderer.invoke('conversations:list', mode),
     get: (id: string): Promise<Conversation | null> => ipcRenderer.invoke('conversations:get', id),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id),
     continuations: (id: string): Promise<ChatLink[]> =>
-      ipcRenderer.invoke('conversations:continuations', id)
+      ipcRenderer.invoke('conversations:continuations', id),
+    // Another model or effort for this chat's next message. No request.
+    setModel: (id: string, settings: ChatSettings): Promise<Conversation> =>
+      ipcRenderer.invoke('conversations:setModel', id, settings)
   },
   // Files for a Chat-mode message (see main/attachments). A draft is one
   // message's files before it is sent.
@@ -225,6 +261,9 @@ const custard = {
     stop: (requestId: string): void => ipcRenderer.send('chat:stop', requestId),
     approve: (id: string, decision: ApprovalDecision): Promise<void> =>
       ipcRenderer.invoke('chat:approve', id, decision),
+    // Yes or Not now on a Plugins hub chat's offer to enter a workspace.
+    proposal: (chatId: string, proposalId: string, yes: boolean): Promise<ProposalResult> =>
+      ipcRenderer.invoke('chat:proposal', chatId, proposalId, yes),
     // Continue a chat that grew too long in a new one; the original is kept.
     continue: (id: string, withoutSummary?: boolean): Promise<ContinueResult> =>
       ipcRenderer.invoke('chat:continue', id, withoutSummary),

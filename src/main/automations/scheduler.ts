@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
-import type { Automation, RunRecord } from '../../shared/automations'
-import { localDay, slotsBetween } from './schedule'
+import type { Automation, RunContext, RunRecord } from '../../shared/automations'
+import { buildContext } from './context'
+import { localDay, slotsBetween, type Slot } from './schedule'
 import {
   addRun,
   closeInterrupted,
@@ -10,8 +11,8 @@ import {
   type RunsFile
 } from './records'
 
-// A slot more than this late (Custard was closed or busy) is not run: catch-up
-// is a later step. It is recorded as skipped instead.
+// A slot more than this late (Custard was closed or busy) is a catch-up: it
+// runs late, flagged as such, up to the automation's limit.
 export const GRACE_MS = 10 * 60_000
 
 export type RunResult = {
@@ -20,6 +21,7 @@ export type RunResult = {
   calls: RunRecord['calls']
   changes: RunRecord['changes']
   summary?: string
+  questions?: string[]
 }
 
 export type SchedulerDeps = {
@@ -27,7 +29,13 @@ export type SchedulerDeps = {
   now: () => number
   list: () => Automation[]
   // Runs one automation to the end. It never throws; it reports how it ended.
-  run: (a: Automation, slot: string | undefined, signal: AbortSignal) => Promise<RunResult>
+  run: (
+    a: Automation,
+    slot: string | undefined,
+    signal: AbortSignal,
+    ctx: RunContext,
+    runId: string
+  ) => Promise<RunResult>
   // Called when a record changes, so the window can refresh.
   changed?: () => void
 }
@@ -74,13 +82,28 @@ export class Scheduler {
         const late = slots.filter((s) => now - s.instant > GRACE_MS)
         const due = slots.filter((s) => now - s.instant <= GRACE_MS)
         updateState(this.d.dir, a.id, { checkedUntil: now })
-        if (late.length)
+        // The newest few missed slots run, oldest first. Older ones are not
+        // run: they are folded into the first catch-up run's context and
+        // noted, never dropped silently.
+        const keep = Math.min(late.length, a.limits.catchUpRuns)
+        const folded = late.slice(0, late.length - keep)
+        const catching = late.slice(late.length - keep)
+        if (!keep && late.length)
           this.skip(
             a,
             late[late.length - 1].label,
-            `${late.length === 1 ? 'A scheduled run was' : `${late.length} scheduled runs were`} missed because Custard was closed or busy.`
+            `${late.length === 1 ? 'A scheduled run was' : `${late.length} scheduled runs were`} missed because Custard was closed or busy, and catch-up is off for this automation.`
           )
-        for (const s of due) this.enqueue(a.id, s.label, 'scheduled')
+        else if (folded.length)
+          this.skip(
+            a,
+            folded[folded.length - 1].label,
+            `${folded.length === 1 ? 'An older scheduled run was' : `${folded.length} older scheduled runs were`} missed and not run. ${folded.length === 1 ? 'It is' : 'They are'} listed in the context of the catch-up run for ${catching[0].label}.`
+          )
+        catching.forEach((s, i) =>
+          this.enqueue(a.id, s, 'scheduled', { catchUp: true, folded: i === 0 ? folded : [] })
+        )
+        for (const s of due) this.enqueue(a.id, s, 'scheduled', { catchUp: false, folded: [] })
       } else updateState(this.d.dir, a.id, { checkedUntil: now })
     }
   }
@@ -89,7 +112,7 @@ export class Scheduler {
   runNow(id: string): boolean {
     if (!this.d.list().some((a) => a.id === id)) return false
     if (this.pending.has(id)) return false
-    this.enqueue(id, undefined, 'manual')
+    this.enqueue(id, undefined, 'manual', { catchUp: false, folded: [] })
     return true
   }
 
@@ -110,10 +133,15 @@ export class Scheduler {
     this.d.changed?.()
   }
 
-  private enqueue(id: string, slot: string | undefined, kind: RunRecord['kind']): void {
+  private enqueue(
+    id: string,
+    slot: Slot | undefined,
+    kind: RunRecord['kind'],
+    how: { catchUp: boolean; folded: Slot[] }
+  ): void {
     if (kind === 'manual') this.pending.add(id)
     this.queue = this.queue
-      .then(() => this.runOne(id, slot, kind))
+      .then(() => this.runOne(id, slot, kind, how))
       .catch(() => {})
       .finally(() => this.pending.delete(id))
   }
@@ -130,8 +158,9 @@ export class Scheduler {
 
   private async runOne(
     id: string,
-    slot: string | undefined,
-    kind: RunRecord['kind']
+    slot: Slot | undefined,
+    kind: RunRecord['kind'],
+    how: { catchUp: boolean; folded: Slot[] }
   ): Promise<void> {
     // Looked up again: it may have been paused, changed or deleted while queued.
     const a = this.d.list().find((x) => x.id === id)
@@ -140,13 +169,18 @@ export class Scheduler {
     if (kind === 'scheduled') {
       if (!a.enabled || f.state.paused) return
       if (this.countToday(f, a) >= a.limits.runsPerDay)
-        return this.skip(a, slot, `The limit of ${a.limits.runsPerDay} runs a day was reached.`)
+        return this.skip(
+          a,
+          slot?.label,
+          `The limit of ${a.limits.runsPerDay} runs a day was reached.`
+        )
     }
     const run: RunRecord = {
       id: randomUUID(),
       automationId: id,
       kind,
-      ...(slot ? { slot } : {}),
+      ...(slot ? { slot: slot.label, slotAt: slot.instant } : {}),
+      ...(how.catchUp ? { catchUp: true } : {}),
       startedAt: this.d.now(),
       status: 'running',
       calls: [],
@@ -157,7 +191,15 @@ export class Scheduler {
     this.d.changed?.()
     let result: RunResult
     try {
-      result = await this.d.run(a, slot, this.abort.signal)
+      const ctx = buildContext(a, {
+        slot,
+        now: this.d.now(),
+        catchUp: how.catchUp,
+        folded: how.folded,
+        // Before this run was added, so it can't be its own last success.
+        runs: f.runs
+      })
+      result = await this.d.run(a, slot?.label, this.abort.signal, ctx, run.id)
     } catch (err) {
       result = {
         status: 'failed',

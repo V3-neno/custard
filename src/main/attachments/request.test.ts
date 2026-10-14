@@ -22,6 +22,8 @@ import { AttachmentStore } from './store'
 const OPUS: FileModel = { id: 'claude-opus-5-5', label: 'Opus 5.5', provider: 'claude' }
 const HAIKU: FileModel = { id: 'claude-haiku-4-5', label: 'Haiku 4.5', provider: 'claude' }
 const GPT: FileModel = { id: 'gpt-6-astra', label: 'GPT-6 Astra', provider: 'openai' }
+const FLASH: FileModel = { id: 'deepseek-flash', label: 'DeepSeek Flash', provider: 'deepseek' }
+const PRO: FileModel = { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', provider: 'deepseek' }
 
 let root: string
 let store: AttachmentStore
@@ -205,6 +207,38 @@ describe('model rules', () => {
     expect((r.files.blocks.get(0)![0] as { text: string }).text).toMatch(/not included.*animated/)
     expect(r.files.notes[0]).toMatch(/a\.gif wasn't sent to GPT-6 Astra/)
     r.files.release()
+  })
+
+  it('refuses a PDF for DeepSeek, and notes an earlier one', async () => {
+    const c = chat([{ role: 'user', content: 'x' }])
+    await attach(c, 0, [['report.pdf', pdf(1)]])
+    const r = await prepare(c, FLASH)
+    expect(r).toMatchObject({ ok: false, overflow: false })
+    expect(!r.ok && r.error).toMatch(/report\.pdf is a PDF, which DeepSeek doesn't accept/)
+    c.messages.push({ role: 'assistant', content: 'ok' }, { role: 'user', content: 'y' })
+    const later = await prepare(c, FLASH)
+    if (!later.ok) throw new Error(later.error)
+    expect(later.files.sent).toHaveLength(0)
+    expect(later.files.notes[0]).toMatch(
+      /report\.pdf wasn't sent to DeepSeek Flash: DeepSeek doesn't accept PDFs/
+    )
+    later.files.release()
+  })
+
+  it('sends DeepSeek Flash images and text files, but no images to V4 Pro', async () => {
+    const c = chat([{ role: 'user', content: 'x' }])
+    await attach(c, 0, [
+      ['shot.png', png(10, 10)],
+      ['notes.txt', Buffer.from('hello')]
+    ])
+    const ok = await prepare(c, FLASH)
+    if (!ok.ok) throw new Error(ok.error)
+    expect(ok.files.sent.map((a) => a.name)).toEqual(['shot.png', 'notes.txt'])
+    ok.files.release()
+    const r = await prepare(c, PRO)
+    expect(!r.ok && r.error).toMatch(
+      /DeepSeek V4 Pro doesn't take images, so shot\.png can't be sent/
+    )
   })
 
   it('counts images per request against the model (100 on Haiku)', async () => {

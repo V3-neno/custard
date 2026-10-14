@@ -3,9 +3,13 @@ import {
   DEFAULT_LIMITS,
   type Automation,
   type AutomationView,
+  type PendingQuestion,
   type RunRecord
 } from '../../../../shared/automations'
-import { chatModels } from '../../../../shared/chat'
+import { chatModels, type ModelAvailability } from '../../../../shared/chat'
+import type { ListedModel } from '../../../../shared/adapter'
+import { providerIds, providerNames } from '../../../../shared/providers'
+import { REASONS } from '../chat/modelText'
 import type { PluginStatus } from '../../../../shared/plugins'
 import type { VaultGrant } from '../../../../shared/vaultGrants'
 import { cleanError, danger, input, primary, secondary } from './ui'
@@ -40,6 +44,7 @@ type Form = {
   folders: string[]
   plugins: string[]
   runsPerDay: string
+  catchUpRuns: string
 }
 
 const blank = (model: string, skill: string): Form => ({
@@ -52,7 +57,8 @@ const blank = (model: string, skill: string): Form => ({
   timezone: '',
   folders: [],
   plugins: [],
-  runsPerDay: String(DEFAULT_LIMITS.runsPerDay)
+  runsPerDay: String(DEFAULT_LIMITS.runsPerDay),
+  catchUpRuns: String(DEFAULT_LIMITS.catchUpRuns)
 })
 
 const split = (s: string): string[] =>
@@ -66,19 +72,37 @@ const split = (s: string): string[] =>
 // and use only the read tools of the plugins picked here.
 export default function Automations(): React.JSX.Element {
   const [views, setViews] = useState<AutomationView[]>([])
+  const [questions, setQuestions] = useState<PendingQuestion[]>([])
   const [grants, setGrants] = useState<VaultGrant[]>([])
   const [skills, setSkills] = useState<string[]>([])
   const [plugins, setPlugins] = useState<PluginStatus[]>([])
   const [form, setForm] = useState<Form | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<string | null>(null)
+  // The models a run can use: the adapters' list, and which of them can be
+  // used now (the same rules as the chat's picker; no provider is asked).
+  const [models, setModels] = useState<Pick<ListedModel, 'id' | 'label' | 'provider'>[]>(() => [
+    ...chatModels
+  ])
+  const [availability, setAvailability] = useState<ModelAvailability[]>([])
 
   const refresh = useCallback(() => {
     window.custard.automations.list().then(setViews)
+    window.custard.automations.questions().then(setQuestions)
     window.custard.vault.getGrants().then(setGrants)
     window.custard.vault.get().then((v) => setSkills(v?.skills ?? []))
     window.custard.plugins.list().then(setPlugins)
+    window.custard.models
+      .list()
+      .then((l) => setModels(l.filter((m) => m.source === 'profile')))
+      .catch(() => {})
+    window.custard.models
+      .availability()
+      .then(setAvailability)
+      .catch(() => {})
   }, [])
+  const offFor = (id: string): ModelAvailability | undefined =>
+    availability.find((a) => a.id === id && !a.available)
   useEffect(() => {
     refresh()
     return window.custard.automations.onChanged(refresh)
@@ -92,7 +116,13 @@ export default function Automations(): React.JSX.Element {
     setError(null)
     // Folders may have been allowed since this was last shown.
     refresh()
-    if (!a) return setForm(blank(chatModels[0].id, skills[0] ?? ''))
+    if (!a)
+      return setForm(
+        blank(
+          models.find((m) => !offFor(m.id))?.id ?? models[0]?.id ?? chatModels[0].id,
+          skills[0] ?? ''
+        )
+      )
     setForm({
       id: a.id,
       name: a.name,
@@ -103,7 +133,8 @@ export default function Automations(): React.JSX.Element {
       timezone: a.timezone ?? '',
       folders: a.folders,
       plugins: a.plugins,
-      runsPerDay: String(a.limits.runsPerDay)
+      runsPerDay: String(a.limits.runsPerDay),
+      catchUpRuns: String(a.limits.catchUpRuns)
     })
   }
 
@@ -123,7 +154,11 @@ export default function Automations(): React.JSX.Element {
       folders: form.folders,
       plugins: form.plugins,
       enabled: existing?.enabled ?? false,
-      limits: { ...(existing?.limits ?? {}), runsPerDay: Number(form.runsPerDay) }
+      limits: {
+        ...(existing?.limits ?? {}),
+        runsPerDay: Number(form.runsPerDay),
+        catchUpRuns: Number(form.catchUpRuns)
+      }
     })
     if (r.ok) {
       setForm(null)
@@ -150,9 +185,60 @@ export default function Automations(): React.JSX.Element {
       <p className="mb-3 text-sm text-ash-300">
         Run a skill on a schedule. It runs only while Custard is open, on its own with nobody to
         ask: it can read your vault, change notes only in the editable folders you pick, and use
-        only the read tools of the plugins you pick. A run that is missed because Custard was closed
-        is skipped and noted below.
+        only the read tools of the plugins you pick. When Custard was closed at a scheduled time,
+        the newest missed runs happen when it opens (you set how many), marked catch-up; older ones
+        are noted and passed to the first of them.
       </p>
+      {questions.some((q) => q.status === 'open') && (
+        <div className="mb-3">
+          <h4 className="mb-1 text-xs font-medium text-ash-300">
+            Waiting for your answer. Claude asks them in your next chat.
+          </h4>
+          <ul className="space-y-1.5" aria-label="Open questions">
+            {questions
+              .filter((q) => q.status === 'open')
+              .map((q) => (
+                <li
+                  key={q.id}
+                  className="flex items-start gap-2 rounded-lg border border-molten-500/40 bg-forge-900 px-3 py-1.5 text-sm"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p>{q.question}</p>
+                    <p className="text-xs text-ash-500">
+                      {q.automationName}, {when(q.created)}
+                      {q.path ? ` · ${q.path}` : ''}
+                    </p>
+                    {q.context && <p className="text-xs text-ash-400">{q.context}</p>}
+                  </div>
+                  <button
+                    aria-label={`Drop question: ${q.question}`}
+                    onClick={() => void run(window.custard.automations.dismissQuestion(q.id))}
+                    className={`${danger} !px-2 !py-0.5 text-xs`}
+                  >
+                    Drop
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
+      {questions.some((q) => q.status === 'answered') && (
+        <details className="mb-3 text-xs text-ash-400">
+          <summary className="cursor-pointer">
+            Answered questions ({questions.filter((q) => q.status === 'answered').length})
+          </summary>
+          <ul className="mt-1 space-y-1" aria-label="Answered questions">
+            {questions
+              .filter((q) => q.status === 'answered')
+              .slice(0, 10)
+              .map((q) => (
+                <li key={q.id}>
+                  {q.question} <span className="text-ash-300">→ {q.answer}</span>
+                </li>
+              ))}
+          </ul>
+        </details>
+      )}
       {views.length > 0 && (
         <ul className="mb-3 space-y-2" aria-label="Automations">
           {views.map(({ automation: a, state, running, runs }) => (
@@ -224,6 +310,7 @@ export default function Automations(): React.JSX.Element {
                           <span className="text-ash-300">{STATUS[r.status]}</span>
                           <span>{when(r.startedAt)}</span>
                           {r.kind === 'manual' && <span>started by you</span>}
+                          {r.catchUp && <span>catch-up for {r.slot?.replace('T', ' ')}</span>}
                         </div>
                         {r.reason && <p className="text-ash-300">{r.reason}</p>}
                         {r.calls.length > 0 && (
@@ -286,10 +373,20 @@ export default function Automations(): React.JSX.Element {
               onChange={(e) => setForm({ ...form, model: e.target.value })}
               className="rounded-lg border border-forge-700 bg-forge-900 px-2 text-sm outline-none"
             >
-              {chatModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
+              {providerIds.map((p) => (
+                <optgroup key={p} label={providerNames[p]}>
+                  {models
+                    .filter((m) => m.provider === p)
+                    .map((m) => {
+                      const off = offFor(m.id)
+                      return (
+                        <option key={m.id} value={m.id} disabled={!!off && m.id !== form.model}>
+                          {m.label}
+                          {off?.reason ? ` · ${REASONS[off.reason](providerNames[p])}` : ''}
+                        </option>
+                      )
+                    })}
+                </optgroup>
               ))}
             </select>
           </div>
@@ -323,6 +420,16 @@ export default function Automations(): React.JSX.Element {
               value={form.runsPerDay}
               onChange={(e) => setForm({ ...form, runsPerDay: e.target.value })}
               title="At most this many scheduled runs a day"
+              className={`${input} !w-24`}
+            />
+            <input
+              aria-label="Catch-up runs"
+              type="number"
+              min={0}
+              max={10}
+              value={form.catchUpRuns}
+              onChange={(e) => setForm({ ...form, catchUpRuns: e.target.value })}
+              title="When Custard was closed, how many missed runs to run on opening (the newest; 0 = none)"
               className={`${input} !w-24`}
             />
           </div>
