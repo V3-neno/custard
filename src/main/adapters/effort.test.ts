@@ -13,7 +13,9 @@ beforeAll(async () => {
     let raw = ''
     req.on('data', (c) => (raw += c))
     req.on('end', () => {
-      bodies.push(JSON.parse(raw))
+      const body = JSON.parse(raw)
+      bodies.push(body)
+      const refuse = body.input === 'please refuse'
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(
         JSON.stringify({
@@ -28,7 +30,11 @@ beforeAll(async () => {
               id: 'm',
               role: 'assistant',
               status: 'completed',
-              content: [{ type: 'output_text', text: 'ok', annotations: [] }]
+              content: [
+                refuse
+                  ? { type: 'refusal', refusal: "I can't help with that." }
+                  : { type: 'output_text', text: 'ok', annotations: [] }
+              ]
             }
           ],
           usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
@@ -80,5 +86,23 @@ describe('effort in the request', () => {
   it('OpenAI gets the level as picked; no effort means none is sent', async () => {
     expect(await send('openai', 'gpt-6-astra', 'xhigh')).toEqual({ effort: 'xhigh' })
     expect(await send('openai', 'gpt-6-astra')).toBeUndefined()
+  })
+})
+
+// Phase 7: a one-shot call (a summary, an automation step) that OpenAI or
+// DeepSeek declines says so, as Claude's does, instead of passing the
+// refusal off as the answer.
+describe('a declined one-shot call', () => {
+  it('is refused', async () => {
+    for (const p of ['openai', 'deepseek'] as const) {
+      const r = await adapterFor(p).sendMessage({
+        model: p === 'openai' ? 'gpt-6-astra' : 'deepseek-flash',
+        apiKey: 'sk-test',
+        system: 's',
+        messages: 'please refuse',
+        retries: 0
+      })
+      expect(r.stop).toBe('refused')
+    }
   })
 })

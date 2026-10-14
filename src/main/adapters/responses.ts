@@ -94,7 +94,16 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
       calls: blocks.flatMap((b) =>
         b.type === 'tool_use' ? [{ id: b.id, name: b.name, input: b.input }] : []
       ),
-      stop: r.status === 'incomplete' ? 'cut-off' : r.status === 'failed' ? 'failed' : 'done',
+      // A refusal part is the model declining, as Claude's refusal stop is.
+      stop: r.output.some(
+        (o) => o.type === 'message' && o.content.some((c) => c.type === 'refusal')
+      )
+        ? 'refused'
+        : r.status === 'incomplete'
+          ? 'cut-off'
+          : r.status === 'failed'
+            ? 'failed'
+            : 'done',
       ...(r.status === 'failed' ? { error: r.error?.message ?? 'unknown error' } : {}),
       usage: [{ model: req.model, usage: fromOpenAI(r.usage) }]
     }
