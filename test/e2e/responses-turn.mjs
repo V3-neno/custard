@@ -366,13 +366,16 @@ try {
     fs.writeFileSync(GOLDEN, got + '\n')
     console.log('golden record written')
   } else {
+    // The context estimate counts the system prompt's characters, and the
+    // date in it (Tuesday, Wednesday) changes its length from day to day.
+    const same = (x) =>
+      JSON.stringify(x, (k, v) =>
+        k === 'context' && v && typeof v === 'object' ? { ...v, tokens: '<estimate>' } : v
+      )
     const want = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'))
     for (const s of Object.keys(want))
       for (const part of ['requests', 'events', 'draft', 'chat'])
-        check(
-          JSON.stringify(want[s][part]) === JSON.stringify(record[s]?.[part]),
-          `${s}: ${part} identical`
-        )
+        check(same(want[s][part]) === same(record[s]?.[part]), `${s}: ${part} identical`)
   }
 } finally {
   await app.close()

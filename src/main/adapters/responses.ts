@@ -1,8 +1,9 @@
 import type { ResponseInputItem } from 'openai/resources/responses/responses'
 import { chatModels, deepseekEffort, type Effort } from '../../shared/chat'
-import { providers, type Provider } from '../../shared/providers'
+import { providers, responsesFeatures, type Provider } from '../../shared/providers'
 import { openaiStart } from '../compaction'
-import { runOpenAI, toBlocks, toInput } from '../openai'
+import { runOpenAI, toBlocks, toFunctionTool, toInput } from '../openai'
+import { searchOpenAI } from '../web/search'
 import { responsesClient } from '../providers'
 import { fromOpenAI } from '../usage'
 import { capabilitiesOf } from './capabilities'
@@ -66,7 +67,7 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
           typeof req.messages === 'string'
             ? req.messages
             : (toInput(req.messages) as ResponseInputItem[]),
-        max_output_tokens: req.maxTokens,
+        ...(req.maxTokens !== undefined ? { max_output_tokens: req.maxTokens } : {}),
         ...(effortFor(req.model, req.effort)
           ? { reasoning: { effort: effortFor(req.model, req.effort) } }
           : {}),
@@ -82,7 +83,8 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
                 }
               }
             }
-          : {})
+          : {}),
+        ...(req.tools?.length ? { tools: req.tools.map(toFunctionTool) } : {})
       },
       { signal: req.signal }
     )
@@ -92,7 +94,8 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
       calls: blocks.flatMap((b) =>
         b.type === 'tool_use' ? [{ id: b.id, name: b.name, input: b.input }] : []
       ),
-      stop: r.status === 'incomplete' ? 'cut-off' : 'done',
+      stop: r.status === 'incomplete' ? 'cut-off' : r.status === 'failed' ? 'failed' : 'done',
+      ...(r.status === 'failed' ? { error: r.error?.message ?? 'unknown error' } : {}),
       usage: [{ model: req.model, usage: fromOpenAI(r.usage) }]
     }
   }
@@ -115,6 +118,17 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
     getCapabilities: capabilitiesOf,
     sendMessage,
     streamMessage,
-    historyStart: (conversation, modelId) => openaiStart(conversation, modelId).from
+    historyStart: (conversation, modelId) => openaiStart(conversation, modelId).from,
+    // OpenAI's hosted search; DeepSeek has none (its profile says so, and
+    // getCapabilities with it).
+    webSearch: async ({ model, apiKey, query, signal }) =>
+      responsesFeatures(id).webSearch
+        ? searchOpenAI(responsesClient(id, apiKey), model, query, signal)
+        : {
+            ran: [],
+            hits: [],
+            summary: '',
+            error: `Web search isn't available for ${model}.`
+          }
   }
 }

@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type {
   BetaContentBlock,
   BetaContentBlockParam,
+  BetaMessageParam,
   MessageCreateParamsStreaming
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { chatModels } from '../../shared/chat'
@@ -21,7 +22,8 @@ import {
   fromLastCompaction
 } from '../context'
 import { anthropicEndpoint } from '../endpoints'
-import { claudeParts, fromClaude } from '../usage'
+import { searchClaude } from '../web/search'
+import { claudeParts } from '../usage'
 import {
   authenticateWith,
   CHECK_OPTS,
@@ -171,25 +173,49 @@ async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
     ...(req.timeoutMs !== undefined ? { timeout: req.timeoutMs } : {}),
     ...(req.retries !== undefined ? { maxRetries: req.retries } : {})
   })
-  const m = await api.messages.create(
-    {
-      model: req.model,
-      max_tokens: req.maxTokens,
-      system: req.system,
-      messages:
-        typeof req.messages === 'string'
-          ? [{ role: 'user', content: req.messages }]
-          : (req.messages as Anthropic.MessageParam[]),
-      ...(req.schema
-        ? { output_config: { format: { type: 'json_schema', schema: req.schema.schema } } }
-        : {})
-    },
-    { signal: req.signal }
-  )
+  const messages =
+    typeof req.messages === 'string'
+      ? [{ role: 'user' as const, content: req.messages }]
+      : (req.messages as Anthropic.MessageParam[])
+  const maxTokens = req.maxTokens ?? 16000
+  const tools = req.tools?.length ? { tools: req.tools } : {}
+  const m = req.stream
+    ? await api.beta.messages
+        .stream(
+          {
+            model: req.model,
+            max_tokens: maxTokens,
+            system: req.system,
+            messages: messages as BetaMessageParam[],
+            ...tools
+          },
+          { signal: req.signal }
+        )
+        .finalMessage()
+    : await api.messages.create(
+        {
+          model: req.model,
+          max_tokens: maxTokens,
+          system: req.system,
+          messages,
+          ...(tools as { tools?: Anthropic.Tool[] }),
+          ...(req.schema
+            ? { output_config: { format: { type: 'json_schema', schema: req.schema.schema } } }
+            : {})
+        },
+        { signal: req.signal }
+      )
+  const content = m.content as {
+    type: string
+    text?: string
+    id?: string
+    name?: string
+    input?: unknown
+  }[]
   return {
-    text: m.content.map((b) => (b.type === 'text' ? b.text : '')).join(''),
-    calls: m.content.flatMap((b) =>
-      b.type === 'tool_use' ? [{ id: b.id, name: b.name, input: b.input }] : []
+    text: content.map((b) => (b.type === 'text' ? (b.text ?? '') : '')).join(''),
+    calls: content.flatMap((b) =>
+      b.type === 'tool_use' ? [{ id: b.id!, name: b.name!, input: b.input }] : []
     ),
     stop:
       m.stop_reason === 'refusal'
@@ -199,7 +225,8 @@ async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
           : m.stop_reason === 'model_context_window_exceeded'
             ? 'too-long'
             : 'done',
-    usage: [{ model: m.model || req.model, usage: fromClaude(m.usage) }]
+    // Split by model when a fallback answered part of it.
+    usage: claudeParts(m.usage, m.model || req.model)
   }
 }
 
@@ -234,6 +261,8 @@ export const anthropicAdapter: ProviderAdapter = {
   getCapabilities: capabilitiesOf,
   sendMessage,
   streamMessage,
+  webSearch: ({ model, apiKey, query, signal }) =>
+    searchClaude(client(apiKey), model, query, signal),
   historyStart: (conversation, modelId) =>
     usesCompaction(modelId) ? claudeFilesFrom(conversation.messages) : 0
 }

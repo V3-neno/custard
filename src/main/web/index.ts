@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk'
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { ActionRecord, Conversation, WebSource } from '../../shared/chat'
 import type { ToolRun } from '../turn'
@@ -9,13 +8,9 @@ import {
   formatResults,
   MAX_QUERY,
   MAX_SEARCHES_PER_TURN,
-  searchClaude,
-  searchOpenAI,
   webSearchTool,
   type SearchOutcome
 } from './search'
-import { anthropicEndpoint } from '../endpoints'
-import { responsesClient } from '../providers'
 import { providers, responsesFeatures, type Provider } from '../../shared/providers'
 import type { OnUsage } from '../../shared/pricing'
 
@@ -59,6 +54,8 @@ export type WebContext = {
   injected: string[]
   // Told what a search's own model call used (see usage.ts).
   onUsage?: OnUsage
+  // Runs one search: the model's provider adapter (adapter.webSearch).
+  search: (query: string) => Promise<SearchOutcome>
 }
 
 const notRun = (content: string): ToolRun => ({ content, isError: true, outcome: 'not-run' })
@@ -169,22 +166,7 @@ export async function runWebTool(
         ? 'Stopped before it ran, so nothing was searched.'
         : 'The user declined this search, so nothing was sent.'
     )
-  const search =
-    deps.search ??
-    ((q: string) =>
-      providers[ctx.model.provider].api === 'anthropic'
-        ? searchClaude(
-            new Anthropic({ apiKey: ctx.apiKey, ...anthropicEndpoint() }),
-            ctx.model.id,
-            q,
-            ctx.signal
-          )
-        : searchOpenAI(
-            responsesClient(ctx.model.provider, ctx.apiKey),
-            ctx.model.id,
-            q,
-            ctx.signal
-          ))
+  const search = deps.search ?? ctx.search
   const outcome = await search(query)
   if (outcome.usage) ctx.onUsage?.(ctx.model.id, outcome.usage)
   addSources(

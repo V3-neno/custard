@@ -63,7 +63,7 @@ type Turn = {
 // How the turn ended, when not with a normal final answer.
 export type OpenAIEnd = 'done' | 'cut-off' | 'cut-off-tool' | 'step-limit' | 'too-long'
 
-const toFunctionTool = (t: BetaTool): FunctionTool => ({
+export const toFunctionTool = (t: BetaTool): FunctionTool => ({
   type: 'function',
   name: t.name,
   description: t.description ?? null,

@@ -680,6 +680,13 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         apiKey,
         onUsage: (m, u) => charge(conversation, m, u),
         signal: controller.signal,
+        search: (query) =>
+          adapterFor(model.provider).webSearch({
+            model: model.id,
+            apiKey,
+            query,
+            signal: controller.signal
+          }),
         turn: log.startLength,
         approve: (label, input, warning) =>
           approve(

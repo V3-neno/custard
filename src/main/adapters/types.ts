@@ -9,6 +9,7 @@ import type { ChatEvent, Conversation, Effort } from '../../shared/chat'
 import type { TokenUsage } from '../../shared/pricing'
 import type { Provider, ProviderApi } from '../../shared/providers'
 import type { TurnLog } from '../turn'
+import type { SearchOutcome } from '../web/search'
 
 // The one interface every provider implements. Custard's own work (vault
 // tools, plugins, approvals, memory, chat notes, the cost meter) sits above
@@ -42,8 +43,7 @@ export type ModelListing = {
 }
 
 // sendMessage(): one call, not streamed to the user. Background summaries
-// (captures, chat notes and their titles, Continue). Automation steps keep
-// their own call for now (see the Phase 2 review).
+// (captures, chat notes and their titles, Continue) and automation steps.
 export type OneShotRequest = {
   model: string
   apiKey: string
@@ -52,7 +52,15 @@ export type OneShotRequest = {
   messages: BetaMessageParam[] | string
   // Ask for JSON matching this schema (structured output).
   schema?: { name: string; schema: Record<string, unknown> }
-  maxTokens: number
+  // Tools the model may call; the calls come back in `calls`, unrun.
+  tools?: BetaTool[]
+  // The output limit. Without one, Claude gets 16,000 (its API needs a
+  // limit) and a Responses provider gets none.
+  maxTokens?: number
+  // Claude: wait for the reply over a stream, as long replies need (the SDK
+  // refuses a plain request it expects to run past its timeout). A Responses
+  // provider sends one plain request either way.
+  stream?: boolean
   // Responses providers only; Claude's one-shot model (Haiku 4.5) takes none.
   effort?: Effort
   timeoutMs?: number
@@ -64,8 +72,10 @@ export type OneShotResult = {
   text: string
   calls: { id: string; name: string; input: unknown }[]
   // done; cut-off (output limit); refused (the model declined); too-long
-  // (the context window filled).
-  stop: 'done' | 'cut-off' | 'refused' | 'too-long'
+  // (the context window filled); failed (the provider says it couldn't
+  // finish, with its reason in `error`).
+  stop: 'done' | 'cut-off' | 'refused' | 'too-long' | 'failed'
+  error?: string
   // What each model used, already split by model when a fallback answered.
   usage: { model: string; usage: TokenUsage }[]
 }
@@ -129,4 +139,16 @@ export interface ProviderAdapter {
   // newest compaction it can read, or 0. Attached files before it aren't
   // sent again.
   historyStart(conversation: Conversation, modelId: string): number
+  // One web search for the web_search tool, in a call of its own that holds
+  // only the query (see web/search.ts). Whether a model has search at all is
+  // in getCapabilities; a model without it gets an outcome saying so, and is
+  // never offered the tool.
+  webSearch(req: WebSearchRequest): Promise<SearchOutcome>
+}
+
+export type WebSearchRequest = {
+  model: string
+  apiKey: string
+  query: string
+  signal: AbortSignal
 }
