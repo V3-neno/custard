@@ -309,6 +309,44 @@ describe('Haiku 4.5 takes no effort', () => {
   })
 })
 
+describe('Haiku 4.5 takes no thinking', () => {
+  // Anthropic's API rejects adaptive thinking on Haiku 4.5, and chats,
+  // summaries and automation steps would send it (automation thinking,
+  // Phase 3).
+  const reason =
+    'Haiku 4.5 can\'t think the way Custard asks: Anthropic\'s API rejects adaptive thinking on it. Leave "thinking" out.'
+
+  it('a customisation of Haiku 4.5 that turns thinking on is rejected', () => {
+    expect(why({ id: 'claude-haiku-4-5', provider: 'claude', thinking: true })).toBe(reason)
+    expect(
+      why({ id: 'claude-haiku-4-5', provider: 'claude', thinking: true, label: 'Haiku (mine)' })
+    ).toBe(reason)
+  })
+
+  it('Haiku 4.5 with thinking off or left out still loads', () => {
+    expect(one({ id: 'claude-haiku-4-5', provider: 'claude', thinking: false }).thinking).toBe(
+      false
+    )
+    expect(one({ id: 'claude-haiku-4-5', provider: 'claude', label: 'Cheap' })).toMatchObject({
+      thinking: false,
+      changed: ['label']
+    })
+  })
+
+  it('other models keep thinking, and the rule goes by id and provider only', () => {
+    expect(one({ id: 'claude-sonnet-5-5', provider: 'claude', thinking: true }).thinking).toBe(true)
+    expect(
+      one({
+        id: 'claude-haiku-4-5-alias',
+        provider: 'claude',
+        label: 'Haiku alias',
+        limits: { window: 200_000, maxOutput: 64_000 },
+        thinking: true
+      }).thinking
+    ).toBe(true)
+  })
+})
+
 describe('the registry with the file', () => {
   it('customised built-ins keep their place; added models follow', () => {
     const r = parse([

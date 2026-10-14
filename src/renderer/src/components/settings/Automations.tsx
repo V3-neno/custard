@@ -6,7 +6,9 @@ import {
   type PendingQuestion,
   type RunRecord
 } from '../../../../shared/automations'
+import { effortControl, formEffort, runModelText } from '../../../../shared/automationEffort'
 import { chatModels, type ModelAvailability } from '../../../../shared/chat'
+import { providerEffort, type Effort } from '../../../../shared/models'
 import type { ListedModel } from '../../../../shared/adapter'
 import { providerIds, providerNames } from '../../../../shared/providers'
 import { REASONS } from '../chat/modelText'
@@ -38,6 +40,11 @@ type Form = {
   name: string
   skill: string
   model: string
+  // The effort the form holds (saved as it is; none for a model that takes
+  // none), and the one the automation had when opened (none for a new one
+  // or one saved before there was a choice).
+  effort?: Effort
+  saved?: Effort
   times: string
   days: string
   timezone: string
@@ -52,6 +59,7 @@ const blank = (model: string, skill: string): Form => ({
   name: '',
   skill,
   model,
+  ...(formEffort(model, undefined) ? { effort: formEffort(model, undefined) } : {}),
   times: '',
   days: '',
   timezone: '',
@@ -128,6 +136,8 @@ export default function Automations(): React.JSX.Element {
       name: a.name,
       skill: a.skill,
       model: a.model,
+      ...(formEffort(a.model, a.effort) ? { effort: formEffort(a.model, a.effort) } : {}),
+      ...(a.effort ? { saved: a.effort } : {}),
       times: a.times.join(', '),
       days: a.days.join(', '),
       timezone: a.timezone ?? '',
@@ -142,8 +152,13 @@ export default function Automations(): React.JSX.Element {
     if (!form) return
     setError(null)
     const existing = views.find((v) => v.automation.id === form.id)?.automation
+    // The effort is whatever the form shows: dropped from the copy of the
+    // existing automation, then set only when the form holds one.
+    const { effort: _was, ...rest } = existing ?? ({} as Partial<Automation>)
+    void _was
     const r = await window.custard.automations.save({
-      ...(existing ?? {}),
+      ...rest,
+      ...(form.effort ? { effort: form.effort } : {}),
       id: form.id,
       name: form.name,
       skill: form.skill,
@@ -312,6 +327,7 @@ export default function Automations(): React.JSX.Element {
                           {r.kind === 'manual' && <span>started by you</span>}
                           {r.catchUp && <span>catch-up for {r.slot?.replace('T', ' ')}</span>}
                         </div>
+                        {runModelText(r) && <p data-run-model>{runModelText(r)}</p>}
                         {r.reason && <p className="text-ash-300">{r.reason}</p>}
                         {r.calls.length > 0 && (
                           <p>
@@ -370,9 +386,19 @@ export default function Automations(): React.JSX.Element {
             <select
               aria-label="Model for the automation"
               value={form.model}
-              onChange={(e) => setForm({ ...form, model: e.target.value })}
+              onChange={(e) => {
+                const { effort: _old, ...f } = form
+                void _old
+                const effort = formEffort(e.target.value, form.effort)
+                setForm({ ...f, model: e.target.value, ...(effort ? { effort } : {}) })
+              }}
               className="rounded-lg border border-forge-700 bg-forge-900 px-2 text-sm outline-none"
             >
+              {!models.some((m) => m.id === form.model) && (
+                <option value={form.model}>
+                  {form.model} · {REASONS['no-profile']('')}
+                </option>
+              )}
               {providerIds.map((p) => (
                 <optgroup key={p} label={providerNames[p]}>
                   {models
@@ -390,6 +416,60 @@ export default function Automations(): React.JSX.Element {
               ))}
             </select>
           </div>
+          {(() => {
+            // The model's effort levels, as the model picker shows them:
+            // a row of buttons, greyed out with the reason for a model
+            // that takes none.
+            const c = effortControl(
+              form.model,
+              form.saved,
+              !form.id,
+              form.effort,
+              providerEffort(models.find((m) => m.id === form.model)?.provider ?? 'claude')
+            )
+            const name = models.find((m) => m.id === form.model)?.label ?? form.model
+            return (
+              <fieldset data-automation-effort={c.kind} className="max-w-sm">
+                <legend className="mb-1 text-xs text-ash-400">
+                  {c.kind === 'levels' ? `Effort for ${name}` : c.note}
+                </legend>
+                {c.kind !== 'no-profile' && (
+                  <div className="flex gap-1">
+                    {c.levels.map((l) => {
+                      const on = c.kind === 'levels' && c.picked === l.value
+                      return (
+                        <button
+                          key={l.value}
+                          type="button"
+                          aria-pressed={on}
+                          data-level={l.value}
+                          disabled={c.kind !== 'levels'}
+                          onClick={() => setForm({ ...form, effort: l.value })}
+                          className={`flex-1 rounded-full border px-1.5 py-1 text-xs disabled:opacity-40 ${
+                            on
+                              ? 'border-molten-500/60 text-molten-200'
+                              : 'border-forge-700 text-ash-300 hover:text-molten-200'
+                          }`}
+                        >
+                          {l.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                {c.kind === 'levels' && (
+                  <p className="mt-1 text-xs text-ash-500" data-effort-cost>
+                    {c.cost}
+                  </p>
+                )}
+                {c.kind === 'levels' && c.note && (
+                  <p className="text-xs text-ash-400" data-effort-note>
+                    {c.note}
+                  </p>
+                )}
+              </fieldset>
+            )
+          })()}
           <input
             aria-label="Times of day"
             value={form.times}

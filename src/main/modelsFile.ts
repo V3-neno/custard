@@ -243,6 +243,13 @@ function checkEntry(raw: Raw, base: ModelProfile | null): ModelProfile {
   const compaction =
     raw.compaction !== undefined ? bool(raw.compaction, 'compaction') : d.compaction
   const thinking = raw.thinking !== undefined ? bool(raw.thinking, 'thinking') : d.thinking
+  // Nor adaptive thinking, which is what Custard asks for (Anthropic's API
+  // takes only a token budget on Haiku 4.5): chats, summaries and
+  // automation steps would fail. Known by its id, as above.
+  if (thinking && provider === 'claude' && id === HAIKU_45)
+    reject(
+      'Haiku 4.5 can\'t think the way Custard asks: Anthropic\'s API rejects adaptive thinking on it. Leave "thinking" out.'
+    )
   const fallbacks = raw.fallbacks !== undefined ? bool(raw.fallbacks, 'fallbacks') : d.fallbacks
   if (fallbacks && provider !== 'claude') reject('"fallbacks" is for Claude models only.')
 
