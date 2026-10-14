@@ -105,18 +105,18 @@ For each history, every prefix (each possible request point) is compared under 3
 
 | Source | Histories | Request comparisons | Mismatches |
 | --- | --- | --- | --- |
-| Goldens: `claude-turn` ×3 models and `responses-turn` (every recorded chat, with its writer) | GOLDEN_H | GOLDEN_R | 0 |
-| Unit suite, captured, in a shape Custard stores (longchat.test, openai.test (adapter), oneShot.test, history.test, turn.test, request.test, memory and continuity tests) | UNIT_H | UNIT_R | 0 |
-| The same histories with `is_error` added to tool results that lack it (see Surprises) | UNIT2_H | UNIT2_R | 0 |
-| Named cases (below) | 9 | NAMED_R | 0 |
-| **e2e run** (`NEUTRAL_E2E_DIR`): every chat file left by all 49 suites | E2E_H | E2E_R | 0 |
-| **e2e run**: every request body logged by `claude-turn` ×3, `responses-turn` and `round-trip`, rebuilt from the stored chat it came from | LOGGED_M of LOGGED_N matched | | 0 |
+| Goldens: `claude-turn` ×3 models and `responses-turn` (every recorded chat, with its writer) | 52 | 184,632 | 0 |
+| Unit suite, captured, in a shape Custard stores (64 of the 172) (longchat.test, openai.test (adapter), oneShot.test, history.test, turn.test, request.test, memory and continuity tests) | 64 | 15,456 | 0 |
+| All 172 again, with `is_error` added to tool results that lack it (see Surprises); 2 are still not a stored shape | 170 | 74,340 | 0 |
+| Named cases (below) | 9 | 3,360 | 0 |
+| **e2e run** (`NEUTRAL_E2E_DIR`): every chat file left by all 49 suites | 107 | 99,624 | 0 |
+| **e2e run**: every request body logged by `claude-turn` ×3, `responses-turn` and `round-trip`, rebuilt from the stored chat it came from | 124 of 187 rebuilt | | 0 |
 
-The logged bodies that were not rebuilt are of three kinds, none of them from a stored chat:
+Of the 187 logged bodies, 124 were rebuilt byte for byte, and none was rebuilt differently. The other 63 are of three kinds, none of them from a stored chat:
 
-- Responses requests after the first step of a turn. Their input carries that turn's own output items (reasoning, messages with ids), which are never stored (B1).
-- Turns that were taken back after a stop or an error before anything happened. The user's message was removed, so no stored prefix holds it.
-- `round-trip`'s web-search call (`Query: …`), which is a one-shot request, not a chat.
+- **52 Responses requests after the first step of a turn.** Their input carries that turn's own output items (reasoning, messages with ids), which are never stored (B1).
+- **10 turns taken back** after a refusal, an error or a stop before anything happened. The user's message was removed, so no stored prefix holds it. These are the `refusal` and `error` cases in `claude-turn` ×3 (6 requests) and in `responses-turn` (4).
+- **1 web-search call in `round-trip`** (`Query: …`), which is a one-shot request, not a chat.
 
 **The named cases.** Each is built with the code that writes it today (`TurnLog`, `echoableContent`, `toBlocks`). Each is compared on all three Claude models and both Responses providers, under every variant above, and checked for consistency:
 
@@ -144,12 +144,12 @@ The logged bodies that were not rebuilt are of three kinds, none of them from a 
 
 | | Baseline (77cbdfa + B1 file) | After B2 |
 | --- | --- | --- |
-| Unit (`npx vitest run`) | 1,315 passed, 82 files | UNIT_AFTER |
+| Unit (`npx vitest run`) | 1,315 passed, 82 files | 1,333 passed, 2 skipped (the two e2e-data tests, which need `NEUTRAL_E2E_DIR`), 83 files |
 | Typecheck | clean | clean |
 | `npx eslint src test` | clean | clean |
-| e2e, one suite at a time | 49 suites, 1,582 checks, 0 failed | E2E_AFTER |
-| Goldens (sha256 of the 5 golden files) | recorded | GOLDENS_AFTER |
-| Request hashes | inside the goldens | GOLDENS_AFTER |
+| e2e, one suite at a time | 49 suites, 1,582 checks, 0 failed | 49 suites, 1,582 checks, 0 failed; every suite's counts identical to the baseline |
+| Goldens (sha256 of the 5 golden files) | recorded | identical (all 5 files unchanged) |
+| Request hashes | inside the goldens | identical (all 5 files unchanged) |
 | App build `out/` (sha256 of all 18 files) | recorded | identical |
 
 Two things about how the baseline was run:
@@ -159,7 +159,7 @@ Two things about how the baseline was run:
 
 ## Surprises
 
-- **The unit tests write tool results without `is_error`.** 106 of the 172 captured histories do this (memory.test, longchat.test, history.test, plugins, continuity, turn.test's repair). `TurnLog` always writes `is_error`, so the helper treats these as "not a stored shape". Rather than make the neutral `isError` optional for test data, they are checked in a second pass with `is_error: false` added, which is what `TurnLog` writes. Both passes have 0 mismatches.
+- **The unit tests write tool results without `is_error`.** 106 of the 172 captured histories do this, and 108 are left out of the first pass in all (memory.test, longchat.test, history.test, plugins, continuity, turn.test's repair). `TurnLog` always writes `is_error`, so the helper treats these as "not a stored shape". Rather than make the neutral `isError` optional for test data, they are checked in a second pass with `is_error: false` added, which is what `TurnLog` writes. Both passes have 0 mismatches.
 - **`request.test` calls `toInput` on messages that already have their files in front.** That is a shape that is never stored, so those 2 are left to the files variants instead.
 - **Chats in the e2e output live under `cfg-*/custard/conversations`.** My first version of the e2e check found 0 chats and passed. It now requires more than 50.
 - **Every live Claude reply may keep `raw`.** See "Where your brief differs", point 2.
