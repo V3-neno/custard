@@ -2,7 +2,7 @@
  "openai:plain": {
   "requests": [
    {
-    "hash": "ff7124e8c9890c963fe837ef1314aabfe6cd6980c0e933e7d11a838e1a3e04d5",
+    "hash": "3f22737d1a0a812ac5fb04ba04528585947bb75e51059a8ce19422e7b7fb3035",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -87,7 +87,7 @@
       }
      ],
      "context": {
-      "tokens": 3458,
+      "tokens": 3734,
       "budget": 936700,
       "counted": false,
       "warn": false,
@@ -149,7 +149,7 @@
  "openai:tool": {
   "requests": [
    {
-    "hash": "8d2315b92e9699dca0e829d9112112ea4389733a2705f508dbef8599e1430a3c",
+    "hash": "326ec31b705157db101691dc7b4a467ad9d8aedee2f232e72c8eae2f78073009",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -182,7 +182,7 @@
     }
    },
    {
-    "hash": "53f847e9cebd59e3b841a0f153e1a8967fbaf4d7da442a1dfaf3096d3b6b3a73",
+    "hash": "16450cabf698d33dc5f148bf33bfc16d3400c9a2f3c6a5b1499e8e5e31543da3",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -331,7 +331,7 @@
       }
      ],
      "context": {
-      "tokens": 3628,
+      "tokens": 3904,
       "budget": 936700,
       "counted": false,
       "warn": false,
@@ -464,7 +464,7 @@
  "openai:cutoff": {
   "requests": [
    {
-    "hash": "b3d3c452499c9b147d6a60bd3d50b551e25b057533170d3c2e3f85b47f665fa6",
+    "hash": "f571bb92ed6d2aec1a1616f0e0bc59a078a6e501fcc03d7bbf6c7a7dfcb6a2d8",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -613,7 +613,7 @@
       }
      ],
      "context": {
-      "tokens": 3623,
+      "tokens": 3898,
       "budget": 936700,
       "counted": false,
       "warn": false,
@@ -781,7 +781,7 @@
  "openai:cuttool": {
   "requests": [
    {
-    "hash": "1d4535e51fb9896c7b7657e132a8c788aa54cbc5ae07012b410fc6a6cd7002ae",
+    "hash": "66ad205ba03b3cff8648ea7ec77eff5b158584733ddf4700087947bb423cbc98",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -954,7 +954,7 @@
       }
      ],
      "context": {
-      "tokens": 3658,
+      "tokens": 3933,
       "budget": 936700,
       "counted": false,
       "warn": false,
@@ -1156,7 +1156,7 @@
  "openai:steps": {
   "requests": [
    {
-    "hash": "09f72b3e9595f5d37367096efaf6c0907c8190d650015abfec2e6bd833a94cd1",
+    "hash": "04cb3a34d7f74c6aa640c9440d52e29cc9de99c19be836c20041e0facfdba005",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1189,7 +1189,7 @@
     }
    },
    {
-    "hash": "874ffb7743d302d2136ab3a3b3357ede5686af043bc7449aa67c5ef2839d569f",
+    "hash": "84e90308de997754a99554bed711667faac47c2c9f97490c7cee939a39ae8086",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1223,7 +1223,7 @@
     }
    },
    {
-    "hash": "8c8b51750a053abac44e05844cceb67883998c46daa66242111fbb04e6129ea1",
+    "hash": "28f4453bcfe5494944573d96f49a3d1a16e69ff22cca31d945f7a7841bb2f231",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1257,7 +1257,7 @@
     }
    },
    {
-    "hash": "0092ad1110f6b5790a201e1fa3f0b5b1b3fec737e9a82ef4ad94c37e9f67491c",
+    "hash": "f72f12e8513858221cd06bb91ba3a7859f5da3452aa4e25c7878bc85f72c56f7",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1291,7 +1291,7 @@
     }
    },
    {
-    "hash": "a310d45f2c0e8ef88e5c8decc64fe8634b5712d66338444b637835892228bf4d",
+    "hash": "1173f0778805ea1fb3ee72eef7bcbf13aa60bc0612914ac3a52696954a1b6c26",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1325,7 +1325,7 @@
     }
    },
    {
-    "hash": "9e50cbfac5892c6e1c121a8ac68c97342f9915e679043324fa7c7dc30456cc1d",
+    "hash": "ebf31a6f8b9f1b64dea61f3a230679998f84b93f8a52d3f770672d458d6640d9",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1359,7 +1359,7 @@
     }
    },
    {
-    "hash": "ccba6d2079cbf245893dc6e2d18c80a6c6171009f731a906d6fdd312dac5de42",
+    "hash": "7b5cdb04b6c82b0c1ff9c45753dfe36cd0da76e8880a317e464dcf09f6b9fffb",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1393,7 +1393,7 @@
     }
    },
    {
-    "hash": "f83a64bcdcc99bf86fc7bd87369cb313b79a284a9005fac9b228c161521b5866",
+    "hash": "53d73ad1046679af9d7c72497cc8efd91b6cb836bdae5fb1f7a13304781ed8ee",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1427,7 +1427,7 @@
     }
    },
    {
-    "hash": "453e91590b2f7d2a106b3f863b6e1efa0227a99c9eaf5aae4ff475a9d160cffc",
+    "hash": "b6f330407604ccb4982c64d15389be554f1f39bbf6b6d42865980f938a04bbd4",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1461,7 +1461,7 @@
     }
    },
    {
-    "hash": "4b1879a1f4011e566a6b6e3c7f2eb125bfdef64974b0f796aae0cda352fea858",
+    "hash": "08279724d61d19aed747f8e567e8346dd66679e7fb975100a943ea0bf0da9ec6",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1495,7 +1495,7 @@
     }
    },
    {
-    "hash": "8043ddf32a4a93abb4a1ee5d1dd1c1bd3438b2299b3cf0d7d17f80e2fb1bcc10",
+    "hash": "e9fcfe6ed04ff2793988317767c131e365cb5e885e09d6a90db313ee871fb8a8",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1529,7 +1529,7 @@
     }
    },
    {
-    "hash": "6f323d2e410010a2b7cdd9d2dcedcd5939ff2138bc177771209a93dd1bb6e5ac",
+    "hash": "3fad80365d04d10af873ff0999fdc871cf8e2523fe6c9236df6004910d4f3d33",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1563,7 +1563,7 @@
     }
    },
    {
-    "hash": "2745a8c406a92a298a4cf042ef9a2f90a8be1cb4ed98063d182211a1558421fa",
+    "hash": "d0de742e382e347894c702dcaa77455182be2b7616be851e25a514abd55a74b6",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1597,7 +1597,7 @@
     }
    },
    {
-    "hash": "e19da30b523a267acc50e66bc0d6c9aff99f679dc5af49e70464ca02103743a9",
+    "hash": "6d2c087fb8eaddd032bf55ad7f7d358885e8c8f9b19b960b386bb63ad29f830e",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1631,7 +1631,7 @@
     }
    },
    {
-    "hash": "45f77720dde8485e0c7d937761261a8a941ce1cd80ea558acf86484d701b6eca",
+    "hash": "5d2f45dc74231d5afe37a49d09ed6ec5fac8f74725baee0656145ed9a0cbcb8a",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1665,7 +1665,7 @@
     }
    },
    {
-    "hash": "17a430e0b84fc632b6e444044c749d27f65383bb703ff049069bcbfe4f62e252",
+    "hash": "41471365bcf70d78a73d1291ae01e745fb171a7b0771c34931c231dd86d23fad",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1699,7 +1699,7 @@
     }
    },
    {
-    "hash": "e0141f83734f5afcb94642b8f90f205b1f34e03b36517cd81b1eee3da9fefa4c",
+    "hash": "e0248da090f2041f5de26c5ff1d451d554f732d398244cd37cc15b9d1bcf41f1",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1733,7 +1733,7 @@
     }
    },
    {
-    "hash": "098640ed184b7ddfc83bc9d1081308c79dc13d438f54b3b7754d519b77536d7c",
+    "hash": "0519f791947e73647d663df8c5c03f2c5f1dcdae2c31298a651373e0d7deae36",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1767,7 +1767,7 @@
     }
    },
    {
-    "hash": "6d24e80219bb997c5e6e0bb4135694dd24f2ab5fde102edae7bbc15e35781541",
+    "hash": "e93d2bd001f626219d79bd9a75409b444c6ffd1c0666f93d2e1f6acdb4d191ec",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1801,7 +1801,7 @@
     }
    },
    {
-    "hash": "70ba3c5250b7479e3980c7e83eb24edeba50f7ec3d44caa22f5878e0b640a8fd",
+    "hash": "7ee68790540b03af9a2661a2050da6c44e895c9534a7f520304833f2158e0575",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1835,7 +1835,7 @@
     }
    },
    {
-    "hash": "8d47e06a4d7c160ea76e28a5843e632dad129e8f1157d1e1b46ca44638b95f04",
+    "hash": "f29b1e4187890388641b55d8d8dc51528b71fcb8acc154366c61c5063b002abc",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1869,7 +1869,7 @@
     }
    },
    {
-    "hash": "e53d716b5555bef40f5b0b679a3d3051318c12c42c44a4c473395edc9288a5db",
+    "hash": "d59ca958d867662ef80035c8daaae9f71650d2ea1db0df7001eeba96097164f2",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1903,7 +1903,7 @@
     }
    },
    {
-    "hash": "a2442f71dca6415172a086bbb5c6fad8caae09f25d521107d5a7c060da301963",
+    "hash": "f47a3dcb8d111c30b57c08b5c4d663fbcb21e9a074a510b9eef31d2038c526e4",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1937,7 +1937,7 @@
     }
    },
    {
-    "hash": "182932a2b209f0031731368a57668d7855f43a5a25fa2526f201e004ef4fc6e2",
+    "hash": "d5d34481eb23ca9a1a6e817d92c82c97cdba9728ff25c2687b6adea313f26f92",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1971,7 +1971,7 @@
     }
    },
    {
-    "hash": "d4fe11a47f153c3fbb66858d22fa2d79d9cb7532ebe68ba13b94173a8b6b33a8",
+    "hash": "be234533bf340f9647613cb27313e529780bc10759b4a46d22dd1066c963fe0a",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -3198,7 +3198,7 @@
       }
      ],
      "context": {
-      "tokens": 5889,
+      "tokens": 6165,
       "budget": 936700,
       "counted": false,
       "warn": false,
@@ -4468,7 +4468,7 @@
  "openai:stop": {
   "requests": [
    {
-    "hash": "5927c601a6653d8168ba6623e2de6d4a31c48af093d693ea17f310a80949d833",
+    "hash": "857ea05ce20d52f40ca6fae4c408cdcfa15e731703f991d77570694600abb2c6",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -5300,7 +5300,7 @@
       }
      ],
      "context": {
-      "tokens": 5717,
+      "tokens": 5992,
       "budget": 936700,
       "counted": false,
       "warn": false,
@@ -6571,7 +6571,7 @@
  "openai:refusal": {
   "requests": [
    {
-    "hash": "2f5afc937ef71c58de9812de7aa826b0aab1c9b37bae5d85f17bb6013b7c8054",
+    "hash": "6b5862de16807476fb5346edd71239c0683b081e143a0a03815e0453308206ce",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -7419,7 +7419,7 @@
       }
      ],
      "context": {
-      "tokens": 5718,
+      "tokens": 5993,
       "budget": 936700,
       "counted": false,
       "warn": false,
@@ -8711,7 +8711,7 @@
  "openai:error": {
   "requests": [
    {
-    "hash": "86cb7714ecf47d83b544a8c1b607aad3dc6212afc3107f90cd0dd7509622e1ea",
+    "hash": "024c8a8aeb0d2224de429d1df96a4ff1d7ac8651ffa1dd582aea3fa4bd51a222",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -9560,7 +9560,7 @@
       }
      ],
      "context": {
-      "tokens": 5754,
+      "tokens": 6029,
       "budget": 936700,
       "counted": false,
       "warn": false,
@@ -10853,7 +10853,7 @@
  "deepseek:plain": {
   "requests": [
    {
-    "hash": "b2475e1222841d4c3ff24c5371745ce5229440152b99686b9d06a928809de97f",
+    "hash": "620aa31bec691ce89b532298beb9cda0b1c77fa0b9e9a57dfc8c85c1f17e1671",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -10927,7 +10927,7 @@
       }
      ],
      "context": {
-      "tokens": 3174,
+      "tokens": 3450,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -10989,7 +10989,7 @@
  "deepseek:tool": {
   "requests": [
    {
-    "hash": "fa76424145dfeb02168b203d2a4b2951934113903404bf9410141f34156467b1",
+    "hash": "ed9ad27024651a99fd76d4c3032e2fe4f02c07341437024021c3839cce6a21e1",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -11011,7 +11011,7 @@
     }
    },
    {
-    "hash": "56f2a48cdb33d568858840e3249ee6070c1ad05a708ddd796aadf0e0242871c8",
+    "hash": "c94805a1c7f4ad8d6a98a6f92ad245783f8d0fde6c3c53e47b04fc6f48f61ebd",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -11149,7 +11149,7 @@
       }
      ],
      "context": {
-      "tokens": 3346,
+      "tokens": 3621,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -11282,7 +11282,7 @@
  "deepseek:cutoff": {
   "requests": [
    {
-    "hash": "05842506351f398ae830f10de46f48f808b402480854ef681f40388207859533",
+    "hash": "d9e99e93a5e4246bba4fec957b87fbbe03d36aba07178bd5a01661250ff397e5",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -11420,7 +11420,7 @@
       }
      ],
      "context": {
-      "tokens": 3341,
+      "tokens": 3616,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -11588,7 +11588,7 @@
  "deepseek:cuttool": {
   "requests": [
    {
-    "hash": "4853fd1e527514f3dec19d1ee893d1bf500b34fa21ad8280d601e2fbceef586f",
+    "hash": "656b8c58bf570bc31374e8c105be2054975487182aae5df2ec6a05a3a4f864f2",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -11750,7 +11750,7 @@
       }
      ],
      "context": {
-      "tokens": 3376,
+      "tokens": 3652,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -11952,7 +11952,7 @@
  "deepseek:steps": {
   "requests": [
    {
-    "hash": "ac7aeb82bd0eae54a42b3263eaf55cd3353c8d6fc89e4bd0d79edee13847b586",
+    "hash": "5fb17a643bc6d86985cc431af1ee25a158a0ba31684b5e69736cdaf425677d0f",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -11974,7 +11974,7 @@
     }
    },
    {
-    "hash": "48e2b17fa8d8c5fef94593148092124f0d9d9a2509a831748981e027f6581b71",
+    "hash": "7e0a7c5273d08acdde4ae60231f0d1d777541c3345290f8513ed3cf6e75c2095",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -11997,7 +11997,7 @@
     }
    },
    {
-    "hash": "b962f8730e2c59e3158d06956e398645f84e7d5ef08f24c398dce5f2accd61d3",
+    "hash": "e8a65eacaf95bbcf6ae6663ae3b116fbb0ce7bfbb3077fc5d718461466b78279",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12020,7 +12020,7 @@
     }
    },
    {
-    "hash": "501706698990a1e46236af86a358c8507d2ae65ffde6b70e363232f193f2b5ce",
+    "hash": "9bc92cf76a5155877165e756525371ab4303199209a41b70cba7af57c33e3cc5",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12043,7 +12043,7 @@
     }
    },
    {
-    "hash": "c5969602b2baf9c39ee3818b438de922d1eb6ea247c740d442550ac2c68d0480",
+    "hash": "3d9598f24b1a6ab92036d2c19072fc34ab8c1f7ab17fec4aa39452d1a408ad99",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12066,7 +12066,7 @@
     }
    },
    {
-    "hash": "da7b1fe1f927fab83f686d2a167cc92ae3676185f9618664c5c0bc934797977e",
+    "hash": "08fef85ac0b70451bff04c049fff1e4858154a2b8b05f5f88175b7696d93defd",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12089,7 +12089,7 @@
     }
    },
    {
-    "hash": "599261cda6e7b7bf1173bf500be14c74c4dd4212e3d2857e214ebde5e1d6c7df",
+    "hash": "dd198b2729d4fb4c42ace0016eaadd770a4ac18d42d19911e65bb14a57485fea",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12112,7 +12112,7 @@
     }
    },
    {
-    "hash": "df6e372d956ef54963e40cb87e709a3a71d2cede0f3dccaa37625f343e5ee2df",
+    "hash": "23c3077d386bb661027b2039ca2504d5fecc0a763bd58bf9d4fbee4dc4beacf5",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12135,7 +12135,7 @@
     }
    },
    {
-    "hash": "a909fe5f18f56c87e1beac9874379c7017ebde66d2fea1ca7c872030f176239a",
+    "hash": "2bf5e119fff150132cf9c0042752fef43936e99429b15f79dfe93ee5723d2398",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12158,7 +12158,7 @@
     }
    },
    {
-    "hash": "7f8899ea6e8f4b389ad0bfbcbfcc3eedf9f5aa2007b194abdcf6d513e2e9f6ff",
+    "hash": "2e81d5602feb9a0cab993939046df52dd82b4eb325577458ba3edec993b0b16f",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12181,7 +12181,7 @@
     }
    },
    {
-    "hash": "ac4c023647af98a4fc7642d72e3077b57dbf0346030fc04124d0c8d3eea9297f",
+    "hash": "11de6e06d2a6d680c5702287799ac7baaec4cc651e3ad579f522f89333425c0c",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12204,7 +12204,7 @@
     }
    },
    {
-    "hash": "89ce54838cb27a082e2b92b4ef5fa4d675e605c931c878eb05b8666991226ef4",
+    "hash": "193c0dab15897f95ec5f9e43181d24ca8f8bdcc94047b7f1523da75b8710115a",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12227,7 +12227,7 @@
     }
    },
    {
-    "hash": "a5684b98b846c6e30898bc1ceacb1eba127072ce7f03280f6ec3c812bae9d941",
+    "hash": "472eff9375450835577ccb63fbe0fb83243e61413d3a2612bc370871d665a8ad",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12250,7 +12250,7 @@
     }
    },
    {
-    "hash": "0657dfe020605002f3129c4bba6f0b0d9ad68a1d9808b2ef1ace54217a391d9e",
+    "hash": "e3731ded82497c66116195ac5b9b3dd7c3de399eb396457e4d6fff3a71f39614",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12273,7 +12273,7 @@
     }
    },
    {
-    "hash": "5335385a316cbc9ca29cc89b8b0b2ad7ea5a1b8701499bbe8d8e032d5bff904e",
+    "hash": "f27214742db40d78dd4294fa66dd0d01961f597460641f257510dd276d01e88e",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12296,7 +12296,7 @@
     }
    },
    {
-    "hash": "d0422a0468f6ea14edcea20d89f1ed3b3201b962b64be3ceb479680f50f9595f",
+    "hash": "c1a4915a4d122c0fcedc8e3e8e14dda4a7812063b2868f70aa29104ee145492a",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12319,7 +12319,7 @@
     }
    },
    {
-    "hash": "662b025bbe791eb1f5e6f6448dc375600b2b8b3d2f1c8eb32f5d135d7d30e35b",
+    "hash": "32f0608cee14fe9cce44c99253856d89dfd34f9f614385abec81cbabf416c82f",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12342,7 +12342,7 @@
     }
    },
    {
-    "hash": "5b07bb99214c6bf6c446954e2b1f172b0d53158519609cfa8c44b1bb28c833b7",
+    "hash": "8c5f9b72086c48ddbf84f433e43e898c3160750fc5c9a7cff5261cc31643a4df",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12365,7 +12365,7 @@
     }
    },
    {
-    "hash": "98af8ef66b8b6e6c5a7ed46dfb3dc46d86160c1fbc1520e999cadcad7d662fbb",
+    "hash": "5bf5c03c27aef18dbd1dee0001ce3d298d7ed219880276cd71cb98acc359edc7",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12388,7 +12388,7 @@
     }
    },
    {
-    "hash": "78cb431af58240e4abc1bc0300b1c42d906b12730f84bedfc9dd0d07fe171760",
+    "hash": "d98da1b04f8739201e702c2feb63e469fd6811b1d0f7989fdea73f6a5e504364",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12411,7 +12411,7 @@
     }
    },
    {
-    "hash": "b862a1434b65ee477fb4d363b00ae851107da7eeeaf22608830a0a57cbc3233a",
+    "hash": "02e0648921b7555ab8ca28bf93b94cac8c4b93ffd7bc0af486266b51726b755c",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12434,7 +12434,7 @@
     }
    },
    {
-    "hash": "f00aa89160cba2739959270bc820415874a09ee47e07fec5bccf1a2da603b441",
+    "hash": "027419ea491dbe04f9c078f0f60ea4af7a7136d73143a8f331ee3f2e45ad4bf3",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12457,7 +12457,7 @@
     }
    },
    {
-    "hash": "d4c883f42b02afb4c1d35c8c73cf37842a5c860328d6eeda3e4ccf17e65be2ad",
+    "hash": "60c80e8acc4c6a8f64deccd79bec58541604f0809e33cdc551ea3aa90588030a",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12480,7 +12480,7 @@
     }
    },
    {
-    "hash": "4391fa1e0f90e04c707f0efbb97c5b38cb83623a76578c11f831e79b509654a0",
+    "hash": "b873de7cdc480721778e3697e779a6574135097f2c048446309e1a80aa35c88a",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -12503,7 +12503,7 @@
     }
    },
    {
-    "hash": "d7d05ee31782a8cfae20ce15907ea8890df6a113ba3f6f5a77eccd3d2a9cf66d",
+    "hash": "d8cc36f51a730b4c389d198b5697f4bc3ad5d0de86c3aed7d51708e316c3b129",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -13719,7 +13719,7 @@
       }
      ],
      "context": {
-      "tokens": 5616,
+      "tokens": 5891,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -14989,7 +14989,7 @@
  "deepseek:stop": {
   "requests": [
    {
-    "hash": "713a3d9c96d5f5b87c46695990582a7e69674276dd3408d0de9f6b74826494d5",
+    "hash": "b4be439ac5098a8d57fd71ccb2259c3dc04987331f512a0a42f40ffa27682445",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -15810,7 +15810,7 @@
       }
      ],
      "context": {
-      "tokens": 5442,
+      "tokens": 5717,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -17081,7 +17081,7 @@
  "deepseek:refusal": {
   "requests": [
    {
-    "hash": "c0b30f58278707bb7d8fd7a0e46163e22bb866aa7e63e2fe04d2c625649d2db8",
+    "hash": "294523d8a3082fcbdb0704248a19f1340240e2dba5dfcc457ffe8a73fef285ea",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -17918,7 +17918,7 @@
       }
      ],
      "context": {
-      "tokens": 5443,
+      "tokens": 5718,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -19210,7 +19210,7 @@
  "deepseek:error": {
   "requests": [
    {
-    "hash": "1468eef13b7c9392dfdc7571fab9fbc40c00f5fce948d0e8a989eb027b7975c0",
+    "hash": "0052192d667c98ca75e9d7b1a2cc004f9d6a91666d300f035a103fec824d7b9a",
     "model": "deepseek-flash",
     "reasoning": {
      "effort": "high"
@@ -20048,7 +20048,7 @@
       }
      ],
      "context": {
-      "tokens": 5479,
+      "tokens": 5754,
       "budget": 889200,
       "counted": false,
       "warn": false,

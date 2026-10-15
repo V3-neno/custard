@@ -2,7 +2,7 @@
  "plain": {
   "requests": [
    {
-    "hash": "7562cd3ccb30150485fa553e140f100f210a0496612fddc9775a0f44c5a1f424",
+    "hash": "9b1a8d1da57045e986d57b5926c286d9104d7b042503c870dee832b7d2db8bc4",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -116,7 +116,7 @@
       }
      ],
      "context": {
-      "tokens": 3402,
+      "tokens": 3677,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -197,7 +197,7 @@
  "tool": {
   "requests": [
    {
-    "hash": "348a78683b0fb6ac0e49666b0f8bbcba33218b73349709f3e9099ece5a4df425",
+    "hash": "04b93dc9ee0c42291fd54d2a745d02b72f2f151914fc410e43bd71b43980970c",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -240,7 +240,7 @@
     }
    },
    {
-    "hash": "30d92de32fc7e71257008881303edac4fb99df0e02ed2f51269d48e45f3c2079",
+    "hash": "c15265a865f67c6aee4b9d3a5832ab22da316c0edcb3bf99c67d3c282718180a",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -424,7 +424,7 @@
       }
      ],
      "context": {
-      "tokens": 3573,
+      "tokens": 3849,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -576,7 +576,7 @@
  "cutoff": {
   "requests": [
    {
-    "hash": "df1c47413933956aef242f594c2235b92c9ca1e36eceac5dcf38d757ca4b3cc6",
+    "hash": "d741e3e8a17683f6c1aa14c575d338dab5d700a13d59914993a3ddcae5ad5248",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -754,7 +754,7 @@
       }
      ],
      "context": {
-      "tokens": 3618,
+      "tokens": 3893,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -941,7 +941,7 @@
  "cuttool": {
   "requests": [
    {
-    "hash": "3575dd2d0042b21c79b2086bb8f502a54999bcedfd5f6970ad41ea3cc147ce61",
+    "hash": "023974ea21ff78d8de7c1d78e482e0d143914ad480718e40150fcf5a3cc206cc",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1143,7 +1143,7 @@
       }
      ],
      "context": {
-      "tokens": 3658,
+      "tokens": 3933,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -1364,7 +1364,7 @@
  "steps": {
   "requests": [
    {
-    "hash": "e44bb82f5c826f3a9627d712d1cb1326f5e12269a9216dbd748a1f11348e9613",
+    "hash": "3b8abbaca935a2eb5965c1dc13ebe3ca9e1a7356d8d45b73776712ac1e6e7a0e",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1407,7 +1407,7 @@
     }
    },
    {
-    "hash": "9e4c951511f0f1b2241f7bd84427a17c4c5d6cb71c5dbd838afd64770282357b",
+    "hash": "5e253b6aa378970d429356923a610f2b1606c9948eeec21aee1895c24ca8f8e6",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1457,7 +1457,7 @@
     }
    },
    {
-    "hash": "19c942ce5196ab48bbcb45e116644a2da3e72453393e19eb1084a59584b005d8",
+    "hash": "050ad868353fc98254efb772be9d85c952b4c4c9e0a7886a0c8ffddcfbbde8c6",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1507,7 +1507,7 @@
     }
    },
    {
-    "hash": "c83d07b33ff13547645fe0c29c154cecbbfeae058094a63e05f36d86eebfaf85",
+    "hash": "757fbaf1b77e7343470f98e4316182e14f1fc2ebde3be73b9b37c0e9edcbf3fa",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1557,7 +1557,7 @@
     }
    },
    {
-    "hash": "c802f35cf434a71fb604725331a4b90a1130f05fd8e5230584a82a600d87bbc7",
+    "hash": "6cd73bac87d99a0f6acaa415d3e0db5a0cf8fe5f3286d651737fe03e8803ac5a",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1607,7 +1607,7 @@
     }
    },
    {
-    "hash": "204b91b3a1897ec812985a417ac0c7c5ce8ffc0f6c911c42cc40b3187f2f9d68",
+    "hash": "f70f9eea0f259ce3a2b4e5f99c1adfe221bbaa355f0cd95158c14eb02fed13fd",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1657,7 +1657,7 @@
     }
    },
    {
-    "hash": "5fad4e58a00414da54563fb6702f198e8e5c65e969f68a4a519f174cc994011f",
+    "hash": "552a4685978970f1379bc5d10d6415e95ada3df1d51293462bb1aa75913ce16e",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1707,7 +1707,7 @@
     }
    },
    {
-    "hash": "5765074a00673c729307ff84ea3732279db5d85fbbcac72e588e12a0cc35a840",
+    "hash": "61d361790c38fdd357080d1fac13387431a4f8fc7d11e91d0d41ea0e0b4cdb6a",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1757,7 +1757,7 @@
     }
    },
    {
-    "hash": "b9f48ef428e402763765b83d3d3fe533eb12ea08184abbdd85d17b36c937b4d2",
+    "hash": "6d3204e613af28a70f8ac343e809b382680d23d490311203d91bc0243668903c",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1807,7 +1807,7 @@
     }
    },
    {
-    "hash": "2bee019e123671b554aeb5c5cf19c36a52da4ccd1d1fc248a7d7b5f13fad6aac",
+    "hash": "d9306ca4bd0538f5a03bff5274f4b43f5e4ccbb6db496426903bb532fc2e12a6",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1857,7 +1857,7 @@
     }
    },
    {
-    "hash": "5494b5260efbd2ef8e6f7f0f0c4ddd356e73da24c4b4976dea9414c2f76a7a21",
+    "hash": "e1445b55784f7f33f88e4f9963a7cdcdfaad7f382a75d1278c05cb299f47ab38",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1907,7 +1907,7 @@
     }
    },
    {
-    "hash": "5894599a9b445fcb967ff3a872150f2a40b3f3dfbe38c215809b52bb39588858",
+    "hash": "eccb294f7828abddfecd92e419102826bacb6246268fff27acef9a0b0864b5db",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -1957,7 +1957,7 @@
     }
    },
    {
-    "hash": "25e58e2158888778f295968a710052c82bfb45a42f2b46de72e49ff90017a30c",
+    "hash": "e5c93d0a5e7f0b08a0602c490a92752f2a05c75d70d5490c9d598bb7bfae1d95",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2007,7 +2007,7 @@
     }
    },
    {
-    "hash": "6eb237dac7d49bb6c0a112faee62cb72af886d26a100fa4dc137035d4f4bfcec",
+    "hash": "e6cc51fe72df54c666d76bf006b1ca70b6e573b0d61b3c990265483146302d8a",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2057,7 +2057,7 @@
     }
    },
    {
-    "hash": "c0d39b07038cc02a838809c25e4f9b9c4b7a0f5f9bc056c5f04744e33355d0b8",
+    "hash": "511549ffaeedc5b6caa773451b538ba167b635ff1aabc230cae8dda174df3994",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2107,7 +2107,7 @@
     }
    },
    {
-    "hash": "56330e47b8658e9f1d4c6ff7bc3271652b159717ffb503bd16b64e0ed86c8bbb",
+    "hash": "04ba245c2a1b275af4df8636b551556312a470ce51ce900b343e9729b2a91bec",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2157,7 +2157,7 @@
     }
    },
    {
-    "hash": "3d1d5cfd479bbbb97fad51c8f39d656d7b51baaaee95083bbd750cbe74873bb0",
+    "hash": "cbd533c7073fc76190ecd7d8de5983738172dedd5007b0912979245ec4347d47",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2207,7 +2207,7 @@
     }
    },
    {
-    "hash": "4b81d1308d717e0bc9daad840b1fef09c705ede34abbedf8a2105fd4cc8b6fa1",
+    "hash": "2bc9bf68d99b14ee031b3cbfe8ffabbfb3d60e09fe0e3b2b46970dc4620f7732",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2257,7 +2257,7 @@
     }
    },
    {
-    "hash": "61a33cc182679d8cf34b3186235cc20bbb5bb1299c7da3c95d03c0a9cf60dc05",
+    "hash": "99dbed01d445073610a51d4eabfd40835f04cea74f22d037f29e5d0186e4e76f",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2307,7 +2307,7 @@
     }
    },
    {
-    "hash": "bde049eb7123b6cdc760d826e488e00076e099dcec79f23fe1460278d62aaa15",
+    "hash": "9561c4011cd7c0ae234ca3fcd44a10477d62c971e2b631476282de1b5b68afdf",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2357,7 +2357,7 @@
     }
    },
    {
-    "hash": "66ec8f5c55c8ea873347657fe6fe14a736d308efba65eac482590858da429aef",
+    "hash": "7c22b8de3ef68e31b55047963ad86227a1b84a22894ef6b7e134c7fc2fa83e64",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2407,7 +2407,7 @@
     }
    },
    {
-    "hash": "c5240bf3fa57efdb43cf6c751c4a52722914f685c0b1c2ff5de4cbb5ecf854b4",
+    "hash": "260896f7877ec510ae00d77f5baba53762e6dbbfb0eba578b06d245dd67c4eda",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2457,7 +2457,7 @@
     }
    },
    {
-    "hash": "d4d791f5b59791446ce30248491dd64468437c24a534d6f0c7cf5564e3785bbc",
+    "hash": "651fcf010cd69e85f41680b495893552af1955c1822ec51f5a105812b440cf38",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2507,7 +2507,7 @@
     }
    },
    {
-    "hash": "01ed526064a4345a6323f0f22284da4961878c067c4c3744061d5bd837fb6d4f",
+    "hash": "f6413afcca2925905ad730c4dd51d2384f0b2108b3a1dd79b5fbf65ee97dffc3",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -2557,7 +2557,7 @@
     }
    },
    {
-    "hash": "b12ffbb6f373c52df03a84623c3db346b14adfb6a1eb8d8221c18ac55310a2c6",
+    "hash": "35de8e408c4bf2da30e7b15c8a6278b1ba970ee079df9a0d1353155c7d409e99",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -3819,7 +3819,7 @@
       }
      ],
      "context": {
-      "tokens": 6097,
+      "tokens": 6372,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -5108,7 +5108,7 @@
  "stop": {
   "requests": [
    {
-    "hash": "8d39bdcf425ecac70b60c21ca42160aaf91bd4b9c84f80d44beb9928ef03001a",
+    "hash": "ed53c7e0c2ff47f24a395fa7ff16a16c8ef1ff2ec92b4127ebadf854a16be007",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -5992,7 +5992,7 @@
       }
      ],
      "context": {
-      "tokens": 6211,
+      "tokens": 6486,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -7315,7 +7315,7 @@
  "refusal": {
   "requests": [
    {
-    "hash": "c96ce5f9dd64613777793b17fc9a19f0a141be887748df4eebd518b0e28f4d83",
+    "hash": "db94f12b85a4d9a766de180af6ccfabad7229c72035ad9d571e96edf4a56424f",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -8194,7 +8194,7 @@
       }
      ],
      "context": {
-      "tokens": 6244,
+      "tokens": 6519,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -9517,7 +9517,7 @@
  "full": {
   "requests": [
    {
-    "hash": "5b70954193fc2f3b36f936511ffe6621a4354a875e833bf88ab6a7ed00123282",
+    "hash": "f352b5f4454a472868e4af3e3875051b72660256ebb0e1dc3d892235125f84d8",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -10422,7 +10422,7 @@
       }
      ],
      "context": {
-      "tokens": 6243,
+      "tokens": 6518,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -11776,7 +11776,7 @@
  "error": {
   "requests": [
    {
-    "hash": "5882f2b013ac370a3f079c4a6fa7079b12af6f522a05609351829011d8230be2",
+    "hash": "fd667e1e4d5e0a3c8ede25bb49b3f73d4ab93c844a962be6c12f7676447af487",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -12677,7 +12677,7 @@
       }
      ],
      "context": {
-      "tokens": 6282,
+      "tokens": 6558,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -14032,7 +14032,7 @@
  "fulltool": {
   "requests": [
    {
-    "hash": "d3427b35dc95177505c15850f8e852ba1a9d5854276053652820b78a8639110d",
+    "hash": "118a6f9a4af3101d8268e97cb718d765953ea28d3f689327c6a23dca0d5350e3",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -14961,7 +14961,7 @@
       }
      ],
      "context": {
-      "tokens": 6283,
+      "tokens": 6559,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -16350,7 +16350,7 @@
  "fallback": {
   "requests": [
    {
-    "hash": "a9c9dd2d3dcbc238097285f3892ddf9d019b427e4d751291c40074a486570ee4",
+    "hash": "0357582a0e41bf0dabf7d052053b5ede6cf34ceac132e914c41d2b1c727fb06b",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -17338,7 +17338,7 @@
       }
      ],
      "context": {
-      "tokens": 6312,
+      "tokens": 6587,
       "budget": 889200,
       "counted": false,
       "warn": false,
@@ -18774,7 +18774,7 @@
  "compact": {
   "requests": [
    {
-    "hash": "1614d9b03f88dc7bbb8a7a63dde5a11dc70a486761b1f6f166252350a0545b5e",
+    "hash": "0580bf9113987a9806e14cd715623639de280ac84b5d397fdacf2f666318cbd0",
     "model": "claude-opus-5-5",
     "max_tokens": 64000,
     "thinking": {
@@ -19795,7 +19795,7 @@
       }
      ],
      "context": {
-      "tokens": 6394,
+      "tokens": 6669,
       "budget": 889200,
       "counted": false,
       "warn": false,
