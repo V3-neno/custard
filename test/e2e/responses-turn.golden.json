@@ -2,7 +2,7 @@
  "openai:plain": {
   "requests": [
    {
-    "hash": "ff7124e8c9890c963fe837ef1314aabfe6cd6980c0e933e7d11a838e1a3e04d5",
+    "hash": "bf3d8e7dfb64049690adf4d1e875864168741faffe97ff87683a989e11bb6f61",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -129,7 +129,7 @@
  "openai:tool": {
   "requests": [
    {
-    "hash": "8d2315b92e9699dca0e829d9112112ea4389733a2705f508dbef8599e1430a3c",
+    "hash": "472fccd9f1bd61bd239da8507346ebaaf02c090c15c2d6d848ed61c4f9efdc43",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -162,7 +162,7 @@
     }
    },
    {
-    "hash": "53f847e9cebd59e3b841a0f153e1a8967fbaf4d7da442a1dfaf3096d3b6b3a73",
+    "hash": "3ee6f9077b0322271d9b3a215a8c1fdb4d1fa3e6a29f618303e74b37757131aa",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -398,7 +398,7 @@
  "openai:cutoff": {
   "requests": [
    {
-    "hash": "b3d3c452499c9b147d6a60bd3d50b551e25b057533170d3c2e3f85b47f665fa6",
+    "hash": "2a4f106d0ccff5eba3eb087643ab401ea3e536f7f20b5a41a51ba856cc71f83d",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -651,7 +651,7 @@
  "openai:cuttool": {
   "requests": [
    {
-    "hash": "1d4535e51fb9896c7b7657e132a8c788aa54cbc5ae07012b410fc6a6cd7002ae",
+    "hash": "1a579f27afd435cf45663a96e9d695598e682a8bd44e4b3b26cdfe50733197b2",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -932,7 +932,7 @@
  "openai:steps": {
   "requests": [
    {
-    "hash": "09f72b3e9595f5d37367096efaf6c0907c8190d650015abfec2e6bd833a94cd1",
+    "hash": "43a06b42dfe4a20c80d9065d4c70c522a3c75801fa29733ffb2771ae1a48b7e8",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -965,7 +965,7 @@
     }
    },
    {
-    "hash": "874ffb7743d302d2136ab3a3b3357ede5686af043bc7449aa67c5ef2839d569f",
+    "hash": "122258f8efadd2d656e0cf4ab008b08b913f81bc2b45fe7c3ea38069289178ef",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -999,7 +999,7 @@
     }
    },
    {
-    "hash": "8c8b51750a053abac44e05844cceb67883998c46daa66242111fbb04e6129ea1",
+    "hash": "d0de5cf3603b5ffe12cf5c4b3613ec8737f12553387bf642650fb3b4ead32756",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1033,7 +1033,7 @@
     }
    },
    {
-    "hash": "0092ad1110f6b5790a201e1fa3f0b5b1b3fec737e9a82ef4ad94c37e9f67491c",
+    "hash": "c92053266f33ceede933e3d58f806a5e2dba6b0fad33d1d689334de909a86dc1",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1067,7 +1067,7 @@
     }
    },
    {
-    "hash": "a310d45f2c0e8ef88e5c8decc64fe8634b5712d66338444b637835892228bf4d",
+    "hash": "b1c9849cd730ca70ff16d15c84a91ccc07aa7e84e3228bf88822772bf3529711",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1101,7 +1101,7 @@
     }
    },
    {
-    "hash": "9e50cbfac5892c6e1c121a8ac68c97342f9915e679043324fa7c7dc30456cc1d",
+    "hash": "4172b9c1b5244241ecaa6c55ee13958523d13de0116ac0c49ddf47499a7b6f09",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1135,7 +1135,7 @@
     }
    },
    {
-    "hash": "ccba6d2079cbf245893dc6e2d18c80a6c6171009f731a906d6fdd312dac5de42",
+    "hash": "e40abf7497a220ee9da0de1a45168a988380afada52a0c137c51b349680c8cd0",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1169,7 +1169,7 @@
     }
    },
    {
-    "hash": "f83a64bcdcc99bf86fc7bd87369cb313b79a284a9005fac9b228c161521b5866",
+    "hash": "fc631969e2ee0d962b0e93cbdd661ce514a6c773b6365f478b6548c70be4b0c4",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1203,7 +1203,7 @@
     }
    },
    {
-    "hash": "453e91590b2f7d2a106b3f863b6e1efa0227a99c9eaf5aae4ff475a9d160cffc",
+    "hash": "0b2abda9141fbf9296fa34fe547511904b3ef898cac1181787bccb93dbf629e0",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1237,7 +1237,7 @@
     }
    },
    {
-    "hash": "4b1879a1f4011e566a6b6e3c7f2eb125bfdef64974b0f796aae0cda352fea858",
+    "hash": "3b4f1829637c1d5f9db907fa2c212e86cfe07d66dcf287a1c6f9ab36f5a8ae31",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1271,7 +1271,7 @@
     }
    },
    {
-    "hash": "8043ddf32a4a93abb4a1ee5d1dd1c1bd3438b2299b3cf0d7d17f80e2fb1bcc10",
+    "hash": "d681f1d487674c9b433613c7ee3775fbedd831e8b56e24b7ad9751fd72860783",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1305,7 +1305,7 @@
     }
    },
    {
-    "hash": "6f323d2e410010a2b7cdd9d2dcedcd5939ff2138bc177771209a93dd1bb6e5ac",
+    "hash": "e058e8adc6ddacc92b9394d7a11ff7346ccd942baddc4ce2512d07e349bf8bf3",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1339,7 +1339,7 @@
     }
    },
    {
-    "hash": "2745a8c406a92a298a4cf042ef9a2f90a8be1cb4ed98063d182211a1558421fa",
+    "hash": "c155e292d51dc17aa479ebb20665c485742f202edf8c84e6a6d8b214c3cffd52",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1373,7 +1373,7 @@
     }
    },
    {
-    "hash": "e19da30b523a267acc50e66bc0d6c9aff99f679dc5af49e70464ca02103743a9",
+    "hash": "378b4f75da74c3edc3058777bd54f5ba02f32d8c99443e988c555f2b83cd8cde",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1407,7 +1407,7 @@
     }
    },
    {
-    "hash": "45f77720dde8485e0c7d937761261a8a941ce1cd80ea558acf86484d701b6eca",
+    "hash": "4d24541a2bb17c00e3b4a48fd83f782e16061828062fdb365e26113900d690b1",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1441,7 +1441,7 @@
     }
    },
    {
-    "hash": "17a430e0b84fc632b6e444044c749d27f65383bb703ff049069bcbfe4f62e252",
+    "hash": "322081e6a3846859801d4ccc7141b374c6dab71e6607bd31bf99e7b1bc055d62",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1475,7 +1475,7 @@
     }
    },
    {
-    "hash": "e0141f83734f5afcb94642b8f90f205b1f34e03b36517cd81b1eee3da9fefa4c",
+    "hash": "34e71a9e8c8c784072ff8224c0c94accee953319436e598040ff0cb96e5571ed",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1509,7 +1509,7 @@
     }
    },
    {
-    "hash": "098640ed184b7ddfc83bc9d1081308c79dc13d438f54b3b7754d519b77536d7c",
+    "hash": "f94ee775a602fb8ed23fd60afbd24121e9bf389884e04bccf679b71577ccc444",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1543,7 +1543,7 @@
     }
    },
    {
-    "hash": "6d24e80219bb997c5e6e0bb4135694dd24f2ab5fde102edae7bbc15e35781541",
+    "hash": "5de36d2193b8da7aadc39a0c38fc8cdaadafd6156c400bd79ae89c74ef8041db",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1577,7 +1577,7 @@
     }
    },
    {
-    "hash": "70ba3c5250b7479e3980c7e83eb24edeba50f7ec3d44caa22f5878e0b640a8fd",
+    "hash": "d6e8ddb60b5532b879b6dc407c89ddbf415846d38e696b969122dcd88ce1681d",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1611,7 +1611,7 @@
     }
    },
    {
-    "hash": "8d47e06a4d7c160ea76e28a5843e632dad129e8f1157d1e1b46ca44638b95f04",
+    "hash": "f5d4facfca8fc19a4385d7f3f9d128173ac63a102a12a4c89e2268c5d81a6fdc",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1645,7 +1645,7 @@
     }
    },
    {
-    "hash": "e53d716b5555bef40f5b0b679a3d3051318c12c42c44a4c473395edc9288a5db",
+    "hash": "30be115c1a471574814fac63f6d89c0d43c08b5eaea9ffc41f9cf60003574f37",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1679,7 +1679,7 @@
     }
    },
    {
-    "hash": "a2442f71dca6415172a086bbb5c6fad8caae09f25d521107d5a7c060da301963",
+    "hash": "d6c70d20f7d62e2b7ffc0088c7ef93b7ee68be7f2c1c2462bf8916eb4fce63c4",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1713,7 +1713,7 @@
     }
    },
    {
-    "hash": "182932a2b209f0031731368a57668d7855f43a5a25fa2526f201e004ef4fc6e2",
+    "hash": "5f9248ee4229b80440aa75dab317d5120bb2fbce9556d9bee9ad0aa1aecd310b",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -1747,7 +1747,7 @@
     }
    },
    {
-    "hash": "d4fe11a47f153c3fbb66858d22fa2d79d9cb7532ebe68ba13b94173a8b6b33a8",
+    "hash": "ba0cb289c5e905a157685080ecc4bd550b7b5c8a8732a464645f0b30f777c933",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -3940,7 +3940,7 @@
  "openai:stop": {
   "requests": [
    {
-    "hash": "5927c601a6653d8168ba6623e2de6d4a31c48af093d693ea17f310a80949d833",
+    "hash": "b6ca8f0b25e6338445041700e832b6ffd6236b758f3c089cfd3d85b79fd0eb31",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -5739,7 +5739,7 @@
  "openai:refusal": {
   "requests": [
    {
-    "hash": "2f5afc937ef71c58de9812de7aa826b0aab1c9b37bae5d85f17bb6013b7c8054",
+    "hash": "7d28db5fd6b38472a6dca3459b763c51fd3cad27077347c5bd2cc2ffd0611d2e",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
@@ -7557,7 +7557,7 @@
  "openai:error": {
   "requests": [
    {
-    "hash": "86cb7714ecf47d83b544a8c1b607aad3dc6212afc3107f90cd0dd7509622e1ea",
+    "hash": "70cc3286c606dc05cfd65e59bbb7f3b7e0cbe41caf3593c28735ca6ad9ac7fc1",
     "model": "gpt-6-astra",
     "reasoning": {
      "effort": "medium",
