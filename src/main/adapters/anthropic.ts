@@ -8,7 +8,6 @@ import type {
 import { profileOf, requireProfile, sentLevel, type ModelProfile } from '../../shared/models'
 import { claudeFilesFrom } from '../attachments/request'
 import {
-  claudeHistory,
   compactionRefused,
   isCompactionRejected,
   recordClaudeCompaction,
@@ -34,11 +33,13 @@ import {
   type RawModel
 } from './common'
 import { capabilitiesOf } from './capabilities'
+import { fromClaudeReply, toClaudeHistory } from './anthropicNeutral'
 import type { OneShotRequest, OneShotResult, ProviderAdapter, TurnEnd, TurnRequest } from './types'
 
-// Claude, through Anthropic's Messages API. The stored chat format is this
-// API's own, so history goes out as it is (less compaction blocks for a model
-// that doesn't compact).
+// Claude, through Anthropic's Messages API. Stored chats are converted with
+// toClaudeHistory (anthropicNeutral.ts): Claude's own replies go back as the
+// blocks it returned (`raw`), less compaction blocks for a model that doesn't
+// compact; everything else is rebuilt from its parts.
 
 // After a mid-answer fallback, blocks the declining model produced before the
 // last `fallback` marker (other than text) must not be sent back to the API.
@@ -59,8 +60,13 @@ async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
   // A model with no profile fails here, loudly, rather than going to
   // another model (chat.ts refuses it before this).
   const model: ModelProfile = requireProfile(turn.model)
-  const history = (): TurnRequest['conversation']['messages'] =>
-    claudeHistory(turn.history(), model.id)
+  const history = (): BetaMessageParam[] =>
+    toClaudeHistory(turn.history(), {
+      model: model.id,
+      files: turn.files,
+      available: turn.available,
+      context: turn.conversation.messageContext
+    })
   const params: MessageCreateParamsStreaming = {
     model: model.id,
     max_tokens: 64000,
@@ -157,7 +163,7 @@ async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
       return full ? 'full-window-tool' : 'cut-off-tool'
     // Before the message goes in, so the record points at it.
     recordClaudeCompaction(turn.conversation, message.content, model.id)
-    log.addAssistant(echoableContent(message.content))
+    log.addAssistant(fromClaudeReply(echoableContent(message.content), model.id))
     if (full) return 'full-window'
     if (message.stop_reason === 'max_tokens') return 'cut-off'
     if (message.stop_reason !== 'tool_use') return 'done'

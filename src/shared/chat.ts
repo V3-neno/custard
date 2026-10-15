@@ -1,5 +1,5 @@
 import type { TokenUsage } from './pricing'
-import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import type { CHAT_FORMAT, CHAT_VERSION, Message, OldReason } from './neutralChat'
 import type { Workspace } from './plugins'
 import type { Attachment, AttachmentKind } from './attachments'
 import { providers, type Provider, type ProviderApi } from './providers'
@@ -134,6 +134,9 @@ export type ConversationSummary = {
   pluginId?: string
   // Skills mode: the skill (its folder in Custard/Skills) the chat works on.
   skill?: string
+  // A chat file this build can't open (see neutralChat.ts): listed as "Old
+  // format" with its title only, and never read as a chat.
+  old?: OldReason
 }
 
 // What became of one tool call. Saved as it changes, so a chat reloaded after
@@ -290,9 +293,12 @@ export type Conversation = ConversationSummary & {
   // only place the chat may write. None: the Skills hub chat, which writes
   // nothing. Fixed when the conversation starts.
   skill?: string
-  // Exactly what is sent to the API, so assistant turns keep their thinking
-  // blocks unchanged between requests.
-  messages: BetaMessageParam[]
+  // Custard's own chat format (see neutralChat.ts). Each provider's adapter
+  // converts the messages on the way out; a provider's own blocks are kept
+  // in `raw` only for that provider.
+  format: typeof CHAT_FORMAT
+  version: typeof CHAT_VERSION
+  messages: Message[]
   // By tool_use id.
   actions?: Record<string, ActionRecord>
   notices?: Notice[]
@@ -325,6 +331,17 @@ export type Conversation = ConversationSummary & {
   // notes as they were when sent, shown to the model for the rest of this
   // chat (see main/earlierChats).
   references?: ChatReference[]
+  // Context Custard added to user messages (notes about the plugins a message
+  // was about), by message index. Sent with that message every time, never
+  // shown as part of it (see main/promptCache).
+  messageContext?: MessageContext[]
+  // What the start of the last request held, so the next one can be sent
+  // the same way while the provider's prompt cache is warm (see
+  // main/promptCache).
+  promptCache?: PromptSnapshot
+  // Big tool results in messages before `before` are sent as one-line stubs
+  // (see main/clearing). The messages themselves are kept in full.
+  cleared?: { before: number; at: number }
 }
 
 export type ChatReference = {
@@ -337,6 +354,28 @@ export type ChatReference = {
   text: string
   // The note says its chat held web or plugin text (or doesn't say).
   outside: boolean
+}
+
+export type MessageContext = {
+  // Index of the user message it was added to.
+  at: number
+  // The plugin id the notes are about.
+  plugin: string
+  text: string
+}
+
+export type PromptSnapshot = {
+  // When the chat's last turn ended.
+  at: number
+  model: string
+  // Hash of everything before the messages except the deferred parts.
+  fixed: string
+  // Whether memory was on for the chat.
+  memory: boolean
+  // The memory epoch it was taken in (bumped by Forget and settings).
+  epoch: number
+  // The deferred parts as sent, in order ('' for one left out).
+  deferred: string[]
 }
 
 // Claude's compaction block is part of the assistant message at `after`, as

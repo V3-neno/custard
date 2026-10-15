@@ -9,8 +9,9 @@ import type { Provider } from '../../shared/providers'
 import { filePart, toBlocks } from '../openai'
 
 // Custard's neutral chat format (shared/neutralChat.ts) to and from the
-// OpenAI Responses API (OpenAI and DeepSeek). Pure functions; nothing in the
-// app calls them until B3. Only `parts` are ever sent: `raw` belongs to the
+// OpenAI Responses API (OpenAI and DeepSeek): runOpenAI (openai.ts) sends
+// the stored chat with toResponsesInput and stores each reply with
+// fromResponsesReply. Only `parts` are ever sent: `raw` belongs to the
 // provider that wrote it, and Responses replies have none.
 
 // The same words history.ts uses for a call to a tool that isn't offered now.
@@ -31,14 +32,19 @@ const isFile = (b: BetaContentBlockParam): boolean => b.type === 'image' || b.ty
 
 // The Responses input for one request: the history from `from` on (where the
 // model's own compaction item takes over; the caller puts the item first),
-// with this request's files in front of their messages and calls to tools
-// not offered now as text, as today.
+// and before `to` (the messages a compaction item stood for, when the model
+// turns compaction down), with this request's files in front of their
+// messages and calls to tools not offered now as text.
 export function toResponsesInput(
   messages: Message[],
   opts: {
     files?: Map<number, BetaContentBlockParam[]>
     available: Set<string>
     from?: number
+    to?: number
+    // The context added in front of earlier messages, by index
+    // (promptCache.contextByMessage).
+    context?: Map<number, string>
   }
 ): ResponseInputItem[] {
   const stale = new Set<string>()
@@ -49,7 +55,7 @@ export function toResponsesInput(
 
   const items: ResponseInputItem[] = []
   for (const [i, m] of messages.entries()) {
-    if (i < (opts.from ?? 0)) continue
+    if (i < (opts.from ?? 0) || i >= (opts.to ?? messages.length)) continue
     if (m.role === 'assistant') {
       if (m.partial) {
         items.push({ role: 'assistant', content: textOf(m.parts) })
@@ -78,8 +84,15 @@ export function toResponsesInput(
         : { kind: 'text', text: p.text }
     )
     const files = opts.files?.get(i)
+    const context = opts.context?.get(i)
+    // A message with context and nothing typed (and no files): the context.
+    const typedOnly = m.parts.length === 1 && m.parts[0].type === 'text'
+    if (context !== undefined && typedOnly && !files && !m.parts[0].text.trim()) {
+      items.push({ role: 'user', content: context })
+      continue
+    }
     // A message with files: the files, then its text if it has any.
-    const pieces: Piece[] = files
+    const withFiles: Piece[] = files
       ? [
           ...files.map((b): Piece =>
             b.type === 'text' ? { kind: 'text', text: b.text } : { kind: 'file', block: b }
@@ -91,6 +104,9 @@ export function toResponsesInput(
             : own)
         ]
       : own
+    // Context goes first, in front of the files.
+    const pieces: Piece[] =
+      context !== undefined ? [{ kind: 'text', text: context }, ...withFiles] : withFiles
     const sent = pieces.map((x): Piece =>
       x.kind === 'result' && stale.has(x.callId)
         ? { kind: 'text', text: staleResult(x.text, x.isError) }

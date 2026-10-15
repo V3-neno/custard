@@ -27,6 +27,8 @@ describe('provider adapters', () => {
       id: 'c',
       mode: 'chat' as const,
       title: '',
+      format: 'custard-chat' as const,
+      version: 1 as const,
       createdAt: 0,
       updatedAt: 0,
       messages: []

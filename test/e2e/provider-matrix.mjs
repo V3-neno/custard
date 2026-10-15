@@ -312,12 +312,10 @@ try {
     const first = mine[0].body
     const c = chatOf(p.id)
     const results = c.messages
-      .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
+      .flatMap((m) => m.parts)
       .filter((b) => b.type === 'tool_result')
-      .map((b) => (typeof b.content === 'string' ? b.content : JSON.stringify(b.content)))
-    const calls = c.messages
-      .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
-      .filter((b) => b.type === 'tool_use')
+      .map((b) => b.text)
+    const calls = c.messages.flatMap((m) => m.parts).filter((b) => b.type === 'tool_call')
     const sys =
       p.who === 'anthropic' ? first.system.map((s) => s.text).join('\n\n') : first.instructions
     trace[p.id] = {

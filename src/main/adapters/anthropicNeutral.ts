@@ -3,9 +3,11 @@ import type {
   BetaMessageParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { AssistantMessage, AssistantPart, Message } from '../../shared/neutralChat'
+import type { MessageContext } from '../../shared/chat'
 import { withFiles } from '../attachments/request'
 import { claudeHistory } from '../compaction'
 import { withoutUnavailableTools } from '../history'
+import { withMessageContext } from '../promptCache'
 
 // Custard's neutral chat format (shared/neutralChat.ts) to and from Claude's
 // Messages API. Pure functions; nothing in the app calls them until B3.
@@ -51,20 +53,25 @@ export function toClaudeMessage(m: Message): BetaMessageParam {
 
 // The history for one Claude request: each message converted, then the
 // changes made for this request only, as today (files in front of their
-// message, calls to tools not offered now as text, compaction blocks only
-// for a model that compacts). The stored chat is never changed.
+// message, calls to tools not offered now as text, the context added to
+// earlier messages in front of them, compaction blocks only for a model that
+// compacts). The stored chat is never changed.
 export function toClaudeHistory(
   messages: Message[],
   opts: {
     model: string
     files?: Map<number, BetaContentBlockParam[]>
     available: Set<string>
+    context?: readonly MessageContext[]
   }
 ): BetaMessageParam[] {
   return claudeHistory(
-    withoutUnavailableTools(
-      withFiles(messages.map(toClaudeMessage), opts.files ?? new Map()),
-      opts.available
+    withMessageContext(
+      withoutUnavailableTools(
+        withFiles(messages.map(toClaudeMessage), opts.files ?? new Map()),
+        opts.available
+      ),
+      opts.context
     ),
     opts.model
   )

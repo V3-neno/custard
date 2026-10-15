@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { modes, type ConversationSummary, type Mode } from '../../../shared/chat'
 import { CloseIcon, PlusIcon, TemporaryIcon } from './icons'
+import { danger, secondary } from './settings/ui'
 
 type Props = {
   modeLabel: string
@@ -16,6 +17,9 @@ type Props = {
   onNew: () => void
   onDelete: (id: string) => void
   onForget: (id: string) => void
+  // Old chats (saved in a format this Custard can't open), in every mode.
+  oldCount: number
+  onDeleteOld: () => Promise<void>
   onClose: () => void
 }
 
@@ -28,8 +32,10 @@ function when(ts: number): string {
 
 function HistoryDrawer(props: Props): React.JSX.Element {
   const { modeLabel, conversations, filter, onFilter, currentId, onOpen, onNew, onDelete } = props
-  const { onForget, onClose, pluginNames, skillNames } = props
+  const { onForget, onClose, pluginNames, skillNames, oldCount, onDeleteOld } = props
   const [find, setFind] = useState('')
+  const [confirmOld, setConfirmOld] = useState(false)
+  const [deletingOld, setDeletingOld] = useState(false)
   const q = find.trim().toLowerCase()
   // Finds by either title, and by what its note says (goal, where it
   // stands, tags).
@@ -156,9 +162,18 @@ function HistoryDrawer(props: Props): React.JSX.Element {
                       · <TemporaryIcon /> Temporary
                     </span>
                   )}
+                  {c.old && (
+                    <span
+                      className="text-ash-500"
+                      title="Saved in a format this Custard can't open"
+                      data-chat-old
+                    >
+                      · Old format
+                    </span>
+                  )}
                 </div>
               </button>
-              {!c.temporary && (
+              {!c.temporary && !c.old && (
                 <button
                   onClick={() => onForget(c.id)}
                   title="Delete the notes Custard saved from this chat and never remember it again. Asks first."
@@ -177,6 +192,61 @@ function HistoryDrawer(props: Props): React.JSX.Element {
             </div>
           ))}
         </div>
+        {oldCount > 0 && (
+          <div
+            className="mx-4 mb-4 border-t border-forge-700 pt-3 text-xs text-ash-400"
+            aria-label="Old chats"
+          >
+            {confirmOld ? (
+              <div role="alertdialog" aria-label="Delete all old chats" className="space-y-2">
+                <p className="text-ash-200">
+                  Delete all {oldCount} old {oldCount === 1 ? 'chat' : 'chats'}?
+                </p>
+                <p>
+                  For each one, Custard deletes the chat file, its attached files, its Design
+                  outputs and its widget records. Your memory, the notes in Custard/Chats, captures,
+                  usage totals and settings stay as they are. This can&apos;t be undone.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    disabled={deletingOld}
+                    onClick={async () => {
+                      setDeletingOld(true)
+                      try {
+                        await onDeleteOld()
+                      } finally {
+                        setDeletingOld(false)
+                        setConfirmOld(false)
+                      }
+                    }}
+                    className={`${danger} !px-2 !py-0.5 text-xs`}
+                  >
+                    Delete {oldCount} old {oldCount === 1 ? 'chat' : 'chats'}
+                  </button>
+                  <button
+                    disabled={deletingOld}
+                    onClick={() => setConfirmOld(false)}
+                    className={`${secondary} !px-2 !py-0.5 text-xs`}
+                  >
+                    Keep them
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="flex-1">
+                  {oldCount} old {oldCount === 1 ? 'chat' : 'chats'} can&apos;t be opened.
+                </span>
+                <button
+                  onClick={() => setConfirmOld(true)}
+                  className={`${danger} !px-2 !py-0.5 text-xs`}
+                >
+                  Delete all old chats
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </aside>
     </div>
   )

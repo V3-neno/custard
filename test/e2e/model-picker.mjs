@@ -151,7 +151,7 @@ const chats = () => {
     : []
 }
 const chatStarting = (t) =>
-  chats().find((c) => c.messages[0]?.content?.[0]?.text?.startsWith?.(t) || c.title.startsWith(t))
+  chats().find((c) => c.messages[0]?.parts?.[0]?.text?.startsWith?.(t) || c.title.startsWith(t))
 const turns = () => seen.filter((s) => s.body.stream)
 const sendText = async (text) => {
   const n = turns().length

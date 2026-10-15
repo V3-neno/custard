@@ -22,6 +22,7 @@ import type { AutomationView, PendingQuestion } from '../shared/automations'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision, ModelAvailability } from '../shared/chat'
+import type { OldChat } from '../shared/neutralChat'
 import type { ModelProfile, ModelsFileReport } from '../shared/models'
 import type {
   Artifact,
@@ -243,8 +244,12 @@ const custard = {
     // Every mode's chats when `mode` is null.
     list: (mode: Mode | null): Promise<ConversationSummary[]> =>
       ipcRenderer.invoke('conversations:list', mode),
-    get: (id: string): Promise<Conversation | null> => ipcRenderer.invoke('conversations:get', id),
+    // An old chat (one this build can't open) comes back as its title only.
+    get: (id: string): Promise<Conversation | OldChat | null> =>
+      ipcRenderer.invoke('conversations:get', id),
     delete: (id: string): Promise<void> => ipcRenderer.invoke('conversations:delete', id),
+    // Every old chat, each the way delete removes one. How many went.
+    deleteOld: (): Promise<number> => ipcRenderer.invoke('conversations:deleteOld'),
     continuations: (id: string): Promise<ChatLink[]> =>
       ipcRenderer.invoke('conversations:continuations', id),
     // Another model or effort for this chat's next message. No request.
