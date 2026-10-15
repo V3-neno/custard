@@ -23,8 +23,10 @@ import type { OneShotRequest, OneShotResult, ProviderAdapter, TurnEnd, TurnReque
 // DeepSeek. What each one leaves out is its profile's `responses` flags
 // (shared/providers.ts), which runOpenAI reads; the adapter is the same code
 // for both. Stored chats are converted to Responses input on the way out
-// (openai.ts toInput, which drops Claude's thinking and compaction blocks)
-// and replies back to stored blocks (toBlocks).
+// (toResponsesInput in responsesNeutral.ts, which sends parts only, so
+// Claude's thinking and compaction never go) and replies back to stored
+// messages (fromResponsesReply). One-shot calls still take Claude-format
+// messages (toInput).
 
 export function responsesAdapter(id: Provider): ProviderAdapter {
   // The effort a request carries: none for a model that takes none (ignored
@@ -46,6 +48,8 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
       effort: effortFor(turn.model, turn.effort),
       instructions: turn.system.map((b) => b.text).join('\n\n'),
       history: turn.history(),
+      files: turn.files,
+      available: turn.available,
       conversation: turn.conversation,
       fits: turn.fits,
       tools: turn.tools,

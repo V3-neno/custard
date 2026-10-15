@@ -66,7 +66,7 @@ export type ModelProfile = {
   changed?: string[]
 }
 
-const EFFORT_LABELS: Record<Effort, string> = {
+export const EFFORT_LABELS: Record<Effort, string> = {
   low: 'Low',
   medium: 'Medium',
   high: 'High',

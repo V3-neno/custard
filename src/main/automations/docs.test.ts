@@ -23,7 +23,17 @@ describe('docs and comments about automation steps', () => {
     expect(comment('types.ts')).not.toMatch(/Responses providers only/)
   })
 
-  it('the models file docs state the Haiku 4.5 effort rule', () => {
+  it('the models file docs state the Haiku 4.5 effort and thinking rules', () => {
     expect(doc('models-file.md')).toMatch(/Haiku 4\.5 takes no effort/)
+    expect(doc('models-file.md')).toMatch(/Haiku 4\.5 takes no thinking/)
+  })
+
+  it('the automations docs describe the form and the run list (Phase 3)', () => {
+    const d = doc('automations.md')
+    expect(d).not.toMatch(/Settings doesn't\s+show them yet/)
+    expect(d).not.toMatch(/The form doesn't offer the choice yet/)
+    expect(d).toMatch(/### The effort control/)
+    expect(d).toMatch(/Haiku 4\.5 takes no effort level/)
+    expect(d).toMatch(/Opus 5\.5 · effort not\s+set/)
   })
 })

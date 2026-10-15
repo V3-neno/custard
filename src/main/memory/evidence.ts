@@ -1,5 +1,6 @@
 import type { ActionRecord, Conversation } from '../../shared/chat'
 import { filesNote } from '../../shared/attachments'
+import { isToolResults, textOf, toolCalls } from '../../shared/neutralChat'
 
 // What a capture is allowed to see: built in code from the saved chat and
 // Step 1's action records, cut down and stripped of secrets before any model
@@ -102,11 +103,6 @@ const DONT_REMEMBER = new RegExp(
 const CONTENT_TOOLS =
   /^(vault_(read|search|list)|fs_(read|list|search)|reference_(read|list)|web_read|web_search)$/
 
-const textOf = (m: Conversation['messages'][number]): string =>
-  typeof m.content === 'string'
-    ? m.content
-    : m.content.map((b) => (b.type === 'text' ? b.text : '')).join('\n')
-
 // Replaces attached files' names (and their names without the extension,
 // when distinctive) with a placeholder, ignoring case.
 // Every file name a chat knows: its own attachments' and those listed from
@@ -155,12 +151,10 @@ export function buildEvidence(
   skipPlugins: string[] = []
 ): Evidence {
   const msgs = c.messages.slice(from, to)
-  const isResults = (m: (typeof msgs)[number]): boolean =>
-    typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
   const files = (i: number): string =>
     filesNote((c.attachments ?? []).filter((a) => a.message === from + i))
   const asked = msgs.flatMap((m, i) =>
-    m.role === 'user' && !isResults(m) ? [{ text: textOf(m).trim(), files: files(i) }] : []
+    m.role === 'user' && !isToolResults(m) ? [{ text: textOf(m).trim(), files: files(i) }] : []
   )
   const requests = asked.map((r) => r.text).filter(Boolean)
   // Attached files' names never reach the summarizer, wherever they appear
@@ -172,28 +166,26 @@ export function buildEvidence(
   const filesSeen = filesInContext(c, to)
   const actions: EvidenceAction[] = []
   for (const m of msgs)
-    if (m.role === 'assistant' && typeof m.content !== 'string')
-      for (const b of m.content)
-        if (b.type === 'tool_use') {
-          const a = c.actions?.[b.id]
-          const plugin = /^([a-z][a-z0-9-]*)__/.exec(b.name)?.[1] ?? null
-          if (plugin && skipPlugins.includes(plugin)) continue
-          actions.push({
-            id: `A${actions.length + 1}`,
-            // With files in context, the label (built from the model's input)
-            // becomes the tool's name: structured metadata only.
-            label: filesSeen ? b.name : unnamed(a?.label || b.name),
-            tool: b.name,
-            plugin,
-            write: a?.write ?? false,
-            status: a?.status ?? 'unknown',
-            content: CONTENT_TOOLS.test(b.name),
-            result:
-              CONTENT_TOOLS.test(b.name) || filesSeen
-                ? ''
-                : unnamed(redact(cut(a?.result ?? '', LIMITS.result)))
-          })
-        }
+    for (const b of toolCalls(m)) {
+      const a = c.actions?.[b.id]
+      const plugin = /^([a-z][a-z0-9-]*)__/.exec(b.name)?.[1] ?? null
+      if (plugin && skipPlugins.includes(plugin)) continue
+      actions.push({
+        id: `A${actions.length + 1}`,
+        // With files in context, the label (built from the model's input)
+        // becomes the tool's name: structured metadata only.
+        label: filesSeen ? b.name : unnamed(a?.label || b.name),
+        tool: b.name,
+        plugin,
+        write: a?.write ?? false,
+        status: a?.status ?? 'unknown',
+        content: CONTENT_TOOLS.test(b.name),
+        result:
+          CONTENT_TOOLS.test(b.name) || filesSeen
+            ? ''
+            : unnamed(redact(cut(a?.result ?? '', LIMITS.result)))
+      })
+    }
   const answerMsg = [...msgs].reverse().find((m) => m.role === 'assistant' && textOf(m).trim())
   const dontRemember =
     requests

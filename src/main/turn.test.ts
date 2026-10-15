@@ -1,16 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { BetaToolResultBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { Conversation } from '../shared/chat'
+import type { UserPart } from '../shared/neutralChat'
 import { actionKey, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
+import { calls as callsMsg, chat, partial, result, said, user } from '../../test/neutral/builders'
 
-const conv = (): Conversation => ({
-  id: 'c1',
-  mode: 'chat',
-  title: 't',
-  createdAt: 0,
-  updatedAt: 0,
-  messages: []
-})
+const conv = (): Conversation => chat()
 
 const call = (id: string, name: string, write = false, input: unknown = {}): Call => ({
   id,
@@ -28,16 +22,15 @@ function saved(): { save: (c: Conversation) => void; copies: Conversation[] } {
 
 function startTurn(c: Conversation, save: (c: Conversation) => void, calls: Call[]): TurnLog {
   const log = new TurnLog(c, save)
-  c.messages.push({ role: 'user', content: 'do things' })
-  log.addAssistant(
-    calls.map((x) => ({ type: 'tool_use' as const, id: x.id, name: x.name, input: x.input }))
-  )
+  c.messages.push(user('do things'))
+  log.addAssistant(callsMsg(...calls))
   return log
 }
 
-const lastResults = (c: Conversation): BetaToolResultBlockParam[] => {
+type Result = Extract<UserPart, { type: 'tool_result' }>
+const lastResults = (c: Conversation): Result[] => {
   const m = c.messages[c.messages.length - 1]
-  return (m.content as BetaToolResultBlockParam[]).filter((b) => b.type === 'tool_result')
+  return m.role === 'user' ? m.parts.filter((b): b is Result => b.type === 'tool_result') : []
 }
 
 describe('a round with mixed outcomes', () => {
@@ -77,12 +70,12 @@ describe('a round with mixed outcomes', () => {
       e: 'completed'
     })
     const results = lastResults(c)
-    expect(results.map((r) => r.tool_use_id)).toEqual(['a', 'b', 'c', 'd', 'e'])
-    expect(results.map((r) => r.is_error)).toEqual([false, true, true, true, false])
-    expect(results[0].content).toBe('Added to Notes.md')
-    expect(results[2].content).toMatch(/^Outcome unknown: The plugin did not answer/)
-    expect(results[2].content).toMatch(/may or may not have taken effect/)
-    expect(results[3].content).toMatch(/^Not run: The user declined/)
+    expect(results.map((r) => r.callId)).toEqual(['a', 'b', 'c', 'd', 'e'])
+    expect(results.map((r) => r.isError)).toEqual([false, true, true, true, false])
+    expect(results[0].text).toBe('Added to Notes.md')
+    expect(results[2].text).toMatch(/^Outcome unknown: The plugin did not answer/)
+    expect(results[2].text).toMatch(/may or may not have taken effect/)
+    expect(results[3].text).toMatch(/^Not run: The user declined/)
   })
 
   it('treats an exception from a write as unknown and from a read as failed', async () => {
@@ -168,13 +161,13 @@ describe('after a mixed round', () => {
         x.id === 'a' ? { content: 'Added', isError: false } : { content: 'Missing', isError: true },
       new AbortController().signal
     )
-    log.addAssistant([{ type: 'text', text: 'Partly done, and cut' }])
+    log.addAssistant(said('Partly done, and cut'))
     log.notice('cut-off', 'cut off')
     // Continue is a new turn on the same chat.
     const next = new TurnLog(c, () => undefined)
-    c.messages.push({ role: 'user', content: 'Continue from where you were cut off.' })
+    c.messages.push(user('Continue from where you were cut off.'))
     const ran: string[] = []
-    next.addAssistant([{ type: 'tool_use', id: 'c', name: 'vault_read', input: {} }])
+    next.addAssistant(callsMsg({ id: 'c', name: 'vault_read' }))
     await next.runRound(
       [call('c', 'vault_read')],
       async (x) => {
@@ -187,8 +180,8 @@ describe('after a mixed round', () => {
     expect(c.actions!.a.status).toBe('completed')
     expect(c.actions!.b.status).toBe('failed')
     // The earlier results stay in the history the model sees.
-    const firstResults = c.messages[2].content as BetaToolResultBlockParam[]
-    expect(firstResults.map((r) => [r.tool_use_id, r.content])).toEqual([
+    const firstResults = c.messages[2].parts as Result[]
+    expect(firstResults.map((r) => [r.callId, r.text])).toEqual([
       ['a', 'Added'],
       ['b', 'Missing']
     ])
@@ -199,13 +192,7 @@ describe('repeats after a crash', () => {
   it('are still recognised once the chat is reopened', () => {
     const input = { uris: ['x'] }
     const c = conv()
-    c.messages = [
-      { role: 'user', content: 'queue it' },
-      {
-        role: 'assistant',
-        content: [{ type: 'tool_use', id: 'q', name: 'spotify__add_to_queue', input }]
-      }
-    ]
+    c.messages = [user('queue it'), callsMsg({ id: 'q', name: 'spotify__add_to_queue', input })]
     c.actions = {
       q: {
         name: 'spotify__add_to_queue',
@@ -249,7 +236,7 @@ describe('stopping', () => {
     expect(c.actions!.a.status).toBe('completed')
     expect(c.actions!.b.status).toBe('unknown')
     expect(c.actions!.c.status).toBe('not-run')
-    expect(lastResults(c)[2].content).toMatch(/^Not run: Stopped before it started/)
+    expect(lastResults(c)[2].text).toMatch(/^Not run: Stopped before it started/)
 
     expect(log.interrupt('stopped', 'Stopped by you.')).toBe(true)
     expect(c.notices).toEqual([
@@ -260,17 +247,32 @@ describe('stopping', () => {
   it('while text streams: the text so far is kept', () => {
     const c = conv()
     const log = new TurnLog(c, () => undefined)
-    c.messages.push({ role: 'user', content: 'hi' })
+    c.messages.push(user('hi'))
     log.text('Here is the start of ')
     expect(log.interrupt('stopped', 'Stopped by you.')).toBe(true)
-    expect(c.messages[1]).toEqual({ role: 'assistant', content: 'Here is the start of' })
+    expect(c.messages[1]).toEqual(partial('Here is the start of'))
+    expect(c.messages[1]).toEqual({
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Here is the start of' }],
+      partial: true
+    })
+  })
+
+  it('while text streams: the cut-off reply says which model wrote it', () => {
+    const c = conv()
+    const by = { provider: 'openai' as const, model: 'gpt-6-astra' }
+    const log = new TurnLog(c, () => undefined, by)
+    c.messages.push(user('hi'))
+    log.text('Half ')
+    expect(log.interrupt('stopped', 'Stopped by you.')).toBe(true)
+    expect(c.messages[1]).toEqual(partial('Half', by))
   })
 
   it('before anything happened: the turn is taken back', () => {
     const c = conv()
-    c.messages.push({ role: 'user', content: 'earlier' }, { role: 'assistant', content: 'yes' })
+    c.messages.push(user('earlier'), said('yes'))
     const log = new TurnLog(c, () => undefined)
-    c.messages.push({ role: 'user', content: 'hi' })
+    c.messages.push(user('hi'))
     expect(log.interrupt('error', 'Network down')).toBe(false)
     expect(c.messages).toHaveLength(2)
     expect(c.notices).toBeUndefined()
@@ -289,10 +291,8 @@ describe('stopping', () => {
     const last = c.messages[c.messages.length - 1]
     expect(c.actions.a.status).toBe('unknown')
     expect(c.actions.b.status).toBe('not-run')
-    expect((last.content as { type: string; text?: string }[]).at(-1)).toEqual({
-      type: 'text',
-      text: '[Custard: Lost connection.]'
-    })
+    expect(last.parts.at(-1)).toEqual({ type: 'note', text: '[Custard: Lost connection.]' })
+    expect(last.parts.map((p) => p.type)).toEqual(['tool_result', 'tool_result', 'note'])
   })
 })
 
@@ -309,7 +309,7 @@ describe('errors after actions', () => {
     log.text('Partial answ')
     expect(log.interrupt('error', 'Claude is overloaded right now.')).toBe(true)
     expect(c.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
-    expect(c.messages[3].content).toBe('Partial answ')
+    expect(c.messages[3]).toEqual(partial('Partial answ'))
     expect(c.notices![0]).toMatchObject({ kind: 'error', after: 4 })
   })
 })
@@ -318,8 +318,8 @@ describe('notices', () => {
   it('cut-off and step-limit sit after the last message', () => {
     const c = conv()
     const log = new TurnLog(c, () => undefined)
-    c.messages.push({ role: 'user', content: 'write a lot' })
-    log.addAssistant([{ type: 'text', text: 'long…' }])
+    c.messages.push(user('write a lot'))
+    log.addAssistant(said('long…'))
     log.notice('cut-off', 'The reply hit the length limit.')
     expect(c.notices).toEqual([
       { after: 2, kind: 'cut-off', text: 'The reply hit the length limit.' }
@@ -368,15 +368,12 @@ describe('reloading a chat Custard closed mid-turn', () => {
   it('closes the open round from the saved records', () => {
     const c = conv()
     c.messages = [
-      { role: 'user', content: 'queue songs and note it' },
-      {
-        role: 'assistant',
-        content: [
-          { type: 'tool_use', id: 'a', name: 'vault_append', input: {} },
-          { type: 'tool_use', id: 'b', name: 'spotify__add_to_queue', input: { uris: ['x'] } },
-          { type: 'tool_use', id: 'c', name: 'vault_read', input: {} }
-        ]
-      }
+      user('queue songs and note it'),
+      callsMsg(
+        { id: 'a', name: 'vault_append' },
+        { id: 'b', name: 'spotify__add_to_queue', input: { uris: ['x'] } },
+        { id: 'c', name: 'vault_read' }
+      )
     ]
     c.actions = {
       a: {
@@ -401,8 +398,8 @@ describe('reloading a chat Custard closed mid-turn', () => {
     expect(c.actions.b.status).toBe('unknown')
     expect(c.actions.c.status).toBe('not-run')
     const results = lastResults(c)
-    expect(results.map((r) => r.tool_use_id)).toEqual(['a', 'b', 'c'])
-    expect(results[0].content).toBe('Added to x.md')
+    expect(results.map((r) => r.callId)).toEqual(['a', 'b', 'c'])
+    expect(results[0].text).toBe('Added to x.md')
     expect(c.notices).toEqual([
       { after: 3, kind: 'interrupted', text: 'Custard closed before this turn finished.' }
     ])
@@ -412,27 +409,14 @@ describe('reloading a chat Custard closed mid-turn', () => {
 
   it('treats a call with no record as not run and a write without one as a write', () => {
     const c = conv()
-    c.messages = [
-      { role: 'user', content: 'x' },
-      {
-        role: 'assistant',
-        content: [{ type: 'tool_use', id: 'a', name: 'spotify__open', input: {} }]
-      }
-    ]
+    c.messages = [user('x'), callsMsg({ id: 'a', name: 'spotify__open' })]
     repairInterrupted(c)
     expect(c.actions!.a.status).toBe('not-run')
   })
 
   it('notes a turn that stopped between rounds', () => {
     const c = conv()
-    c.messages = [
-      { role: 'user', content: 'x' },
-      {
-        role: 'assistant',
-        content: [{ type: 'tool_use', id: 'a', name: 'vault_read', input: {} }]
-      },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: 'ok' }] }
-    ]
+    c.messages = [user('x'), callsMsg({ id: 'a', name: 'vault_read' }), result('a', 'ok')]
     expect(repairInterrupted(c)).toBe(true)
     expect(c.notices![0]).toMatchObject({ after: 3, kind: 'interrupted' })
     expect(repairInterrupted(c)).toBe(false)
@@ -440,10 +424,7 @@ describe('reloading a chat Custard closed mid-turn', () => {
 
   it('leaves finished chats alone', () => {
     const c = conv()
-    c.messages = [
-      { role: 'user', content: 'x' },
-      { role: 'assistant', content: [{ type: 'text', text: 'done' }] }
-    ]
+    c.messages = [user('x'), said('done')]
     expect(repairInterrupted(c)).toBe(false)
     expect(c.notices).toBeUndefined()
   })

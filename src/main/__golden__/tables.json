@@ -174,7 +174,7 @@
         "compaction": true
       },
       "budget": 889200,
-      "compactTrigger": 400000,
+      "compactTrigger": 150000,
       "maxResultChars": 100000,
       "cost": 0.01306,
       "costLong": 1.22906,
@@ -215,7 +215,7 @@
         "compaction": true
       },
       "budget": 889200,
-      "compactTrigger": 400000,
+      "compactTrigger": 150000,
       "maxResultChars": 100000,
       "cost": 0.00653,
       "costLong": 0.62453,
@@ -296,7 +296,7 @@
         "compaction": true
       },
       "budget": 936700,
-      "compactTrigger": 400000,
+      "compactTrigger": 150000,
       "maxResultChars": 100000,
       "cost": 0.0323,
       "costLong": 6.0546,
@@ -332,7 +332,7 @@
         "compaction": true
       },
       "budget": 936700,
-      "compactTrigger": 400000,
+      "compactTrigger": 150000,
       "maxResultChars": 100000,
       "cost": 0.00643,
       "costLong": 1.22686,
@@ -368,7 +368,7 @@
         "compaction": true
       },
       "budget": 936700,
-      "compactTrigger": 400000,
+      "compactTrigger": 150000,
       "maxResultChars": 100000,
       "cost": 0.000323,
       "costLong": 0.080346,
@@ -404,7 +404,7 @@
         "compaction": false
       },
       "budget": 889200,
-      "compactTrigger": 400000,
+      "compactTrigger": 150000,
       "maxResultChars": 100000,
       "cost": 0.0031812,
       "costLong": 0.41786120000000004,
@@ -440,7 +440,7 @@
         "compaction": false
       },
       "budget": 889200,
-      "compactTrigger": 400000,
+      "compactTrigger": 150000,
       "maxResultChars": 100000,
       "cost": 0.0008418,
       "costLong": 0.11054180000000001,

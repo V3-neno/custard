@@ -37,7 +37,8 @@ describe('providers', () => {
     expect(responsesFeatures('openai')).toEqual({
       reasoningSummary: true,
       encryptedReasoning: true,
-      tokenCount: true
+      tokenCount: true,
+      promptCacheKey: true
     })
     expect(providers.claude.api).toBe('anthropic')
   })
@@ -47,7 +48,8 @@ describe('providers', () => {
     expect(responsesFeatures('deepseek')).toEqual({
       reasoningSummary: false,
       encryptedReasoning: false,
-      tokenCount: false
+      tokenCount: false,
+      promptCacheKey: false
     })
   })
 
