@@ -350,6 +350,9 @@ export type Conversation = ConversationSummary & {
   // the same way while the provider's prompt cache is warm (see
   // main/promptCache).
   promptCache?: PromptSnapshot
+  // Big tool results in messages before `before` are sent as one-line stubs
+  // (see main/clearing). The messages themselves are kept in full.
+  cleared?: { before: number; at: number }
 }
 
 export type ChatReference = {
