@@ -342,6 +342,14 @@ export type Conversation = ConversationSummary & {
   // notes as they were when sent, shown to the model for the rest of this
   // chat (see main/earlierChats).
   references?: ChatReference[]
+  // Context Custard added to user messages (notes about the plugins a message
+  // was about), by message index. Sent with that message every time, never
+  // shown as part of it (see main/promptCache).
+  messageContext?: MessageContext[]
+  // What the start of the last request held, so the next one can be sent
+  // the same way while the provider's prompt cache is warm (see
+  // main/promptCache).
+  promptCache?: PromptSnapshot
 }
 
 export type ChatReference = {
@@ -356,6 +364,28 @@ export type ChatReference = {
   outside: boolean
 }
 
+export type MessageContext = {
+  // Index of the user message it was added to.
+  at: number
+  // The plugin id the notes are about.
+  plugin: string
+  text: string
+}
+
+export type PromptSnapshot = {
+  // When the chat's last turn ended.
+  at: number
+  model: string
+  // Hash of everything before the messages except the deferred parts.
+  fixed: string
+  // Whether memory was on for the chat.
+  memory: boolean
+  // The memory epoch it was taken in (bumped by Forget and settings).
+  epoch: number
+  // The deferred parts as sent, in order ('' for one left out).
+  deferred: string[]
+}
+
 // Claude's compaction block is part of the assistant message at `after`, as
 // the API requires; OpenAI's encrypted item is kept here, with the model it
 // came from, and is only sent back to that model.
@@ -368,7 +398,8 @@ export type Compaction = {
 }
 
 export type ContinueResult =
-  { ok: true; conversation: Conversation } | { ok: false; error: string; canSkipSummary: boolean }
+  | { ok: true; conversation: Conversation }
+  | { ok: false; error: string; canSkipSummary: boolean }
 
 export type ChatLink = { id: string; title: string; mode: Mode }
 

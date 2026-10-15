@@ -15,6 +15,7 @@ import {
   updateConversation
 } from '../store'
 import { handle } from '../ipc'
+import { bumpMemoryEpoch } from '../promptCache'
 import type { ChatMemory } from '../../shared/chat'
 import type { MemorySettings } from '../../shared/memory'
 import { Capture } from './capture'
@@ -134,16 +135,17 @@ export function registerMemoryHandlers(): void {
   })
   handle('memory:setSettings', (_, s: MemorySettings) => {
     setMemorySettings(s)
+    // Chats stop showing memory from before this at their next message.
+    bumpMemoryEpoch()
     if (!s.auto) {
       memory().cancelAll()
       chatNotes().cancelAll()
     }
   })
-  handle(
-    'memory:setChat',
-    (_, id: string, off: boolean): ChatMemory | null =>
-      memory().setChatMemory(id, off)?.memory ?? null
-  )
+  handle('memory:setChat', (_, id: string, off: boolean): ChatMemory | null => {
+    bumpMemoryEpoch()
+    return memory().setChatMemory(id, off)?.memory ?? null
+  })
   // Asks first, listing every note it will delete, then forgets the chat.
   // A chat's continuations carry a summary of it, so they are forgotten too.
   handle('memory:forgetChat', async (e, id: string): Promise<ChatMemory | null> => {
@@ -173,6 +175,8 @@ export function registerMemoryHandlers(): void {
     if (r.response !== 1) return getConversation(id)?.memory ?? null
     for (const i of ids) chatNotes().forget(i)
     const left = ids.flatMap((i) => memory().forget(i).left)
+    // No chat keeps showing what was forgotten from its last prompt.
+    bumpMemoryEpoch()
     if (left.length)
       await dialog.showMessageBox({
         type: 'error',

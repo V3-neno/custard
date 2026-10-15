@@ -242,13 +242,19 @@ try {
 
   await send('Did spotify find what I asked for earlier?')
   await idle()
-  const sys2 = JSON.stringify(chatRequests().at(-1)?.system)
+  // Plugin notes travel with the message that named the plugin, so the
+  // system prompt (and the provider's cache of it) stays the same.
+  const msgs2 = JSON.stringify(chatRequests().at(-1)?.messages)
   check(
-    sys2.includes('<plugin-notes plugin=\\"Spotify\\"') &&
-      sys2.includes('Looked up Nils Frahm') &&
-      sys2.includes('Requested outcome: not checked') &&
-      sys2.includes('Current state in Custard: enabled'),
+    msgs2.includes('<plugin-notes plugin=\\"Spotify\\"') &&
+      msgs2.includes('Looked up Nils Frahm') &&
+      msgs2.includes('Requested outcome: not checked') &&
+      msgs2.includes('Current state in Custard: enabled'),
     'naming Spotify brings its notes from the earlier chat, with its state now'
+  )
+  check(
+    !JSON.stringify(chatRequests().at(-1)?.system).includes('<plugin-notes'),
+    'with that message, not in the system prompt'
   )
   check(summaries().length === 1, 'and asking about it is not itself summarized')
 
@@ -430,7 +436,7 @@ try {
   await newChat()
   await send('What happened with spotify before?')
   await idle()
-  const sys3 = JSON.stringify(chatRequests().at(-1)?.system)
+  const sys3 = JSON.stringify(chatRequests().at(-1)?.messages)
   check(
     sys3.includes('Current state in Custard: turned off in Custard (its notes are kept)'),
     'turning Spotify off reaches the model from the app'
