@@ -20,6 +20,7 @@ import {
   getVaultPath,
   holdConversation,
   newConversation,
+  oldChat,
   releaseConversation,
   saveConversation,
   vaultEditsDir
@@ -59,9 +60,8 @@ import {
 } from './automations/chatTool'
 import { chatHasOutsideText, isOutsideTool } from '../shared/outsideText'
 import { anyGrantAllows } from '../shared/vaultGrants'
-import { withoutUnavailableTools } from './history'
 import { attachments } from './attachments'
-import { prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
+import { prepareFiles, type PreparedFiles } from './attachments/request'
 import { acceptsAttachments, type Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
 import { createPluginNamed, pluginHost, protectedRoots, verifyWorkspace } from './plugins'
@@ -77,6 +77,7 @@ import {
 import { createSkill, skillEntries, skillExists } from './skillsHub'
 import { isWebTool, runWebTool, webTools } from './web'
 import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
+import { OLD_CHAT_REFUSAL, userMessage } from '../shared/neutralChat'
 import {
   isChatModel,
   isEffort,
@@ -256,6 +257,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
 
   const fileIds = req.attachments?.ids ?? []
   if (!req.text.trim() && !fileIds.length) return refuse('Write a message or attach a file first.')
+  // An old chat (see store.ts) is never sent from.
+  if (req.conversationId && oldChat(req.conversationId)) return refuse(OLD_CHAT_REFUSAL)
   const existing = (req.conversationId && openConversation(req.conversationId)) || null
   // The mode comes from the renderer and picks the prompt and the tools.
   if (!existing && !isMode(req.mode)) return refuse('Unknown mode.')
@@ -279,7 +282,10 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       conversation,
       req.references ?? [],
       conversation.messages.length,
-      (id) => getConversation(id)
+      (id) => {
+        if (oldChat(id)) throw new Error(OLD_CHAT_REFUSAL)
+        return getConversation(id)
+      }
     )
   } catch (err) {
     return refuse(err instanceof Error ? err.message : String(err))
@@ -301,8 +307,11 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
   // Created before the user's message goes in, so it can be taken back out
   // if nothing at all happens.
-  const log = new TurnLog(conversation, saveConversation)
-  conversation.messages.push({ role: 'user', content: req.text })
+  const log = new TurnLog(conversation, saveConversation, {
+    provider: model.provider,
+    model: model.id
+  })
+  conversation.messages.push(userMessage(req.text))
   // The message's files move from the composer's draft to the chat. Taken
   // back (see stopEarly) if the turn doesn't happen.
   const current = conversation.messages.length - 1
@@ -497,14 +506,10 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const available = new Set(tools.map((t) => t.name))
   // Attached files, read once the turn starts (see attachments/request).
   let files: PreparedFiles | null = null
-  // Calls in the history to tools that aren't offered now go in as text.
-  // The adapter drops what its provider can't read.
-  const history = (): Conversation['messages'] => {
-    return withoutUnavailableTools(
-      withFiles(conversation.messages, files?.blocks ?? new Map()),
-      available
-    )
-  }
+  // The chat as stored. The adapter converts it for its provider, with the
+  // files in front of their messages and calls to tools that aren't offered
+  // now as text.
+  const history = (): Conversation['messages'] => conversation.messages
 
   // Checks the next request against the model's budget (see context.ts) and
   // keeps the result, so the chat can say when it's getting long.
@@ -992,6 +997,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       effort: req.settings.effort,
       system,
       history,
+      files: files?.blocks ?? new Map(),
+      available,
       conversation,
       tools,
       maxSteps: MAX_STEPS,
@@ -1048,6 +1055,7 @@ async function continueFrom(id: string, withoutSummary: boolean): Promise<Contin
       error: 'This chat is still busy. Try again when it has finished.',
       canSkipSummary: false
     }
+  if (oldChat(id)) return { ok: false as const, error: OLD_CHAT_REFUSAL, canSkipSummary: false }
   continuing.add(id)
   try {
     return await continueChat(
@@ -1093,6 +1101,7 @@ export function registerChatHandlers(): void {
   // Picking another model (or effort) in an open chat: saved on the chat, so
   // its next message goes there. No provider is asked.
   handle('conversations:setModel', (_, id: string, settings: ChatSettings) => {
+    if (oldChat(String(id))) throw new Error(OLD_CHAT_REFUSAL)
     const c = openConversation(String(id))
     if (!c) throw new Error('That chat is gone.')
     if (active.has(c.id)) throw new Error('Wait for this chat to finish answering first.')
@@ -1132,6 +1141,7 @@ export function registerChatHandlers(): void {
     try {
       if (active.has(String(chatId)))
         return { ok: false, error: 'Wait for this chat to finish answering first.' }
+      if (oldChat(String(chatId))) return { ok: false, error: OLD_CHAT_REFUSAL }
       const c = openConversation(String(chatId))
       if (!c) return { ok: false, error: 'That chat is gone.' }
       const vault = getVaultPath()

@@ -2,6 +2,7 @@ import { readFileSync, renameSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
 import { modes, type ChatNote, type Conversation, type Provider } from '../shared/chat'
 import { chatHasOutsideText } from '../shared/outsideText'
+import { textOf } from '../shared/neutralChat'
 import {
   actionLedger,
   handoffEvidence,
@@ -74,11 +75,7 @@ const read = (full: string): string | null => {
 function userWords(c: Conversation): string {
   return c.messages
     .filter((m) => m.role === 'user')
-    .map((m) =>
-      typeof m.content === 'string'
-        ? m.content
-        : m.content.map((b) => (b.type === 'text' ? b.text : '')).join(' ')
-    )
+    .map((m) => textOf(m, ' '))
     .join('\n')
 }
 

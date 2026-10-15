@@ -41,6 +41,8 @@ import {
   getChatSettings,
   getVaultPath,
   listConversations,
+  oldChat,
+  oldChatIds,
   setChatSettings,
   setVaultPath,
   getVaultGrants,
@@ -65,6 +67,16 @@ import {
   starterSkillFolders
 } from './vaultTemplate'
 import { createSkill, readSkill, skillEntries } from './skillsHub'
+
+// Deleting a chat: its file, its widget records, its attached files and its
+// Design outputs. Nothing in the vault (memory, notes in Custard/Chats,
+// captures), usage totals or settings.
+async function deleteChat(id: string): Promise<void> {
+  deleteConversation(id)
+  widgets().conversationDeleted(id)
+  await attachments().deleteChat(id)
+  designChatDeleted(id)
+}
 
 function vaultInfo(): VaultInfo {
   const path = getVaultPath()
@@ -213,17 +225,21 @@ app.whenReady().then(() => {
   handle('conversations:list', (_, mode: Mode | null) =>
     mode === null ? listConversations(null) : isMode(mode) ? listConversations(mode) : []
   )
-  handle('conversations:get', (_, id: string) => openConversation(id))
+  // A chat this build can't open comes back as an old chat: its title only.
+  handle('conversations:get', (_, id: string) => openConversation(id) ?? oldChat(id))
   handle('conversations:delete', async (_, id: string) => {
     if (chatBusy(id))
       throw new Error(
         'This chat is still answering. Stop it or wait for it to finish, then delete it.'
       )
-    deleteConversation(id)
-    widgets().conversationDeleted(id)
-    // The chat's attached files and Design outputs go with it.
-    await attachments().deleteChat(id)
-    designChatDeleted(id)
+    await deleteChat(id)
+  })
+  // Every old chat (see store.ts), each removed the way Delete removes one.
+  // The window asks first.
+  handle('conversations:deleteOld', async () => {
+    const ids = oldChatIds()
+    for (const id of ids) await deleteChat(id)
+    return ids.length
   })
   handle('vault:get', () => vaultInfo())
   handle('vault:pick', async (e) => {

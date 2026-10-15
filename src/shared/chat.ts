@@ -1,5 +1,5 @@
 import type { TokenUsage } from './pricing'
-import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import type { CHAT_FORMAT, CHAT_VERSION, Message, OldReason } from './neutralChat'
 import type { Workspace } from './plugins'
 import type { Attachment, AttachmentKind } from './attachments'
 import { providers, type Provider, type ProviderApi } from './providers'
@@ -134,6 +134,9 @@ export type ConversationSummary = {
   pluginId?: string
   // Skills mode: the skill (its folder in Custard/Skills) the chat works on.
   skill?: string
+  // A chat file this build can't open (see neutralChat.ts): listed as "Old
+  // format" with its title only, and never read as a chat.
+  old?: OldReason
 }
 
 // What became of one tool call. Saved as it changes, so a chat reloaded after
@@ -290,9 +293,12 @@ export type Conversation = ConversationSummary & {
   // only place the chat may write. None: the Skills hub chat, which writes
   // nothing. Fixed when the conversation starts.
   skill?: string
-  // Exactly what is sent to the API, so assistant turns keep their thinking
-  // blocks unchanged between requests.
-  messages: BetaMessageParam[]
+  // Custard's own chat format (see neutralChat.ts). Each provider's adapter
+  // converts the messages on the way out; a provider's own blocks are kept
+  // in `raw` only for that provider.
+  format: typeof CHAT_FORMAT
+  version: typeof CHAT_VERSION
+  messages: Message[]
   // By tool_use id.
   actions?: Record<string, ActionRecord>
   notices?: Notice[]

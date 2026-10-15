@@ -1,7 +1,8 @@
 import { clearPluginWorkspace, peekPluginWorkspace } from './workspaceEntry'
 import { chatHasOutsideText } from '../../../../shared/outsideText'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import { isOldChat, isToolResults, type OldChat } from '../../../../shared/neutralChat'
+import OldChatView from './OldChat'
 import {
   chatSettingsOf,
   isChatModel,
@@ -62,9 +63,6 @@ type Live = {
 }
 
 const folderName = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?? p
-
-const isToolResults = (m: BetaMessageParam | undefined): boolean =>
-  !!m && typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
 
 const CONTINUE = 'Continue from where you were cut off.'
 
@@ -173,6 +171,11 @@ function ChatView(props: Props): React.JSX.Element {
   const [list, setList] = useState<ConversationSummary[]>([])
   const [filter, setFilter] = useState<Mode | null>(historyFilter)
   const [current, setCurrent] = useState<Conversation | null>(null)
+  // An old chat opened from History: its title and a way to delete it. Its
+  // messages are never read.
+  const [oldChat, setOldChat] = useState<OldChat | null>(null)
+  // How many old chats there are, in every mode (History's Delete all).
+  const [oldCount, setOldCount] = useState(0)
   // A model picked here: for the next new chat (chat null), or for the open
   // chat, whose next message uses it. Picking never asks a provider.
   const [picked, setPicked] = useState<{ chat: string | null; s: ChatSettings } | null>(null)
@@ -225,7 +228,7 @@ function ChatView(props: Props): React.JSX.Element {
       .get(id)
       .then((c) => {
         restoring.current = false
-        if (c) setCurrent(c)
+        if (c && !isOldChat(c)) setCurrent(c)
         else openChats.delete(mode)
       })
       .catch(() => {
@@ -239,6 +242,8 @@ function ChatView(props: Props): React.JSX.Element {
     else openChats.delete(mode)
   }, [mode, current])
   const [live, setLive] = useState<Live | null>(null)
+  // Sending from the message box starts a new chat: the old one goes away.
+  if (oldChat && (current || live)) setOldChat(null)
   const [error, setError] = useState<string | null>(null)
   // The unsent message (and its files) of each mode, kept when switching
   // mode, which mounts a new view.
@@ -316,10 +321,13 @@ function ChatView(props: Props): React.JSX.Element {
   // Earlier chats picked for the next message.
   const [refs, setRefs] = useState<ChatLink[]>([])
 
-  const refreshList = useCallback(
-    () => window.custard.conversations.list(filter).then(setList),
-    [filter]
-  )
+  const refreshList = useCallback(() => {
+    void window.custard.conversations
+      .list(null)
+      .then((all) => setOldCount(all.filter((c) => c.old).length))
+      .catch(() => {})
+    return window.custard.conversations.list(filter).then(setList)
+  }, [filter])
 
   // Also on opening History: chat notes finish after a turn, with the
   // summary each row shows.
@@ -446,6 +454,7 @@ function ChatView(props: Props): React.JSX.Element {
   useEffect(() => {
     if (newChat === firstNewChat.current) return
     setCurrent(null)
+    setOldChat(null)
     setPicked(null)
     setError(null)
   }, [newChat])
@@ -567,7 +576,9 @@ function ChatView(props: Props): React.JSX.Element {
     if (live) return
     setError(null)
     setOverflow(false)
-    setCurrent(await window.custard.conversations.get(id))
+    const c = await window.custard.conversations.get(id)
+    setCurrent(isOldChat(c) ? null : c)
+    setOldChat(isOldChat(c) ? c : null)
     setPicked(null)
     onCloseHistory()
   }
@@ -588,6 +599,7 @@ function ChatView(props: Props): React.JSX.Element {
     if (live) return
     onTemporary(false)
     setCurrent(null)
+    setOldChat(null)
     setPicked(null)
     setError(null)
     setOverflow(false)
@@ -602,6 +614,18 @@ function ChatView(props: Props): React.JSX.Element {
       return
     }
     if (current?.id === id) setCurrent(null)
+    if (oldChat?.id === id) setOldChat(null)
+    refreshList()
+  }
+
+  // Every old chat, after History's confirmation.
+  const removeOld = async (): Promise<void> => {
+    try {
+      await window.custard.conversations.deleteOld()
+    } catch (e) {
+      setError(cleanError(e))
+    }
+    setOldChat(null)
     refreshList()
   }
 
@@ -610,10 +634,10 @@ function ChatView(props: Props): React.JSX.Element {
   const actions = useMemo(() => {
     const all: Record<string, ActionRecord> = { ...(current?.actions ?? {}) }
     for (const m of current?.messages ?? [])
-      if (typeof m.content !== 'string')
-        for (const b of m.content)
-          if (b.type === 'tool_result' && b.is_error && !all[b.tool_use_id])
-            all[b.tool_use_id] = { name: '', label: '', write: false, status: 'failed', key: '' }
+      if (m.role === 'user')
+        for (const b of m.parts)
+          if (b.type === 'tool_result' && b.isError && !all[b.callId])
+            all[b.callId] = { name: '', label: '', write: false, status: 'failed', key: '' }
     return all
   }, [current])
 
@@ -635,11 +659,7 @@ function ChatView(props: Props): React.JSX.Element {
       const answer = msgs
         .slice(start, i + 1)
         .filter((x) => x.role === 'assistant')
-        .flatMap((x) =>
-          typeof x.content === 'string'
-            ? [x.content]
-            : x.content.flatMap((b) => (b.type === 'text' ? [b.text] : []))
-        )
+        .flatMap((x) => x.parts.flatMap((b) => (b.type === 'text' ? [b.text] : [])))
         .join('\n')
       out.set(i, { sources, answer })
     })
@@ -765,6 +785,7 @@ function ChatView(props: Props): React.JSX.Element {
   const toHub = (): void => {
     if (live) return
     setCurrent(null)
+    setOldChat(null)
     setError(null)
     setWorkspace(null)
     setSkill(null)
@@ -833,7 +854,9 @@ function ChatView(props: Props): React.JSX.Element {
         {showPane && narrow && <SideSwitch side={side} onSide={setSide} count={outputs.length} />}
         <div className="flex-1 overflow-y-auto">
           {crumbs && <PathBar crumbs={crumbs} />}
-          {empty && mode === 'code' && workspace?.kind === 'internal' ? (
+          {empty && oldChat ? (
+            <OldChatView chat={oldChat} onDelete={() => void remove(oldChat.id)} />
+          ) : empty && mode === 'code' && workspace?.kind === 'internal' ? (
             <PluginWorkspace
               key={workspace.pluginId}
               pluginId={workspace.pluginId}
@@ -1086,6 +1109,8 @@ function ChatView(props: Props): React.JSX.Element {
           onNew={startNew}
           onDelete={remove}
           onForget={forgetChat}
+          oldCount={oldCount}
+          onDeleteOld={removeOld}
           onClose={onCloseHistory}
         />
       )}

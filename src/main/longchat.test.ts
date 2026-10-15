@@ -42,16 +42,14 @@ import { actionKey, repairInterrupted, TurnLog, type Call } from './turn'
 import { toInput } from './openai'
 import { buildEvidence, evidenceText } from './memory/evidence'
 import { searchExposure } from './web'
+import type { Message } from '../shared/neutralChat'
+import { fromClaudeReply, toClaudeHistory } from './adapters/anthropicNeutral'
+import { toResponsesInput } from './adapters/responsesNeutral'
+import { assistant, calls, chat, result, said, user } from '../../test/neutral/builders'
+import { toolResults } from '../shared/neutralChat'
 
-const conv = (over: Partial<Conversation> = {}): Conversation => ({
-  id: 'orig',
-  mode: 'chat',
-  title: 'Plan the launch',
-  createdAt: 0,
-  updatedAt: 0,
-  messages: [],
-  ...over
-})
+const conv = (over: Partial<Conversation> = {}): Conversation =>
+  chat({ id: 'orig', title: 'Plan the launch', ...over })
 
 // A chat with a decision, a read, an accepted change, a failure, a decline
 // and an action whose outcome is unknown.
@@ -59,39 +57,27 @@ function workedChat(): Conversation {
   const c = conv()
   const send = { to: 'team@example.com', subject: 'Launch' }
   c.messages = [
-    { role: 'user', content: 'Plan the launch for Friday. Never email customers directly.' },
-    {
-      role: 'assistant',
-      content: [
-        { type: 'text', text: 'Reading the plan.' },
-        { type: 'tool_use', id: 'r1', name: 'vault_read', input: { path: 'Plan.md' } }
-      ]
-    },
-    {
-      role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: 'r1', content: 'SECRET PLAN CONTENTS' }]
-    },
-    { role: 'assistant', content: 'Decided: launch Friday 10:00.' },
-    { role: 'user', content: 'Send the team email and add the calendar event.' },
-    {
-      role: 'assistant',
-      content: [
-        { type: 'tool_use', id: 'w1', name: 'mail__send', input: send },
-        { type: 'tool_use', id: 'w2', name: 'cal__add', input: { day: 'Fri' } },
-        { type: 'tool_use', id: 'w3', name: 'vault_append', input: { path: 'Log.md' } },
-        { type: 'tool_use', id: 'w4', name: 'crm__update', input: { id: 7 } }
-      ]
-    },
-    {
-      role: 'user',
-      content: [
-        { type: 'tool_result', tool_use_id: 'w1', content: 'Outcome unknown: timed out' },
-        { type: 'tool_result', tool_use_id: 'w2', content: 'Calendar API error 500' },
-        { type: 'tool_result', tool_use_id: 'w3', content: 'Appended' },
-        { type: 'tool_result', tool_use_id: 'w4', content: 'Not run: declined' }
-      ]
-    },
-    { role: 'assistant', content: 'The email may or may not have gone out.' }
+    user('Plan the launch for Friday. Never email customers directly.'),
+    assistant([
+      { type: 'text', text: 'Reading the plan.' },
+      { type: 'tool_call', id: 'r1', name: 'vault_read', input: { path: 'Plan.md' } }
+    ]),
+    result('r1', 'SECRET PLAN CONTENTS'),
+    said('Decided: launch Friday 10:00.'),
+    user('Send the team email and add the calendar event.'),
+    calls(
+      { id: 'w1', name: 'mail__send', input: send },
+      { id: 'w2', name: 'cal__add', input: { day: 'Fri' } },
+      { id: 'w3', name: 'vault_append', input: { path: 'Log.md' } },
+      { id: 'w4', name: 'crm__update', input: { id: 7 } }
+    ),
+    toolResults([
+      { callId: 'w1', text: 'Outcome unknown: timed out', isError: false },
+      { callId: 'w2', text: 'Calendar API error 500', isError: false },
+      { callId: 'w3', text: 'Appended', isError: false },
+      { callId: 'w4', text: 'Not run: declined', isError: false }
+    ]),
+    said('The email may or may not have gone out.')
   ]
   c.actions = {
     r1: {
@@ -158,14 +144,7 @@ function store(...chats: Conversation[]): ContinueDeps & {
     all,
     saves,
     load: (id) => (all.has(id) ? structuredClone(all.get(id)!) : null),
-    create: (mode, title) => ({
-      id: `new${++n}`,
-      mode,
-      title,
-      createdAt: 1,
-      updatedAt: 1,
-      messages: []
-    }),
+    create: (mode, title) => chat({ id: `new${++n}`, mode, title, createdAt: 1, updatedAt: 1 }),
     save: (c) => {
       saves.push(c.id)
       all.set(c.id, structuredClone(c))
@@ -363,8 +342,32 @@ describe('provider history', () => {
     expect(out && 'call_id' in out && out.call_id).toBe('u1')
   })
 
+  // The same history as stored: Claude's reply with its blocks in `raw`.
+  const stored: Message[] = [
+    user('one'),
+    said('two'),
+    user('three'),
+    fromClaudeReply(history[3].content as never, 'claude-opus-5-5'),
+    result('u1', 'ok')
+  ]
+
+  it('sends the stored history as the same Claude and Responses requests', () => {
+    const available = new Set(['vault_list'])
+    for (const model of ['claude-opus-5-5', 'claude-haiku-4-5'])
+      expect(toClaudeHistory(stored, { model, available })).toEqual(
+        claudeHistory(
+          [
+            ...history.slice(0, 4),
+            { ...history[4], content: [{ ...(history[4].content[0] as object), is_error: false }] }
+          ] as BetaMessageParam[],
+          model
+        )
+      )
+    expect(toResponsesInput(stored, { available })).toEqual(toInput(history))
+  })
+
   it('records where Claude compacted', () => {
-    const c = conv({ messages: history.slice(0, 3) })
+    const c = conv({ messages: stored.slice(0, 3) })
     const content = [compaction, { type: 'text', text: 'hi' }] as unknown as BetaContentBlock[]
     expect(recordClaudeCompaction(c, content, 'claude-opus-5-5', 5)).toBe(true)
     expect(c.compactions).toEqual([
@@ -374,7 +377,7 @@ describe('provider history', () => {
   })
 
   it("starts OpenAI from its newest compaction, and only the same model's", () => {
-    const c = conv({ messages: history.slice(0, 3) })
+    const c = conv({ messages: stored.slice(0, 3) })
     recordOpenAICompaction(
       c,
       { id: 'cmp_1', type: 'compaction', encrypted_content: 'E1' },
@@ -382,7 +385,7 @@ describe('provider history', () => {
       'openai',
       1
     )
-    c.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'four' }] })
+    c.messages.push(said('four'))
     expect(c.compactions?.[0].after).toBe(3)
     const start = openaiStart(c, 'gpt-6-astra')
     expect(start).toEqual({
@@ -437,8 +440,8 @@ describe('action record', () => {
     const c = workedChat()
     for (let i = 0; i < 3000; i++)
       c.messages.push(
-        { role: 'user', content: `request ${i} ${'z'.repeat(2_000)}` },
-        { role: 'assistant', content: `answer ${i} ${'w'.repeat(2_000)}` }
+        user(`request ${i} ${'z'.repeat(2_000)}`),
+        said(`answer ${i} ${'w'.repeat(2_000)}`)
       )
     // Far past any model's window (about 12M characters).
     expect(JSON.stringify(c.messages).length).toBeGreaterThan(10_000_000)
@@ -477,17 +480,11 @@ describe('bounded record, complete records', () => {
   // 300 write actions with long labels; the first one's outcome is unknown.
   function busyChat(): Conversation {
     const c = conv({ id: 'busy' })
-    c.messages.push({ role: 'user', content: 'do lots' })
+    c.messages.push(user('do lots'))
     c.actions = {}
     for (let i = 0; i < 300; i++) {
       const input = { n: i }
-      c.messages.push(
-        {
-          role: 'assistant',
-          content: [{ type: 'tool_use', id: `t${i}`, name: 'crm__update', input }]
-        },
-        { role: 'user', content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: 'x' }] }
-      )
+      c.messages.push(calls({ id: `t${i}`, name: 'crm__update', input }), result(`t${i}`, 'x'))
       c.actions[`t${i}`] = {
         name: 'crm__update',
         label: `Update record ${i} ${'with a very long description '.repeat(20)}`,
@@ -534,14 +531,8 @@ describe('bounded record, complete records', () => {
     const c = busyChat()
     // 80 more unknown outcomes push action 0 out of the shown record.
     for (let i = 300; i < 380; i++) {
-      c.messages.push({
-        role: 'assistant',
-        content: [{ type: 'tool_use', id: `t${i}`, name: 'crm__update', input: { n: i } }]
-      })
-      c.messages.push({
-        role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: 'x' }]
-      })
+      c.messages.push(calls({ id: `t${i}`, name: 'crm__update', input: { n: i } }))
+      c.messages.push(result(`t${i}`, 'x'))
       c.actions![`t${i}`] = {
         name: 'crm__update',
         label: `Update record ${i}`,
@@ -679,10 +670,7 @@ describe('continue in a new chat', () => {
     const r = await continueChat(s, 'orig')
     if (!r.ok) throw new Error(r.error)
     const next = r.conversation
-    next.messages.push(
-      { role: 'user', content: 'What next?' },
-      { role: 'assistant', content: 'Check the email first.' }
-    )
+    next.messages.push(user('What next?'), said('Check the email first.'))
     const text = evidenceText(buildEvidence(next, 0, next.messages.length))
     expect(text).not.toContain('Launch Friday 10:00')
     expect(text).not.toContain('Send email to team')
@@ -733,10 +721,12 @@ describe('repeat protection and search gate across compaction and continuation',
       [{ type: 'compaction', content: 'All done.', encrypted_content: null }] as BetaContentBlock[],
       'claude-opus-5-5'
     )
-    c.messages.push({
-      role: 'assistant',
-      content: [{ type: 'compaction', content: 'All done.', encrypted_content: null }]
-    })
+    c.messages.push(
+      fromClaudeReply(
+        [{ type: 'compaction', content: 'All done.', encrypted_content: null }],
+        'claude-opus-5-5'
+      )
+    )
     expect(new TurnLog(c, () => {}).unknownRepeat(mail)).toBe(true)
     // The model is given Custard's own record next to the summary.
     const carried = carriedContext(c)
@@ -751,7 +741,7 @@ describe('repeat protection and search gate across compaction and continuation',
       [{ type: 'compaction', content: 's', encrypted_content: null }] as BetaContentBlock[],
       'claude-opus-5-5'
     )
-    c.messages.push({ role: 'user', content: 'Search the web for launch tips' })
+    c.messages.push(user('Search the web for launch tips'))
     const turn = c.messages.length - 1
     const reasons = searchExposure(c, turn, carriedContext(c).injected)
     expect(reasons).toContain('a summary of earlier messages')
@@ -763,11 +753,11 @@ describe('repeat protection and search gate across compaction and continuation',
     const r = await continueChat(s, 'orig', { withoutSummary: true })
     if (!r.ok) throw new Error()
     const c = r.conversation
-    c.messages.push({ role: 'user', content: 'Search the web' })
+    c.messages.push(user('Search the web'))
     expect(searchExposure(c, 0, carriedContext(c).injected)).toEqual([
       'a summary of an earlier chat'
     ])
     // A fresh chat with nothing carried has no reason to ask.
-    expect(searchExposure(conv({ messages: [{ role: 'user', content: 'x' }] }), 0, [])).toEqual([])
+    expect(searchExposure(conv({ messages: [user('x')] }), 0, [])).toEqual([])
   })
 })

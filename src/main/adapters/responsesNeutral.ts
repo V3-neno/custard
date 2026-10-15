@@ -9,8 +9,9 @@ import type { Provider } from '../../shared/providers'
 import { filePart, toBlocks } from '../openai'
 
 // Custard's neutral chat format (shared/neutralChat.ts) to and from the
-// OpenAI Responses API (OpenAI and DeepSeek). Pure functions; nothing in the
-// app calls them until B3. Only `parts` are ever sent: `raw` belongs to the
+// OpenAI Responses API (OpenAI and DeepSeek): runOpenAI (openai.ts) sends
+// the stored chat with toResponsesInput and stores each reply with
+// fromResponsesReply. Only `parts` are ever sent: `raw` belongs to the
 // provider that wrote it, and Responses replies have none.
 
 // The same words history.ts uses for a call to a tool that isn't offered now.
@@ -31,14 +32,16 @@ const isFile = (b: BetaContentBlockParam): boolean => b.type === 'image' || b.ty
 
 // The Responses input for one request: the history from `from` on (where the
 // model's own compaction item takes over; the caller puts the item first),
-// with this request's files in front of their messages and calls to tools
-// not offered now as text, as today.
+// and before `to` (the messages a compaction item stood for, when the model
+// turns compaction down), with this request's files in front of their
+// messages and calls to tools not offered now as text.
 export function toResponsesInput(
   messages: Message[],
   opts: {
     files?: Map<number, BetaContentBlockParam[]>
     available: Set<string>
     from?: number
+    to?: number
   }
 ): ResponseInputItem[] {
   const stale = new Set<string>()
@@ -49,7 +52,7 @@ export function toResponsesInput(
 
   const items: ResponseInputItem[] = []
   for (const [i, m] of messages.entries()) {
-    if (i < (opts.from ?? 0)) continue
+    if (i < (opts.from ?? 0) || i >= (opts.to ?? messages.length)) continue
     if (m.role === 'assistant') {
       if (m.partial) {
         items.push({ role: 'assistant', content: textOf(m.parts) })

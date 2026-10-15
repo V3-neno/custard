@@ -1,11 +1,12 @@
 import { useContext, useState } from 'react'
-import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import Markdown from '../Markdown'
 import Orb from '../Orb'
 import { toolLabel } from '../../../../shared/vault'
 import type { ActionRecord, ActionStatus, Notice, WebSource } from '../../../../shared/chat'
 import { splitSources } from '../../../../shared/web'
 import { ToolLabelsContext } from '../../toolLabels'
+import type { Message } from '../../../../shared/neutralChat'
+import { messageItems } from './messageItems'
 
 // The orb is the "buffer": it glows while Claude works and holds the
 // collapsible thinking summary once there is one.
@@ -189,28 +190,23 @@ export function UserBubble({ text }: { text: string }): React.JSX.Element | null
   )
 }
 
-type Props = { message: BetaMessageParam; actions?: Record<string, ActionRecord> }
+type Props = { message: Message; actions?: Record<string, ActionRecord> }
 
 function MessageView({ message, actions }: Props): React.JSX.Element | null {
   const labels = useContext(ToolLabelsContext)
-  const blocks =
-    typeof message.content === 'string'
-      ? [{ type: 'text' as const, text: message.content }]
-      : message.content
+  const items = messageItems(message)
 
   if (message.role === 'user') {
-    // Tool results are sent as user messages but aren't something the user wrote.
-    if (blocks.some((b) => b.type === 'tool_result')) return null
-    const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n')
-    return <UserBubble text={text} />
+    const user = items[0]
+    return user?.kind === 'user' ? <UserBubble text={user.text} /> : null
   }
 
   return (
     <div>
-      {blocks.map((b, i) => {
-        if (b.type === 'thinking') return <Thinking key={i} text={b.thinking} />
-        if (b.type === 'fallback') return <FallbackNote key={i} to={b.to.model} />
-        if (b.type === 'tool_use')
+      {items.map((b, i) => {
+        if (b.kind === 'thinking') return <Thinking key={i} text={b.text} />
+        if (b.kind === 'fallback') return <FallbackNote key={i} to={b.to} />
+        if (b.kind === 'tool')
           return (
             <ToolLine
               key={i}
@@ -218,7 +214,7 @@ function MessageView({ message, actions }: Props): React.JSX.Element | null {
               status={lineStatus(actions?.[b.id]?.status)}
             />
           )
-        if (b.type === 'text') return <Markdown key={i} text={b.text} />
+        if (b.kind === 'text') return <Markdown key={i} text={b.text} />
         return null
       })}
     </div>

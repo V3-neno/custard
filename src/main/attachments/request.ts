@@ -10,14 +10,16 @@ import {
   type AttachmentKind
 } from '../../shared/attachments'
 import { providerNames, type Conversation, type Provider } from '../../shared/chat'
+import type { Message } from '../../shared/neutralChat'
 import { profileOf, type ImageTokens } from '../../shared/models'
 import { limitsFor, registerFileData } from '../context'
 import { AttachmentMissing } from './store'
 
 // Attached files in a request: read from Custard's stored copies once per
 // turn, checked against what the chosen model accepts, and put in front of
-// the user message they came with as Claude-format blocks (openai.ts turns
-// them into Responses input). Files are always sent inline as base64; nothing
+// the user message they came with as Claude-format blocks, by the adapter's
+// converter (anthropicNeutral.ts uses withFiles below; responsesNeutral.ts
+// turns them into Responses input). Files are always sent inline as base64; nothing
 // is uploaded to a provider's file storage.
 
 export type FileModel = { id: string; label: string; provider: Provider }
@@ -332,12 +334,12 @@ export function withFiles(
   })
 }
 
-// The index of the newest message holding a Claude compaction block: files
+// The index of the newest stored message holding a Claude compaction: files
 // before it aren't read by the API any more.
-export function claudeFilesFrom(messages: BetaMessageParam[]): number {
+export function claudeFilesFrom(messages: Message[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const c = messages[i].content
-    if (typeof c !== 'string' && c.some((b) => b.type === 'compaction')) return i
+    const m = messages[i]
+    if (m.role === 'assistant' && m.parts.some((p) => p.type === 'compaction')) return i
   }
   return 0
 }

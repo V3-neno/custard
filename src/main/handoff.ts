@@ -4,6 +4,7 @@ import { redact } from './memory/evidence'
 import { filesNote } from '../shared/attachments'
 import { adapterFor } from './adapters/registry'
 import type { OnUsage } from '../shared/pricing'
+import { isToolResults, textOf, toolCalls } from '../shared/neutralChat'
 
 // "Continue in a new chat": a bounded handoff from a chat that is too long
 // to go on. It is built from the saved chat in code, so it works however
@@ -43,13 +44,6 @@ const cut = (s: string, n: number): string =>
   s.length > n ? `${s.slice(0, n).trimEnd()}… [shortened]` : s
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim()
 
-const textOf = (m: Conversation['messages'][number]): string =>
-  typeof m.content === 'string'
-    ? m.content
-    : m.content.map((b) => (b.type === 'text' ? b.text : '')).join('\n')
-const isResults = (m: Conversation['messages'][number]): boolean =>
-  typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
-
 const STATUS_WORDS: Record<ActionRecord['status'], string> = {
   completed: 'the tool reported success',
   failed: 'the tool reported an error',
@@ -63,16 +57,14 @@ const STATUS_WORDS: Record<ActionRecord['status'], string> = {
 function actionsInOrder(c: Conversation): (ActionRecord & { id: string })[] {
   const out: (ActionRecord & { id: string })[] = []
   for (const m of c.messages)
-    if (m.role === 'assistant' && typeof m.content !== 'string')
-      for (const b of m.content)
-        if (b.type === 'tool_use') {
-          const a = c.actions?.[b.id]
-          out.push(
-            a
-              ? { ...a, id: b.id }
-              : { id: b.id, name: b.name, label: b.name, write: true, status: 'unknown', key: '' }
-          )
-        }
+    for (const b of toolCalls(m)) {
+      const a = c.actions?.[b.id]
+      out.push(
+        a
+          ? { ...a, id: b.id }
+          : { id: b.id, name: b.name, label: b.name, write: true, status: 'unknown', key: '' }
+      )
+    }
   return out
 }
 
@@ -153,7 +145,7 @@ export function handoffEvidence(c: Conversation, ledger: string): string {
   type Turn = { request: string; answer: string }
   const turns: Turn[] = []
   for (const [i, m] of c.messages.entries()) {
-    if (m.role === 'user' && !isResults(m)) {
+    if (m.role === 'user' && !isToolResults(m)) {
       const t = textOf(m).trim()
       // Files appear only as their number and types.
       const files = filesNote((c.attachments ?? []).filter((a) => a.message === i))
