@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { ActionRecord, Conversation } from '../shared/chat'
+import type { Message } from '../shared/neutralChat'
 import { CLEAR_LIMITS, clearableTokens, keepFrom, nextMark, withClearedResults } from './clearing'
 
 const big = (n = 30_000): string => 'x'.repeat(n)
@@ -16,48 +16,39 @@ const action = (
 })
 
 // One turn: the user's message, a tool call, its result, the answer.
-function turn(id: string, result: string, opts: { error?: boolean } = {}): BetaMessageParam[] {
+function turn(id: string, result: string, opts: { error?: boolean } = {}): Message[] {
   return [
-    { role: 'user', content: `question ${id}` },
+    { role: 'user', parts: [{ type: 'text', text: `question ${id}` }] },
     {
       role: 'assistant',
-      content: [{ type: 'tool_use', id, name: 'web_read', input: { url: `https://x/${id}` } }]
+      parts: [{ type: 'tool_call', id, name: 'web_read', input: { url: `https://x/${id}` } }]
     },
     {
       role: 'user',
-      content: [
-        {
-          type: 'tool_result',
-          tool_use_id: id,
-          content: result,
-          ...(opts.error ? { is_error: true } : {})
-        }
-      ]
+      parts: [{ type: 'tool_result', callId: id, text: result, isError: !!opts.error }]
     },
-    { role: 'assistant', content: [{ type: 'text', text: `answer ${id}` }] }
+    { role: 'assistant', parts: [{ type: 'text', text: `answer ${id}` }] }
   ]
 }
 
 const chat = (
   n: number,
   size = 30_000
-): { messages: BetaMessageParam[]; actions: Conversation['actions'] } => {
-  const messages: BetaMessageParam[] = []
+): { messages: Message[]; actions: Conversation['actions'] } => {
+  const messages: Message[] = []
   const actions: Conversation['actions'] = {}
   for (let i = 0; i < n; i++) {
     messages.push(...turn(`t${i}`, big(size)))
     actions[`t${i}`] = action()
   }
   // The message that starts the new turn.
-  messages.push({ role: 'user', content: 'next question' })
+  messages.push({ role: 'user', parts: [{ type: 'text', text: 'next question' }] })
   return { messages, actions }
 }
 
-const resultOf = (m: BetaMessageParam): string => {
-  const b = (m.content as { type: string; content?: unknown }[]).find(
-    (x) => x.type === 'tool_result'
-  )
-  return String(b?.content)
+const resultOf = (m: Message): string => {
+  const b = (m.parts as { type: string; text?: string }[]).find((x) => x.type === 'tool_result')
+  return String(b?.text)
 }
 
 describe('where clearing may reach', () => {
@@ -142,8 +133,8 @@ describe('what is sent', () => {
     // Saved messages are not changed, and the same input gives the same stub.
     expect(resultOf(messages[2])).toBe(big())
     expect(withClearedResults(messages, actions, 12)).toEqual(sent)
-    // The tool_use / tool_result pairing is kept.
-    expect((sent[2].content as { tool_use_id: string }[])[0].tool_use_id).toBe('t0')
+    // The tool call / result pairing is kept.
+    expect((sent[2].parts as { callId: string }[])[0].callId).toBe('t0')
   })
 
   it('leaves the history alone without a mark', () => {

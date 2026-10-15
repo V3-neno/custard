@@ -17,7 +17,7 @@ describe('provider adapters', () => {
   it("lists the same models as Custard's fixed list, unchecked, without a key", async () => {
     const listed = await allModels()
     expect(listed.map((m) => [m.id, m.label, m.provider])).toEqual(
-      chatModels.map((m) => [m.id, m.label, m.provider])
+      chatModels().map((m) => [m.id, m.label, m.provider])
     )
     expect(listed.every((m) => m.available === 'unchecked' && m.source === 'profile')).toBe(true)
   })
@@ -27,10 +27,12 @@ describe('provider adapters', () => {
       id: 'c',
       mode: 'chat' as const,
       title: '',
+      format: 'custard-chat' as const,
+      version: 1 as const,
       createdAt: 0,
       updatedAt: 0,
       messages: []
     }
-    for (const p of providerIds) expect(adapterFor(p).historyStart(c, chatModels[0].id)).toBe(0)
+    for (const p of providerIds) expect(adapterFor(p).historyStart(c, chatModels()[0].id)).toBe(0)
   })
 })

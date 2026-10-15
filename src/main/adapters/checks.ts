@@ -84,7 +84,7 @@ export function availabilityFrom(
   hasKey: (p: Provider) => boolean,
   check: (p: Provider) => ModelCheck | null
 ): ModelAvailability[] {
-  return chatModels.map((m): ModelAvailability => {
+  return chatModels().map((m): ModelAvailability => {
     if (!hasKey(m.provider)) return { id: m.id, available: false, reason: 'no-key' }
     const c = check(m.provider)
     if (c && (c.result === 'auth' || c.result === 'permission'))

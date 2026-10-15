@@ -1,16 +1,17 @@
 import { clearPluginWorkspace, peekPluginWorkspace } from './workspaceEntry'
 import { chatHasOutsideText } from '../../../../shared/outsideText'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import { isOldChat, isToolResults, type OldChat } from '../../../../shared/neutralChat'
+import OldChatView from './OldChat'
+import { atMessage, callOutcomes, turnProposals, turnSources } from '../../../../shared/chatLayout'
 import {
   chatSettingsOf,
+  isChatModel,
   modes,
   providerNames,
   providerOf,
   type ModelAvailability,
-  type ActionRecord,
   type ChatLink,
-  type WebSource,
   type ChatSettings,
   type Conversation,
   type ConversationSummary,
@@ -61,9 +62,6 @@ type Live = {
 }
 
 const folderName = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?? p
-
-const isToolResults = (m: BetaMessageParam | undefined): boolean =>
-  !!m && typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
 
 const CONTINUE = 'Continue from where you were cut off.'
 
@@ -172,6 +170,11 @@ function ChatView(props: Props): React.JSX.Element {
   const [list, setList] = useState<ConversationSummary[]>([])
   const [filter, setFilter] = useState<Mode | null>(historyFilter)
   const [current, setCurrent] = useState<Conversation | null>(null)
+  // An old chat opened from History: its title and a way to delete it. Its
+  // messages are never read.
+  const [oldChat, setOldChat] = useState<OldChat | null>(null)
+  // How many old chats there are, in every mode (History's Delete all).
+  const [oldCount, setOldCount] = useState(0)
   // A model picked here: for the next new chat (chat null), or for the open
   // chat, whose next message uses it. Picking never asks a provider.
   const [picked, setPicked] = useState<{ chat: string | null; s: ChatSettings } | null>(null)
@@ -224,8 +227,12 @@ function ChatView(props: Props): React.JSX.Element {
       .get(id)
       .then((c) => {
         restoring.current = false
-        if (c) setCurrent(c)
-        else openChats.delete(mode)
+        if (c && !isOldChat(c)) setCurrent(c)
+        else {
+          openChats.delete(mode)
+          // An old chat opened from another mode's History.
+          if (isOldChat(c)) setOldChat(c)
+        }
       })
       .catch(() => {
         restoring.current = false
@@ -238,6 +245,8 @@ function ChatView(props: Props): React.JSX.Element {
     else openChats.delete(mode)
   }, [mode, current])
   const [live, setLive] = useState<Live | null>(null)
+  // Sending from the message box starts a new chat: the old one goes away.
+  if (oldChat && (current || live)) setOldChat(null)
   const [error, setError] = useState<string | null>(null)
   // The unsent message (and its files) of each mode, kept when switching
   // mode, which mounts a new view.
@@ -315,10 +324,13 @@ function ChatView(props: Props): React.JSX.Element {
   // Earlier chats picked for the next message.
   const [refs, setRefs] = useState<ChatLink[]>([])
 
-  const refreshList = useCallback(
-    () => window.custard.conversations.list(filter).then(setList),
-    [filter]
-  )
+  const refreshList = useCallback(() => {
+    void window.custard.conversations
+      .list(null)
+      .then((all) => setOldCount(all.filter((c) => c.old).length))
+      .catch(() => {})
+    return window.custard.conversations.list(filter).then(setList)
+  }, [filter])
 
   // Also on opening History: chat notes finish after a turn, with the
   // summary each row shows.
@@ -445,6 +457,7 @@ function ChatView(props: Props): React.JSX.Element {
   useEffect(() => {
     if (newChat === firstNewChat.current) return
     setCurrent(null)
+    setOldChat(null)
     setPicked(null)
     setError(null)
   }, [newChat])
@@ -566,7 +579,9 @@ function ChatView(props: Props): React.JSX.Element {
     if (live) return
     setError(null)
     setOverflow(false)
-    setCurrent(await window.custard.conversations.get(id))
+    const c = await window.custard.conversations.get(id)
+    setCurrent(isOldChat(c) ? null : c)
+    setOldChat(isOldChat(c) ? c : null)
     setPicked(null)
     onCloseHistory()
   }
@@ -587,6 +602,7 @@ function ChatView(props: Props): React.JSX.Element {
     if (live) return
     onTemporary(false)
     setCurrent(null)
+    setOldChat(null)
     setPicked(null)
     setError(null)
     setOverflow(false)
@@ -601,67 +617,24 @@ function ChatView(props: Props): React.JSX.Element {
       return
     }
     if (current?.id === id) setCurrent(null)
+    if (oldChat?.id === id) setOldChat(null)
     refreshList()
   }
 
-  // Each tool call's outcome. Chats saved before outcomes were recorded only
-  // know which calls failed.
-  const actions = useMemo(() => {
-    const all: Record<string, ActionRecord> = { ...(current?.actions ?? {}) }
-    for (const m of current?.messages ?? [])
-      if (typeof m.content !== 'string')
-        for (const b of m.content)
-          if (b.type === 'tool_result' && b.is_error && !all[b.tool_use_id])
-            all[b.tool_use_id] = { name: '', label: '', write: false, status: 'failed', key: '' }
-    return all
-  }, [current])
+  // Every old chat, after History's confirmation.
+  const removeOld = async (): Promise<void> => {
+    try {
+      await window.custard.conversations.deleteOld()
+    } catch (e) {
+      setError(cleanError(e))
+    }
+    setOldChat(null)
+    refreshList()
+  }
 
-  // Where each turn ends (the message before the next thing the user wrote)
-  // mapped to its sources and its answer text.
-  const turnSources = useMemo(() => {
-    const out = new Map<number, { sources: WebSource[]; answer: string }>()
-    const msgs = current?.messages ?? []
-    const all = current?.sources ?? []
-    if (!all.length) return out
-    let start = -1
-    msgs.forEach((m, i) => {
-      if (m.role === 'user' && !isToolResults(m)) start = i
-      const next = msgs[i + 1]
-      const ends = !next || (next.role === 'user' && !isToolResults(next))
-      if (!ends || start < 0) return
-      const sources = all.filter((s) => s.turn === start)
-      if (!sources.length) return
-      const answer = msgs
-        .slice(start, i + 1)
-        .filter((x) => x.role === 'assistant')
-        .flatMap((x) =>
-          typeof x.content === 'string'
-            ? [x.content]
-            : x.content.flatMap((b) => (b.type === 'text' ? [b.text] : []))
-        )
-        .join('\n')
-      out.set(i, { sources, answer })
-    })
-    return out
-  }, [current])
-
-  // Hub chat offers to enter a workspace, shown where their turn ends.
-  const turnProposals = useMemo(() => {
-    const out = new Map<number, NonNullable<Conversation['proposals']>>()
-    const msgs = current?.messages ?? []
-    const all = current?.proposals ?? []
-    if (!all.length) return out
-    let start = -1
-    msgs.forEach((m, i) => {
-      if (m.role === 'user' && !isToolResults(m)) start = i
-      const next = msgs[i + 1]
-      const ends = !next || (next.role === 'user' && !isToolResults(next))
-      if (!ends || start < 0) return
-      const here = all.filter((p) => p.turn === start)
-      if (here.length) out.set(i, here)
-    })
-    return out
-  }, [current])
+  const actions = useMemo(() => callOutcomes(current), [current])
+  const sourcesAt = useMemo(() => turnSources(current), [current])
+  const proposalsAt = useMemo(() => turnProposals(current), [current])
   const [proposalError, setProposalError] = useState<{ id: string; error: string } | null>(null)
   const answerProposal = async (id: string, yes: boolean): Promise<void> => {
     if (!current || live) return
@@ -750,7 +723,10 @@ function ChatView(props: Props): React.JSX.Element {
   }
   const shownProvider = providerOf(chatSettings.model)
   const providerName = providerNames[shownProvider]
-  const shownStatus = availability?.find((a) => a.id === chatSettings.model)
+  // A model with no profile can't be used whatever the keys say.
+  const shownStatus: ModelAvailability | undefined = isChatModel(chatSettings.model)
+    ? availability?.find((a) => a.id === chatSettings.model)
+    : { id: chatSettings.model, available: false, reason: 'no-profile' }
   // Nothing can go to a model that can't be used now.
   const unavailable = shownStatus?.available === false ? shownStatus : null
   const noKeys = !!availability?.length && availability.every((a) => a.reason === 'no-key')
@@ -761,6 +737,7 @@ function ChatView(props: Props): React.JSX.Element {
   const toHub = (): void => {
     if (live) return
     setCurrent(null)
+    setOldChat(null)
     setError(null)
     setWorkspace(null)
     setSkill(null)
@@ -829,7 +806,9 @@ function ChatView(props: Props): React.JSX.Element {
         {showPane && narrow && <SideSwitch side={side} onSide={setSide} count={outputs.length} />}
         <div className="flex-1 overflow-y-auto">
           {crumbs && <PathBar crumbs={crumbs} />}
-          {empty && mode === 'code' && workspace?.kind === 'internal' ? (
+          {empty && oldChat ? (
+            <OldChatView chat={oldChat} onDelete={() => void remove(oldChat.id)} />
+          ) : empty && mode === 'code' && workspace?.kind === 'internal' ? (
             <PluginWorkspace
               key={workspace.pluginId}
               pluginId={workspace.pluginId}
@@ -881,60 +860,50 @@ function ChatView(props: Props): React.JSX.Element {
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 pt-8 pb-6">
               {current?.continuedFrom && <HandoffCard k={current.continuedFrom} onOpen={open} />}
-              {current?.messages.map((m, i) => (
-                <Fragment key={i}>
-                  {(current.compactions ?? [])
-                    .filter((k) => k.after === i)
-                    .slice(-1)
-                    .map((k) => (
-                      <CompactionLine key={`k${i}`} k={k} />
-                    ))}
-                  {!isToolResults(m) && (
-                    // A reply that continues after vault actions sits flush with the part before it.
-                    <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
-                      <MessageView message={m} actions={actions} />
-                      <SentFiles
-                        chat={current.id}
-                        files={(current.attachments ?? []).filter((a) => a.message === i)}
-                      />
-                      <SentReferences
-                        items={(current.references ?? []).filter((r) => r.message === i)}
-                        onOpen={openIn}
-                      />
-                    </div>
-                  )}
-                  {turnProposals.get(i)?.map((p) => (
-                    <ProposalCard
-                      key={p.id}
-                      p={p}
-                      names={p.target === 'skill' ? skillNames : pluginNames}
-                      busy={!!live}
-                      error={proposalError?.id === p.id ? proposalError.error : undefined}
-                      onAnswer={(yes) => void answerProposal(p.id, yes)}
-                    />
-                  ))}
-                  {turnSources.has(i) && (
-                    <SourcesList
-                      sources={turnSources.get(i)!.sources}
-                      answer={turnSources.get(i)!.answer}
-                    />
-                  )}
-                  {notices
-                    // The length notice below says it, with the way on.
-                    .filter(
-                      (n) => n.after === i + 1 && !(showLength && n === lastNotice && tooLong)
-                    )
-                    .map((n, j) => (
-                      <NoticeLine
-                        key={j}
-                        notice={n}
-                        onContinue={
-                          canContinue && n === lastNotice ? () => send(CONTINUE) : undefined
-                        }
+              {current?.messages.map((m, i) => {
+                const here = atMessage(current, i)
+                return (
+                  <Fragment key={i}>
+                    {here.compaction && <CompactionLine key={`k${i}`} k={here.compaction} />}
+                    {!isToolResults(m) && (
+                      // A reply that continues after vault actions sits flush with the part before it.
+                      <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
+                        <MessageView message={m} actions={actions} />
+                        <SentFiles chat={current.id} files={here.files} />
+                        <SentReferences items={here.references} onOpen={openIn} />
+                      </div>
+                    )}
+                    {proposalsAt.get(i)?.map((p) => (
+                      <ProposalCard
+                        key={p.id}
+                        p={p}
+                        names={p.target === 'skill' ? skillNames : pluginNames}
+                        busy={!!live}
+                        error={proposalError?.id === p.id ? proposalError.error : undefined}
+                        onAnswer={(yes) => void answerProposal(p.id, yes)}
                       />
                     ))}
-                </Fragment>
-              ))}
+                    {sourcesAt.has(i) && (
+                      <SourcesList
+                        sources={sourcesAt.get(i)!.sources}
+                        answer={sourcesAt.get(i)!.answer}
+                      />
+                    )}
+                    {here.notices
+                      // The length notice below says it, with the way on.
+                      .filter((n) => !(showLength && n === lastNotice && tooLong))
+                      .map((n, j) => (
+                        <NoticeLine
+                          key={j}
+                          notice={n}
+                          onContinue={
+                            canContinue && n === lastNotice ? () => send(CONTINUE) : undefined
+                          }
+                        />
+                      ))}
+                  </Fragment>
+                )
+              })}
               {showLength && !handoff && (
                 <LengthNotice
                   use={current.context}
@@ -1082,6 +1051,8 @@ function ChatView(props: Props): React.JSX.Element {
           onNew={startNew}
           onDelete={remove}
           onForget={forgetChat}
+          oldCount={oldCount}
+          onDeleteOld={removeOld}
           onClose={onCloseHistory}
         />
       )}

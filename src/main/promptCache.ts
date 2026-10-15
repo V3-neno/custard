@@ -129,24 +129,29 @@ export const contextBefore = (
 
 // The history as sent: each user message with context gets it as a text
 // block in front of its own content. The saved messages are not changed.
+// The text added in front of each message that has context, by index.
+export function contextByMessage(
+  context: readonly MessageContext[] | undefined
+): Map<number, string> {
+  const by = new Map<number, string[]>()
+  for (const c of context ?? []) {
+    const list = by.get(c.at) ?? []
+    list.push(c.text)
+    by.set(c.at, list)
+  }
+  return new Map([...by].map(([at, texts]) => [at, [CONTEXT_INTRO, ...texts].join('\n\n')]))
+}
+
 export function withMessageContext(
   messages: BetaMessageParam[],
   context: readonly MessageContext[] | undefined
 ): BetaMessageParam[] {
   if (!context?.length) return messages
-  const by = new Map<number, string[]>()
-  for (const c of context) {
-    const list = by.get(c.at) ?? []
-    list.push(c.text)
-    by.set(c.at, list)
-  }
+  const by = contextByMessage(context)
   return messages.map((m, i) => {
-    const texts = by.get(i)
-    if (!texts || m.role !== 'user') return m
-    const block: BetaContentBlockParam = {
-      type: 'text',
-      text: [CONTEXT_INTRO, ...texts].join('\n\n')
-    }
+    const text = by.get(i)
+    if (text === undefined || m.role !== 'user') return m
+    const block: BetaContentBlockParam = { type: 'text', text }
     const content: BetaContentBlockParam[] =
       typeof m.content === 'string'
         ? m.content.trim()

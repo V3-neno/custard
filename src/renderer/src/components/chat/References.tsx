@@ -33,6 +33,13 @@ export function ReferenceButton({
   const [chats, setChats] = useState<ConversationSummary[] | null>(null)
   const [query, setQuery] = useState('')
   const box = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  // Picking a chat puts focus back on the button.
+  const close = (): void => {
+    setOpen(false)
+    trigger.current?.focus()
+  }
 
   useEffect(() => {
     if (!open) return
@@ -41,7 +48,9 @@ export function ReferenceButton({
       if (!box.current?.contains(e.target as Node)) setOpen(false)
     }
     const esc = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      if (box.current?.contains(document.activeElement)) trigger.current?.focus()
     }
     document.addEventListener('mousedown', away)
     document.addEventListener('keydown', esc)
@@ -63,9 +72,43 @@ export function ReferenceButton({
     )
   }, [chats, query, current])
 
+  // Arrow keys from the search box into the list and along it.
+  const rows = (): HTMLButtonElement[] => [
+    ...(list.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+  ]
+  const arrows = (e: React.KeyboardEvent): void => {
+    const all = rows()
+    if (!all.length) return
+    const at = all.indexOf(document.activeElement as HTMLButtonElement)
+    const to =
+      e.key === 'ArrowDown'
+        ? Math.min(at + 1, all.length - 1)
+        : e.key === 'ArrowUp'
+          ? at - 1
+          : e.key === 'Home' && at >= 0
+            ? 0
+            : e.key === 'End' && at >= 0
+              ? all.length - 1
+              : null
+    if (to === null) return
+    e.preventDefault()
+    if (to < 0) box.current?.querySelector<HTMLInputElement>('input')?.focus()
+    else all[to].focus()
+  }
+
   return (
-    <div ref={box} className="relative">
+    <div
+      ref={box}
+      className="relative"
+      onBlur={(e) => {
+        // Tabbing out of the panel closes it. (A click on the panel's own
+        // text moves focus nowhere, and leaves it open.)
+        const to = e.relatedTarget as Node | null
+        if (open && to && !box.current?.contains(to)) setOpen(false)
+      }}
+    >
       <button
+        ref={trigger}
         onClick={() => {
           if (open) return setOpen(false)
           setQuery('')
@@ -80,7 +123,7 @@ export function ReferenceButton({
         title="Reference an earlier chat: its summary note goes with your message"
         aria-label="Reference a chat"
         aria-expanded={open}
-        className={`flex h-8 w-8 items-center justify-center rounded-full border text-base transition-colors disabled:opacity-40 ${
+        className={`focus-ring flex h-8 w-8 items-center justify-center rounded-full border text-base transition-colors disabled:opacity-40 ${
           open
             ? 'border-molten-500/50 text-molten-200'
             : 'border-forge-700 text-ash-400 hover:border-molten-500/50 hover:text-molten-200'
@@ -92,7 +135,8 @@ export function ReferenceButton({
         <div
           role="dialog"
           aria-label="Reference a chat"
-          className="absolute bottom-10 left-0 z-30 w-[360px] max-w-[80vw] rounded-2xl border border-forge-700 bg-forge-900 p-2 shadow-[0_10px_40px_rgb(0_0_0/0.5)]"
+          onKeyDown={arrows}
+          className="absolute bottom-10 left-0 z-30 w-[360px] max-w-[80vw] rounded-2xl border border-forge-700 bg-forge-850 p-3 shadow-xl"
         >
           <input
             autoFocus
@@ -100,9 +144,13 @@ export function ReferenceButton({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Find a chat"
             aria-label="Find a chat to reference"
-            className="mb-2 w-full rounded-xl border border-forge-700 bg-forge-850 px-3 py-1.5 text-sm text-ash-100 outline-none placeholder:text-ash-500 focus:border-molten-500/50"
+            className="mb-2 w-full rounded-lg border border-forge-700 bg-forge-900 px-3 py-1.5 text-sm text-ash-100 outline-none placeholder:text-ash-500 focus:border-molten-500/60"
           />
-          <ul className="max-h-64 overflow-y-auto" aria-label="Chats you can reference">
+          <ul
+            ref={list}
+            className="max-h-64 space-y-0.5 overflow-y-auto"
+            aria-label="Chats you can reference"
+          >
             {chats === null && <li className="px-2 py-1.5 text-xs text-ash-500">Loading…</li>}
             {chats !== null && shown.length === 0 && (
               <li className="px-2 py-1.5 text-xs text-ash-500">
@@ -116,10 +164,10 @@ export function ReferenceButton({
                   <button
                     onClick={() => {
                       onAdd({ id: c.id, title: c.title, mode: c.mode })
-                      setOpen(false)
+                      close()
                     }}
                     disabled={already || full}
-                    className="w-full rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-forge-800 disabled:opacity-40"
+                    className="w-full rounded-lg px-2 py-1.5 text-left transition-colors outline-none hover:bg-forge-800 focus-visible:bg-forge-800 disabled:opacity-40"
                   >
                     <span className="flex items-baseline gap-2">
                       <span className="truncate text-sm text-ash-100">{c.title}</span>
@@ -134,7 +182,7 @@ export function ReferenceButton({
               )
             })}
           </ul>
-          <p className="mt-2 border-t border-forge-800 px-2 pt-2 text-[11px] text-ash-500">
+          <p className="mt-2 border-t border-forge-700 px-2 pt-2 text-[11px] text-ash-500">
             {full
               ? `A message can reference ${MAX_REFERENCES} chats at most.`
               : 'Only chats with a summary note in Custard/Chats are listed. The note goes with your message, not the whole chat.'}

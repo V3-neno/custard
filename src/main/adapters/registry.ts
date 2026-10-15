@@ -1,5 +1,5 @@
 import type { ListedModel } from '../../shared/adapter'
-import { chatModels } from '../../shared/chat'
+import { requireProfile } from '../../shared/models'
 import { providerIds, type Provider } from '../../shared/providers'
 import { anthropicAdapter } from './anthropic'
 import { responsesAdapter } from './responses'
@@ -15,8 +15,10 @@ const adapters: Record<Provider, ProviderAdapter> = {
 
 export const adapterFor = (provider: Provider): ProviderAdapter => adapters[provider]
 
+// A model with no profile has no provider: it fails loudly (NoProfileError)
+// rather than going to Claude.
 export const adapterForModel = (model: string): ProviderAdapter =>
-  adapters[chatModels.find((m) => m.id === model)?.provider ?? 'claude']
+  adapters[requireProfile(model).provider]
 
 // Every provider's models, in picker order (see shared/providers.ts).
 // Not checked against any provider: no key is sent.

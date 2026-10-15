@@ -1,31 +1,29 @@
 import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { ActionRecord, Conversation, WebSource } from '../../shared/chat'
 import type { ToolRun } from '../turn'
+import { toolCalls } from '../../shared/neutralChat'
 import { originWarning, rememberLinks, urlOrigin } from './provenance'
 import { webRead, webReadTool } from './read'
 import {
-  claudeSearchTool,
   formatResults,
   MAX_QUERY,
   MAX_SEARCHES_PER_TURN,
   webSearchTool,
   type SearchOutcome
 } from './search'
-import { providers, responsesFeatures, type Provider } from '../../shared/providers'
+import { hasHostedSearch } from '../../shared/models'
+import type { Provider } from '../../shared/providers'
 import type { OnUsage } from '../../shared/pricing'
 
 export const isWebTool = (name: string): boolean => name === 'web_read' || name === 'web_search'
 
 export type WebModel = { id: string; provider: Provider }
 
-// web_read works with any model. Search needs the provider's hosted search
-// for that model (see claudeSearchTool; a Responses provider says whether it
-// has one, and every OpenAI model Custard offers lists web search).
+// web_read works with any model. Search needs hosted search for that model,
+// which its profile names (shared/models.ts: Claude's search tool, or a
+// Responses provider's web_search).
 export function webTools(model: WebModel): { tools: BetaTool[]; prompt: string } {
-  const search =
-    providers[model.provider].api === 'responses'
-      ? responsesFeatures(model.provider).webSearch
-      : claudeSearchTool(model.id) !== null
+  const search = hasHostedSearch(model.id)
   return {
     tools: search ? [webSearchTool, webReadTool] : [webReadTool],
     prompt: [
@@ -62,13 +60,7 @@ const notRun = (content: string): ToolRun => ({ content, isError: true, outcome:
 
 // This turn's records, oldest first.
 function turnActions(c: Conversation, turn: number): ActionRecord[] {
-  const ids = c.messages
-    .slice(turn)
-    .flatMap((m) =>
-      m.role === 'assistant' && typeof m.content !== 'string'
-        ? m.content.flatMap((b) => (b.type === 'tool_use' ? [b.id] : []))
-        : []
-    )
+  const ids = c.messages.slice(turn).flatMap((m) => toolCalls(m).map((b) => b.id))
   return ids.map((id) => c.actions?.[id]).filter((a): a is ActionRecord => !!a)
 }
 
@@ -86,14 +78,7 @@ export function searchExposure(c: Conversation, turn: number, injected: string[]
     ([id, a]) =>
       a.status !== 'not-run' &&
       a.status !== 'pending' &&
-      c.messages
-        .slice(0, turn)
-        .some(
-          (m) =>
-            m.role === 'assistant' &&
-            typeof m.content !== 'string' &&
-            m.content.some((b) => b.type === 'tool_use' && b.id === id)
-        )
+      c.messages.slice(0, turn).some((m) => toolCalls(m).some((b) => b.id === id))
   )
   if (earlier) reasons.push('results of tools from earlier in this chat')
   if (turnHasOutsideContent(c, turn)) reasons.push('results of tools from this turn')

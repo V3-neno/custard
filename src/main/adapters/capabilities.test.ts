@@ -8,7 +8,7 @@ const yes = (model: string): string[] =>
 
 describe('model capabilities', () => {
   it('describes every model Custard offers', () => {
-    for (const m of chatModels) {
+    for (const m of chatModels()) {
       const info = modelInfo(m.id)!
       expect(info).toMatchObject({
         id: m.id,

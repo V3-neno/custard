@@ -10,13 +10,16 @@ import {
   type AttachmentKind
 } from '../../shared/attachments'
 import { providerNames, type Conversation, type Provider } from '../../shared/chat'
+import type { Message } from '../../shared/neutralChat'
+import { profileOf, type ImageTokens } from '../../shared/models'
 import { limitsFor, registerFileData } from '../context'
 import { AttachmentMissing } from './store'
 
 // Attached files in a request: read from Custard's stored copies once per
 // turn, checked against what the chosen model accepts, and put in front of
-// the user message they came with as Claude-format blocks (openai.ts turns
-// them into Responses input). Files are always sent inline as base64; nothing
+// the user message they came with as Claude-format blocks, by the adapter's
+// converter (anthropicNeutral.ts uses withFiles below; responsesNeutral.ts
+// turns them into Responses input). Files are always sent inline as base64; nothing
 // is uploaded to a provider's file storage.
 
 export type FileModel = { id: string; label: string; provider: Provider }
@@ -30,8 +33,6 @@ const PROVIDER_LIMITS: Record<
     // Why the model can't take a file at all, if it can't: `why` for a note,
     // `refusal` when it is on the message being sent.
     refuses: (m: string, label: string, a: Attachment) => { why: string; refusal: string } | null
-    // How images are counted: Claude's long-edge tiers, or OpenAI's patches.
-    imageCount: 'claude' | 'patches'
   }
 > = {
   // 600 images, or 100 on 200K-context models; 600 PDF pages, or 100 on
@@ -39,8 +40,7 @@ const PROVIDER_LIMITS: Record<
   claude: {
     images: (m) => (limitsFor(m).window < 1_000_000 ? 100 : 600),
     pdfPages: (m) => (limitsFor(m).window < 1_000_000 ? 100 : 600),
-    refuses: () => null,
-    imageCount: 'claude'
+    refuses: () => null
   },
   // 1,500 images per request; no page limit is documented.
   openai: {
@@ -53,28 +53,27 @@ const PROVIDER_LIMITS: Record<
             why: "OpenAI doesn't accept animated GIFs.",
             refusal: `${a.name} is an animated GIF, which OpenAI doesn't accept. Remove it, attach a still image, or choose a Claude model (Claude uses only the first frame).`
           }
-        : null,
-    imageCount: 'patches'
+        : null
   },
   // DeepSeek's Responses API: "File inputs are not supported" (so no PDFs;
-  // text files go as text), and images only on deepseek-flash. No image
-  // count limit or token rule is documented: OpenAI's are used as a guess.
+  // text files go as text), and images only on the models whose profiles
+  // say so (DeepSeek Flash). No image count limit is documented: OpenAI's is
+  // used as a guess.
   deepseek: {
     images: () => 1_500,
     pdfPages: () => null,
     refuses: (m, label, a) =>
-      a.kind === 'pdf'
+      a.kind === 'pdf' && !profileOf(m)?.files.pdf
         ? {
             why: "DeepSeek doesn't accept PDFs.",
             refusal: `${a.name} is a PDF, which DeepSeek doesn't accept. Remove it, or choose a Claude or OpenAI model.`
           }
-        : a.kind === 'image' && m !== 'deepseek-flash'
+        : a.kind === 'image' && !profileOf(m)?.files.images
           ? {
               why: `${label} doesn't take images.`,
               refusal: `${label} doesn't take images, so ${a.name} can't be sent. Remove it, or choose DeepSeek Flash, a Claude or an OpenAI model.`
             }
-          : null,
-    imageCount: 'patches'
+          : null
   }
 }
 
@@ -85,10 +84,16 @@ export function kindRefusal(model: FileModel, kind: AttachmentKind): string | nu
   return PROVIDER_LIMITS[model.provider].refuses(model.id, model.label, probe)?.why ?? null
 }
 
+// How the model's images are counted, from its profile (shared/models.ts).
 // Claude downscales images past a long edge and caps their tokens; models
-// before the 4.7 generation (here, Haiku 4.5) use the smaller tier.
-const claudeTier = (model: string): { side: number; tokens: number } =>
-  model.startsWith('claude-haiku-4-5') ? { side: 1568, tokens: 1568 } : { side: 2576, tokens: 4784 }
+// before the 4.7 generation (here, Haiku 4.5) use the smaller tier. A model
+// with no profile goes by its provider's usual rule.
+const imageRule = (model: FileModel): ImageTokens =>
+  profileOf(model.id)?.files.imageTokens ?? (model.provider === 'claude' ? 'claude' : 'patches')
+const CLAUDE_TIERS = {
+  claude: { side: 2576, tokens: 4784 },
+  'claude-small': { side: 1568, tokens: 1568 }
+}
 
 // OpenAI images are sent with detail "high", which allows up to 2,500
 // patches. The 32-pixel patch is an assumption; past half the budget the
@@ -96,11 +101,12 @@ const claudeTier = (model: string): { side: number; tokens: number } =>
 const OPENAI_PATCHES = 2_500
 
 export function imageTokens(model: FileModel, width?: number, height?: number): number {
-  if (PROVIDER_LIMITS[model.provider].imageCount === 'patches') {
+  const rule = imageRule(model)
+  if (rule === 'patches') {
     if (!width || !height) return OPENAI_PATCHES
     return Math.min(OPENAI_PATCHES, Math.ceil(width / 32) * Math.ceil(height / 32))
   }
-  const tier = claudeTier(model.id)
+  const tier = CLAUDE_TIERS[rule]
   if (!width || !height) return tier.tokens
   const scale = Math.min(1, tier.side / Math.max(width, height))
   const w = Math.ceil(width * scale)
@@ -328,12 +334,12 @@ export function withFiles(
   })
 }
 
-// The index of the newest message holding a Claude compaction block: files
+// The index of the newest stored message holding a Claude compaction: files
 // before it aren't read by the API any more.
-export function claudeFilesFrom(messages: BetaMessageParam[]): number {
+export function claudeFilesFrom(messages: Message[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const c = messages[i].content
-    if (typeof c !== 'string' && c.some((b) => b.type === 'compaction')) return i
+    const m = messages[i]
+    if (m.role === 'assistant' && m.parts.some((p) => p.type === 'compaction')) return i
   }
   return 0
 }

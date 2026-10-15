@@ -10,7 +10,7 @@ function UsageMeter({ usage, context }: Props): React.JSX.Element | null {
   if (!usage && !context) return null
   const share = context && context.budget > 0 ? Math.min(1, context.tokens / context.budget) : 0
   const pct = Math.round(share * 100)
-  const model = chatModels.find((m) => m.id === context?.model)?.label ?? context?.model
+  const model = chatModels().find((m) => m.id === context?.model)?.label ?? context?.model
   const lines = [
     ...(context
       ? [

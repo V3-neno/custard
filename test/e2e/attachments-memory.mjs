@@ -127,9 +127,10 @@ try {
   await send(`quote test: I prefer short answers. What do "${TEXT_NAME}" and "${IMAGE_NAME}" say?`)
   await idle()
   const c1 = chat('quote test')
-  const last = c1.messages.at(-1).content
-  const answer =
-    typeof last === 'string' ? last : last.map((b) => (b.type === 'text' ? b.text : '')).join('')
+  const answer = c1.messages
+    .at(-1)
+    .parts.map((p) => (p.type === 'text' ? p.text : ''))
+    .join('')
   check(
     answer.includes(TEXT_NAME) &&
       answer.includes(IMAGE_NAME) &&

@@ -1,8 +1,13 @@
-import type {
-  BetaContentBlockParam,
-  BetaToolResultBlockParam
-} from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import type { BetaToolResultBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { ActionRecord, ActionStatus, Conversation, NoticeKind } from '../shared/chat'
+import {
+  isToolResults,
+  partialReply,
+  toolCalls,
+  toolResults,
+  type AssistantMessage,
+  type Writer
+} from '../shared/neutralChat'
 
 // Keeps a turn's history honest when it doesn't finish normally. Every tool
 // call is recorded as it happens and saved at each change, so a stop, an
@@ -53,7 +58,9 @@ export class TurnLog {
 
   constructor(
     readonly conversation: Conversation,
-    private readonly save: (c: Conversation) => void
+    private readonly save: (c: Conversation) => void,
+    // The model answering, for a reply cut off part way (partialReply).
+    private readonly by?: Writer
   ) {
     this.startLength = conversation.messages.length
   }
@@ -67,10 +74,12 @@ export class TurnLog {
     this.partial += delta
   }
 
-  addAssistant(content: BetaContentBlockParam[]): void {
+  // A reply as the adapter converted it (fromClaudeReply, fromResponsesReply).
+  // An empty reply isn't kept.
+  addAssistant(message: AssistantMessage): void {
     this.partial = ''
-    if (content.length) {
-      this.conversation.messages.push({ role: 'assistant', content })
+    if (message.parts.length || message.raw) {
+      this.conversation.messages.push(message)
       this.happened = true
     }
     this.save(this.conversation)
@@ -143,24 +152,24 @@ export class TurnLog {
     this.save(this.conversation)
   }
 
-  // One result per call of the open round, plus an optional note for the model.
+  // One result per call of the open round, plus an optional note for the
+  // model. Stored as the neutral message; returned as Claude blocks for the
+  // adapter's own loop.
   private closeRound(note?: string): BetaToolResultBlockParam[] {
     const calls = this.round ?? []
     this.round = null
-    const results: BetaToolResultBlockParam[] = calls.map((c) => {
+    const results = calls.map((c) => {
       const a = this.actions[c.id]
-      return {
-        type: 'tool_result',
-        tool_use_id: c.id,
-        content: resultText(a),
-        is_error: a.status !== 'completed'
-      }
+      return { callId: c.id, text: resultText(a), isError: a.status !== 'completed' }
     })
-    const content: (BetaToolResultBlockParam | { type: 'text'; text: string })[] = [...results]
-    if (note) content.push({ type: 'text', text: note })
-    this.conversation.messages.push({ role: 'user', content })
+    this.conversation.messages.push(toolResults(results, note))
     this.save(this.conversation)
-    return results
+    return results.map((r) => ({
+      type: 'tool_result',
+      tool_use_id: r.callId,
+      content: r.text,
+      is_error: r.isError
+    }))
   }
 
   // A round left open in a saved chat, to be closed by interrupt().
@@ -202,7 +211,7 @@ export class TurnLog {
       this.closeRound(`[Custard: ${text}]`)
     }
     if (this.partial.trim()) {
-      this.conversation.messages.push({ role: 'assistant', content: this.partial.trimEnd() })
+      this.conversation.messages.push(partialReply(this.partial.trimEnd(), this.by))
       this.partial = ''
       this.happened = true
     }
@@ -215,9 +224,6 @@ export class TurnLog {
   }
 }
 
-const isToolResults = (m: Conversation['messages'][number] | undefined): boolean =>
-  !!m && typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
-
 // A chat saved in the middle of a turn (Custard quit or crashed). Closes the
 // open round from the saved records, the same way a stop would, so the
 // history is valid again. Returns true if it changed anything.
@@ -225,8 +231,8 @@ export function repairInterrupted(c: Conversation): boolean {
   const last = c.messages[c.messages.length - 1]
   const closed = (c.notices ?? []).some((n) => n.after === c.messages.length)
   const text = 'Custard closed before this turn finished.'
-  if (last?.role === 'assistant' && typeof last.content !== 'string') {
-    const uses = last.content.filter((b) => b.type === 'tool_use')
+  if (last?.role === 'assistant' && !last.partial) {
+    const uses = toolCalls(last)
     if (!uses.length) return false
     const log = new TurnLog(c, () => undefined)
     const calls: Call[] = uses.map((u) => {

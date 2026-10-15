@@ -46,10 +46,14 @@ try {
   process.exit(1)
 }
 
-// A user message the person typed: a string, or blocks other than tool results.
+// A user message the person typed: no tool results. Reads chats in Custard's
+// format (`parts`) and old chats (`content`: a string or blocks), so a
+// baseline taken before the format change still counts.
 const typed = (m) =>
   m.role === 'user' &&
-  (typeof m.content === 'string' || !m.content.some((b) => b.type === 'tool_result'))
+  (Array.isArray(m.parts)
+    ? !m.parts.some((p) => p.type === 'tool_result')
+    : typeof m.content === 'string' || !m.content.some((b) => b.type === 'tool_result'))
 
 const rows = []
 for (const f of files) {

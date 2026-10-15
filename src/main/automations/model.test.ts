@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OneShotRequest, OneShotResult } from '../adapters/types'
+import { builtInProfiles, setProfiles, type Effort } from '../../shared/models'
 
 // An automation step is one adapter.sendMessage call; what the reply means
 // for the run must not depend on the provider (Phase 7).
@@ -16,11 +17,11 @@ vi.mock('../adapters/registry', () => ({
     }
   })
 }))
-const { stepFor } = await import('./model')
+const { CLAUDE_STEP_TOKENS, stepFor } = await import('./model')
 const { charge } = await import('../store')
 
-const run = async (model: string): Promise<unknown> => {
-  const step = stepFor(model)
+const run = async (model: string, effort?: Effort): Promise<unknown> => {
+  const step = stepFor(model, effort)
   if (typeof step === 'string') throw new Error(step)
   return step({
     system: 's',
@@ -40,9 +41,56 @@ describe('automation steps go through the adapter', () => {
 
   it('sends the same request shape for every provider', async () => {
     for (const m of MODELS) await run(m)
-    expect(sent.map((r) => [r.model, r.stream, r.retries, r.maxTokens])).toEqual(
-      MODELS.map((m) => [m, true, 0, undefined])
-    )
+    expect(sent.map((r) => [r.model, r.stream, r.retries])).toEqual(MODELS.map((m) => [m, true, 0]))
+  })
+
+  // Automation thinking, Phase 2.
+  it('Claude steps get 64,000 tokens; Responses providers no limit, as before', async () => {
+    for (const m of [...MODELS, 'claude-sonnet-5-5', 'claude-haiku-4-5']) await run(m)
+    expect(sent.map((r) => [r.model, r.maxTokens])).toEqual([
+      ['claude-opus-5-5', 64_000],
+      ['gpt-6-astra', undefined],
+      ['deepseek-flash', undefined],
+      ['claude-sonnet-5-5', 64_000],
+      ['claude-haiku-4-5', 64_000]
+    ])
+  })
+
+  it('the Claude step limit is at most every built-in Claude model’s output limit', () => {
+    for (const m of builtInProfiles.filter((p) => p.provider === 'claude'))
+      expect(CLAUDE_STEP_TOKENS).toBeLessThanOrEqual(m.limits.maxOutput)
+  })
+
+  it('a Claude model whose output limit is lower gets its own limit', async () => {
+    setProfiles([
+      ...builtInProfiles.filter((m) => m.id !== 'claude-sonnet-5-5'),
+      { ...builtInProfiles[1], limits: { window: 200_000, maxOutput: 8_000 } }
+    ])
+    try {
+      await run('claude-sonnet-5-5')
+      expect(sent[0].maxTokens).toBe(8_000)
+    } finally {
+      setProfiles(builtInProfiles)
+    }
+  })
+
+  it("passes the automation's effort when one is set, and none when not", async () => {
+    for (const m of [...MODELS, 'claude-haiku-4-5']) {
+      await run(m, 'high')
+      await run(m)
+    }
+    expect(sent.map((r) => [r.model, r.effort])).toEqual([
+      ['claude-opus-5-5', 'high'],
+      ['claude-opus-5-5', undefined],
+      ['gpt-6-astra', 'high'],
+      ['gpt-6-astra', undefined],
+      ['deepseek-flash', 'high'],
+      ['deepseek-flash', undefined],
+      // The adapter decides: Haiku 4.5's profile takes none (anthropic.ts).
+      ['claude-haiku-4-5', 'high'],
+      ['claude-haiku-4-5', undefined]
+    ])
+    expect(sent.filter((r) => !r.effort).every((r) => !('effort' in r))).toBe(true)
   })
 
   it('a reply with text and calls is the step', async () => {
@@ -80,5 +128,19 @@ describe('automation steps go through the adapter', () => {
 
   it('refuses a model Custard no longer offers', () => {
     expect(stepFor('gpt-4')).toMatch(/isn't one Custard offers/)
+  })
+
+  // Phase A3: a profile gone from the registry stops the run the same way,
+  // and nothing is sent.
+  it('refuses a model whose profile is gone from the registry', () => {
+    setProfiles(builtInProfiles.filter((m) => m.id !== 'deepseek-flash'))
+    try {
+      expect(stepFor('deepseek-flash')).toBe(
+        "The model deepseek-flash isn't one Custard offers any more. Pick another."
+      )
+      expect(sent).toHaveLength(0)
+    } finally {
+      setProfiles(builtInProfiles)
+    }
   })
 })

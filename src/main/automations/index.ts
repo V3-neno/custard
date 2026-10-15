@@ -109,6 +109,9 @@ export function startAutomations(): void {
   scheduler.start()
 }
 
+// Whether an automation is running now (Reload of the models file waits).
+export const automationRunning = (): boolean => scheduler?.busy() ?? false
+
 export function stopAutomations(): void {
   scheduler?.stop()
   scheduler = null

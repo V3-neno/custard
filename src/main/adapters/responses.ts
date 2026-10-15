@@ -1,6 +1,7 @@
 import type { ResponseInputItem } from 'openai/resources/responses/responses'
-import { chatModels, deepseekEffort, type Effort } from '../../shared/chat'
-import { providers, responsesFeatures, type Provider } from '../../shared/providers'
+import type { Effort } from '../../shared/chat'
+import { profileOf, providerEffort, sentLevel } from '../../shared/models'
+import { providers, type Provider } from '../../shared/providers'
 import { openaiStart } from '../compaction'
 import { runOpenAI, toBlocks, toFunctionTool, toInput } from '../openai'
 import { searchOpenAI } from '../web/search'
@@ -22,15 +23,20 @@ import type { OneShotRequest, OneShotResult, ProviderAdapter, TurnEnd, TurnReque
 // DeepSeek. What each one leaves out is its profile's `responses` flags
 // (shared/providers.ts), which runOpenAI reads; the adapter is the same code
 // for both. Stored chats are converted to Responses input on the way out
-// (openai.ts toInput, which drops Claude's thinking and compaction blocks)
-// and replies back to stored blocks (toBlocks).
+// (toResponsesInput in responsesNeutral.ts, which sends parts only, so
+// Claude's thinking and compaction never go) and replies back to stored
+// messages (fromResponsesReply). One-shot calls still take Claude-format
+// messages (toInput).
 
 export function responsesAdapter(id: Provider): ProviderAdapter {
   // The effort a request carries: none for a model that takes none (ignored
-  // without a word), and for DeepSeek one of the levels its docs list.
+  // without a word), otherwise the level its profile sends for it (DeepSeek:
+  // low, high or max). A model with no profile goes by its provider's levels.
   const effortFor = (model: string, e: Effort | undefined): Effort | undefined => {
-    if (!e || chatModels.find((m) => m.id === model)?.effort === false) return undefined
-    return id === 'deepseek' ? deepseekEffort(e) : e
+    const profile = profileOf(model)
+    const spec = profile ? profile.effort : providerEffort(id)
+    if (!e || !spec) return undefined
+    return sentLevel(spec, e)
   }
   const streamMessage = async (turn: TurnRequest): Promise<TurnEnd> => {
     const end = await runOpenAI({
@@ -42,6 +48,8 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
       effort: effortFor(turn.model, turn.effort),
       instructions: turn.system.map((b) => b.text).join('\n\n'),
       history: turn.history(),
+      files: turn.files,
+      available: turn.available,
       conversation: turn.conversation,
       fits: turn.fits,
       tools: turn.tools,
@@ -128,10 +136,10 @@ export function responsesAdapter(id: Provider): ProviderAdapter {
     sendMessage,
     streamMessage,
     historyStart: (conversation, modelId) => openaiStart(conversation, modelId).from,
-    // OpenAI's hosted search; DeepSeek has none (its profile says so, and
-    // getCapabilities with it).
+    // OpenAI's hosted search; DeepSeek has none (its models' profiles say
+    // so, and getCapabilities with them).
     webSearch: async ({ model, apiKey, query, signal }) =>
-      responsesFeatures(id).webSearch
+      profileOf(model)?.search === 'responses'
         ? searchOpenAI(responsesClient(id, apiKey), model, query, signal)
         : {
             ran: [],

@@ -9,6 +9,7 @@ import {
   setBudget,
   usageThisMonth,
   getConversation,
+  oldChat,
   getMemorySettings,
   getVaultPath,
   setMemorySettings,
@@ -18,6 +19,7 @@ import {
 import { handle } from '../ipc'
 import { bumpMemoryEpoch } from '../promptCache'
 import type { ChatMemory } from '../../shared/chat'
+import { OLD_CHAT_REFUSAL } from '../../shared/neutralChat'
 import type { MemorySettings } from '../../shared/memory'
 import { Capture } from './capture'
 import { continuationsOf } from '../continue'
@@ -144,12 +146,15 @@ export function registerMemoryHandlers(): void {
     }
   })
   handle('memory:setChat', (_, id: string, off: boolean): ChatMemory | null => {
+    if (oldChat(id)) throw new Error(OLD_CHAT_REFUSAL)
     bumpMemoryEpoch()
     return memory().setChatMemory(id, off)?.memory ?? null
   })
   // Asks first, listing every note it will delete, then forgets the chat.
   // A chat's continuations carry a summary of it, so they are forgotten too.
   handle('memory:forgetChat', async (e, id: string): Promise<ChatMemory | null> => {
+    // An old chat is never read (see store.ts); its notes stay in the vault.
+    if (oldChat(id)) throw new Error(OLD_CHAT_REFUSAL)
     const later = continuationsOf(allConversations(), id)
     const ids = [id, ...later.map((c) => c.id)]
     const notes = ids.flatMap((i) => memory().savedNotes(i))

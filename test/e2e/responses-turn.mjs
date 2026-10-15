@@ -252,7 +252,7 @@ const ids = new Map()
 const norm = (v) =>
   JSON.parse(
     JSON.stringify(v, function (k, x) {
-      if (k === 'requestId' || k === 'id' || k === 'tool_use_id') {
+      if (k === 'requestId' || k === 'id' || k === 'tool_use_id' || k === 'callId') {
         if (typeof x !== 'string') return x
         if (!ids.has(x)) ids.set(x, `#${ids.size + 1}`)
         return ids.get(x)
@@ -365,6 +365,9 @@ try {
   step('Compare with the golden record')
   const got = JSON.stringify(record, null, 1)
   fs.writeFileSync(`${OUT}/responses-turn.json`, got)
+
+  // Every request body, for the neutral-format check (test/neutral/README.md).
+  fs.writeFileSync(`${OUT}/requests.json`, JSON.stringify(seen))
   if (FLAG === '--update' || !fs.existsSync(GOLDEN)) {
     fs.writeFileSync(GOLDEN, got + '\n')
     console.log('golden record written')

@@ -1,8 +1,5 @@
-import type {
-  BetaContentBlockParam,
-  BetaMessageParam
-} from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { ActionRecord, Conversation } from '../shared/chat'
+import { isToolResults, type Message, type UserPart } from '../shared/neutralChat'
 
 // Clearing old tool results: the cheap step before compaction. Pages, notes
 // and plugin output the model read a few turns ago are usually spent, but
@@ -40,21 +37,16 @@ export const CLEAR_LIMITS = {
 // Custard's estimate elsewhere (context.estimateTokens): 3 characters a token.
 const tokens = (chars: number): number => Math.ceil(chars / 3)
 
-type Message = BetaMessageParam
-type ToolResult = Extract<BetaContentBlockParam, { type: 'tool_result' }>
-
-const isToolResults = (m: Message): boolean =>
-  typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result')
+type ToolResult = Extract<UserPart, { type: 'tool_result' }>
 
 // A message the user typed (not tool results).
 const typed = (m: Message): boolean => m.role === 'user' && !isToolResults(m)
 
-const resultChars = (b: ToolResult): number =>
-  typeof b.content === 'string' ? b.content.length : JSON.stringify(b.content ?? '').length
+const resultChars = (b: ToolResult): number => b.text.length
 
 // Whether a result may be replaced by a stub.
 function clearable(b: ToolResult, action: ActionRecord | undefined): boolean {
-  if (b.is_error || !action) return false
+  if (b.isError || !action) return false
   // Only settled actions whose outcome is known.
   if (!['completed', 'failed', 'not-run'].includes(action.status)) return false
   return resultChars(b) >= CLEAR_LIMITS.minResultChars
@@ -80,10 +72,9 @@ export function clearableTokens(
   let chars = 0
   for (let i = Math.max(0, from); i < Math.min(to, messages.length); i++) {
     const m = messages[i]
-    if (typeof m.content === 'string') continue
-    for (const b of m.content)
-      if (b.type === 'tool_result' && clearable(b, actions?.[b.tool_use_id]))
-        chars += resultChars(b)
+    if (m.role !== 'user') continue
+    for (const b of m.parts)
+      if (b.type === 'tool_result' && clearable(b, actions?.[b.callId])) chars += resultChars(b)
   }
   return tokens(chars)
 }
@@ -130,23 +121,22 @@ export function withClearedResults(
 ): Message[] {
   if (!before) return messages
   let changed = false
-  const out = messages.map((m, i) => {
-    if (i >= before || typeof m.content === 'string' || !isToolResults(m)) return m
+  const out = messages.map((m, i): Message => {
+    if (i >= before || m.role !== 'user' || !isToolResults(m)) return m
     let touched = false
-    const content = m.content.map((b): BetaContentBlockParam => {
+    const parts = m.parts.map((b): UserPart => {
       if (b.type !== 'tool_result') return b
-      const a = actions?.[b.tool_use_id]
+      const a = actions?.[b.callId]
       if (!a || !clearable(b, a)) return b
       touched = true
       return {
-        type: 'tool_result',
-        tool_use_id: b.tool_use_id,
-        content: `[Custard cleared this result to save room: ${a.label} (${a.name}), ${resultChars(b).toLocaleString('en-US')} characters, ${OUTCOME[a.status]}. The chat's record keeps its outcome. Call the tool again if you need what it returned.]`
+        ...b,
+        text: `[Custard cleared this result to save room: ${a.label} (${a.name}), ${resultChars(b).toLocaleString('en-US')} characters, ${OUTCOME[a.status]}. The chat's record keeps its outcome. Call the tool again if you need what it returned.]`
       }
     })
     if (!touched) return m
     changed = true
-    return { ...m, content }
+    return { ...m, parts }
   })
   return changed ? out : messages
 }

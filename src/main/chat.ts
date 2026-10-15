@@ -20,6 +20,7 @@ import {
   getVaultPath,
   holdConversation,
   newConversation,
+  oldChat,
   releaseConversation,
   saveConversation,
   vaultEditsDir
@@ -28,14 +29,7 @@ import { allPluginInfo, chatNotes, memory } from './memory'
 import { pluginNoteParts } from './memory/plugins'
 import { adapterFor } from './adapters/registry'
 import { carriedContext, handoffSummarizer } from './handoff'
-import {
-  chooseDeferred,
-  contextBefore,
-  hashFixed,
-  memoryEpoch,
-  newContext,
-  withMessageContext
-} from './promptCache'
+import { chooseDeferred, contextBefore, hashFixed, memoryEpoch, newContext } from './promptCache'
 import {
   chatTools,
   isChatTool,
@@ -75,9 +69,8 @@ import {
 } from './automations/chatTool'
 import { chatHasOutsideText, isOutsideTool } from '../shared/outsideText'
 import { anyGrantAllows } from '../shared/vaultGrants'
-import { withoutUnavailableTools } from './history'
 import { attachments } from './attachments'
-import { prepareFiles, withFiles, type PreparedFiles } from './attachments/request'
+import { prepareFiles, type PreparedFiles } from './attachments/request'
 import { acceptsAttachments, type Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
 import { createPluginNamed, pluginHost, protectedRoots, verifyWorkspace } from './plugins'
@@ -93,14 +86,13 @@ import {
 import { createSkill, skillEntries, skillExists } from './skillsHub'
 import { isWebTool, runWebTool, webTools } from './web'
 import { hasMalformedArguments, repairInterrupted, TurnLog, type Call, type ToolRun } from './turn'
+import { OLD_CHAT_REFUSAL, userMessage } from '../shared/neutralChat'
 import {
-  chatModels,
   isChatModel,
   isEffort,
   type ChatSettings,
   isMode,
   introduce,
-  providerOf,
   type ActionStatus,
   type ApprovalDecision,
   providerNames,
@@ -112,6 +104,7 @@ import {
   type Mode,
   type SendChatRequest
 } from '../shared/chat'
+import { noProfileMessage, profileOf, type ModelProfile } from '../shared/models'
 import { toolLabel } from '../shared/vault'
 import { setRequestLookup, widgets } from './widgets'
 import { modeName, modePolicy, refuseKind, toolKind } from './modes/policy'
@@ -181,7 +174,7 @@ const isCoreWrite = (name: string, input: unknown): boolean =>
   CORE_WRITES.test(name) ||
   (name === 'design_jobs' && (input as { action?: unknown } | null)?.action === 'cancel')
 
-const systemPrompt = (model: (typeof chatModels)[number]): string =>
+const systemPrompt = (model: ModelProfile): string =>
   `${introduce(model)}, ` +
   'working with the user through Custard, their personal desktop client. ' +
   'Format responses in Markdown when it helps readability.'
@@ -260,15 +253,21 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const emit = (e: ChatEvent): void => {
     if (!sender.isDestroyed()) sender.send('chat:event', e)
   }
-  const model = chatModels.find((m) => m.id === req.settings.model) ?? chatModels[0]
-  const provider = providerNames[model.provider]
-  const apiKey = getApiKey(model.provider)
   const refuse = (message: string): void =>
     emit({ requestId, type: 'error', message, conversation: null, kept: false })
+  // A model with no profile is never sent anywhere, and never swapped for
+  // another one: the chat says so and keeps its model until another is
+  // picked.
+  const model = profileOf(String(req.settings?.model))
+  if (!model) return refuse(noProfileMessage(String(req.settings?.model)))
+  const provider = providerNames[model.provider]
+  const apiKey = getApiKey(model.provider)
   if (!apiKey) return refuse(`Add your ${provider} API key in Settings first.`)
 
   const fileIds = req.attachments?.ids ?? []
   if (!req.text.trim() && !fileIds.length) return refuse('Write a message or attach a file first.')
+  // An old chat (see store.ts) is never sent from.
+  if (req.conversationId && oldChat(req.conversationId)) return refuse(OLD_CHAT_REFUSAL)
   const existing = (req.conversationId && openConversation(req.conversationId)) || null
   // The mode comes from the renderer and picks the prompt and the tools.
   if (!existing && !isMode(req.mode)) return refuse('Unknown mode.')
@@ -292,7 +291,10 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       conversation,
       req.references ?? [],
       conversation.messages.length,
-      (id) => getConversation(id)
+      (id) => {
+        if (oldChat(id)) throw new Error(OLD_CHAT_REFUSAL)
+        return getConversation(id)
+      }
     )
   } catch (err) {
     return refuse(err instanceof Error ? err.message : String(err))
@@ -314,8 +316,11 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
   // Created before the user's message goes in, so it can be taken back out
   // if nothing at all happens.
-  const log = new TurnLog(conversation, saveConversation)
-  conversation.messages.push({ role: 'user', content: req.text })
+  const log = new TurnLog(conversation, saveConversation, {
+    provider: model.provider,
+    model: model.id
+  })
+  conversation.messages.push(userMessage(req.text))
   // The message's files move from the composer's draft to the chat. Taken
   // back (see stopEarly) if the turn doesn't happen.
   const current = conversation.messages.length - 1
@@ -565,22 +570,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
   // Attached files, read once the turn starts (see attachments/request).
   let files: PreparedFiles | null = null
-  // Calls in the history to tools that aren't offered now go in as text.
-  // The adapter drops what its provider can't read.
-  // Context added to earlier messages goes with them every time.
-  const history = (): Conversation['messages'] => {
-    return withMessageContext(
-      withoutUnavailableTools(
-        withClearedResults(
-          withFiles(conversation.messages, files?.blocks ?? new Map()),
-          conversation.actions,
-          conversation.cleared?.before
-        ),
-        available
-      ),
-      conversation.messageContext
-    )
-  }
+  // The chat as stored, with big old tool results as stubs (see clearing).
+  // The adapter converts it for its provider, with the files in front of
+  // their messages, the context added to earlier messages (messageContext)
+  // and calls to tools that aren't offered now as text.
+  const history = (): Conversation['messages'] =>
+    withClearedResults(conversation.messages, conversation.actions, conversation.cleared?.before)
 
   // Checks the next request against the model's budget (see context.ts) and
   // keeps the result, so the chat can say when it's getting long.
@@ -1075,6 +1070,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       effort: req.settings.effort,
       system,
       history,
+      files: files?.blocks ?? new Map(),
+      available,
       conversation,
       tools,
       maxSteps: MAX_STEPS,
@@ -1121,6 +1118,9 @@ const continuing = new Set<string>()
 // A chat that is answering or being continued is still being saved, so it
 // can't be deleted until that ends (or the delete would be undone).
 export const chatBusy = (id: string): boolean => active.has(id) || continuing.has(id)
+// Whether any chat is answering or being continued (Reload of the models
+// file waits, so no turn sees its model change halfway).
+export const anyChatBusy = (): boolean => active.size > 0 || continuing.size > 0
 async function continueFrom(id: string, withoutSummary: boolean): Promise<ContinueResult> {
   if (active.has(id) || continuing.has(id))
     return {
@@ -1128,6 +1128,7 @@ async function continueFrom(id: string, withoutSummary: boolean): Promise<Contin
       error: 'This chat is still busy. Try again when it has finished.',
       canSkipSummary: false
     }
+  if (oldChat(id)) return { ok: false as const, error: OLD_CHAT_REFUSAL, canSkipSummary: false }
   continuing.add(id)
   try {
     return await continueChat(
@@ -1145,7 +1146,12 @@ async function continueFrom(id: string, withoutSummary: boolean): Promise<Contin
         },
         save: saveConversation,
         summarizer: (original) => {
-          const p = providerOf(original.context?.model ?? getChatSettings().model)
+          // The summary goes to the provider of the model the chat last used.
+          // One with no profile has no provider, so nothing is sent.
+          const id = original.context?.model ?? getChatSettings().model
+          const p = profileOf(id)?.provider
+          if (!p)
+            return `${noProfileMessage(id).replace(/ Pick a different model\.$/, '')} Custard doesn't know which provider to ask for the summary. Continue without one, or pick a different model in this chat first.`
           const key = getApiKey(p)
           // Charged to the chat being summarized.
           return key
@@ -1168,6 +1174,7 @@ export function registerChatHandlers(): void {
   // Picking another model (or effort) in an open chat: saved on the chat, so
   // its next message goes there. No provider is asked.
   handle('conversations:setModel', (_, id: string, settings: ChatSettings) => {
+    if (oldChat(String(id))) throw new Error(OLD_CHAT_REFUSAL)
     const c = openConversation(String(id))
     if (!c) throw new Error('That chat is gone.')
     if (active.has(c.id)) throw new Error('Wait for this chat to finish answering first.')
@@ -1207,6 +1214,7 @@ export function registerChatHandlers(): void {
     try {
       if (active.has(String(chatId)))
         return { ok: false, error: 'Wait for this chat to finish answering first.' }
+      if (oldChat(String(chatId))) return { ok: false, error: OLD_CHAT_REFUSAL }
       const c = openConversation(String(chatId))
       if (!c) return { ok: false, error: 'That chat is gone.' }
       const vault = getVaultPath()
