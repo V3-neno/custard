@@ -275,6 +275,12 @@ try {
   )
 
   step('Forget this chat, from the history')
+  const others = () => conversations().filter((c) => !c.title.startsWith('From now on I prefer'))
+  const orderBefore = others().map((c) => `${c.id}:${c.updatedAt}`).sort()
+  check(
+    others().some((c) => c.promptCache?.deferred?.some((d) => d.includes('<memory>'))),
+    'before it, other chats keep a prompt snapshot holding memory'
+  )
   await w.click('button[title="Chat history"]')
   const row = w.locator('div.group:has-text("From now on I prefer")')
   await row.hover()
@@ -291,6 +297,15 @@ try {
     'it asked first, listing the note it would delete'
   )
   check(!captures().includes(prefNote), 'the note is deleted')
+  check(
+    conversations().every((c) => !c.promptCache),
+    'no chat file keeps a prompt snapshot after the Forget'
+  )
+  check(
+    JSON.stringify(others().map((c) => `${c.id}:${c.updatedAt}`).sort()) ===
+      JSON.stringify(orderBefore),
+    "and the other chats' places in history are unchanged"
+  )
   check(captures().length === 1, "and the other chat's note is kept")
   await send('I prefer long answers again, remember that')
   await idle()

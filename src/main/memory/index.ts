@@ -12,7 +12,8 @@ import {
   getMemorySettings,
   getVaultPath,
   setMemorySettings,
-  updateConversation
+  updateConversation,
+  clearPromptSnapshots
 } from '../store'
 import { handle } from '../ipc'
 import { bumpMemoryEpoch } from '../promptCache'
@@ -175,8 +176,10 @@ export function registerMemoryHandlers(): void {
     if (r.response !== 1) return getConversation(id)?.memory ?? null
     for (const i of ids) chatNotes().forget(i)
     const left = ids.flatMap((i) => memory().forget(i).left)
-    // No chat keeps showing what was forgotten from its last prompt.
+    // No chat keeps showing what was forgotten from its last prompt, or
+    // keeps a copy of it in its saved snapshot.
     bumpMemoryEpoch()
+    clearPromptSnapshots()
     if (left.length)
       await dialog.showMessageBox({
         type: 'error',

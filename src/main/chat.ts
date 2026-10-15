@@ -32,6 +32,7 @@ import {
   chooseDeferred,
   contextBefore,
   hashFixed,
+  memoryEpoch,
   newContext,
   withMessageContext
 } from './promptCache'
@@ -525,8 +526,12 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   deferredAt.forEach((at, k) => (system[at] = { type: 'text', text: chosen.deferred[k] }))
   for (let i = system.length - 1; i >= 0; i--) if (!system[i].text) system.splice(i, 1)
   // Kept on the chat once a turn has happened, for the next message.
+  // Not kept when a Forget or a memory setting changed during the turn: the
+  // snapshot may hold what was forgotten.
   const keepPrompt = (): void => {
-    conversation.promptCache = { ...chosen.snapshot, at: Date.now() }
+    if (chosen.snapshot.epoch === memoryEpoch())
+      conversation.promptCache = { ...chosen.snapshot, at: Date.now() }
+    else delete conversation.promptCache
   }
   // Attached files, read once the turn starts (see attachments/request).
   let files: PreparedFiles | null = null
