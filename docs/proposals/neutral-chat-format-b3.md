@@ -2,7 +2,7 @@
 
 **Base: `neutral-chat-format-b2`** (draft PR #63, head d33ae84). It is the branch closest to the tip that has B2 on it: it sits on the tip of `automation-thinking-p3` (77cbdfa), which has not moved, and nothing has been merged since B2. No merge was needed. Branch: `neutral-chat-format-b3`, draft PR into `neutral-chat-format-b2`. Nothing merged.
 
-Status: done and stopped for review. Everything below was run against local stand-ins only; nothing was sent to a live provider.
+Draft PR: #65. Status: done and stopped for review. Everything below was run against local stand-ins only; nothing was sent to a live provider.
 
 ## Where the brief differs from the B1 and B2 reviews
 
