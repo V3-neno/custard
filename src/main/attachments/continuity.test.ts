@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { assistant, result, said, user } from '../../../test/neutral/builders'
 import { filesNote, type Attachment } from '../../shared/attachments'
 import type { Conversation } from '../../shared/chat'
 import { buildEvidence, eligible, evidenceText, titleWithoutFiles } from '../memory/evidence'
@@ -31,13 +32,15 @@ const chat = (): Conversation => ({
   id: 'c1',
   mode: 'chat',
   title: 'Files',
+  format: 'custard-chat',
+  version: 1,
   createdAt: 0,
   updatedAt: 0,
   messages: [
-    { role: 'user', content: 'Summarize these for me' },
-    { role: 'assistant', content: 'The PDF covers the agreement.' },
-    { role: 'user', content: '' },
-    { role: 'assistant', content: 'Got the screenshot.' }
+    user('Summarize these for me'),
+    said('The PDF covers the agreement.'),
+    user(''),
+    said('Got the screenshot.')
   ],
   attachments: [
     file(0, SECRET_NAME, 'pdf'),
@@ -79,19 +82,13 @@ describe('memory evidence never carries file names or quoted contents', () => {
   it("scrubs names from the user's words, action labels, results and notices, and leaves out the answer", () => {
     const c = chat()
     c.messages = [
-      { role: 'user', content: 'Read Divorce settlement draft and tell me the total' },
-      {
-        role: 'assistant',
-        content: [
-          { type: 'text', text: 'Searching.' },
-          { type: 'tool_use', id: 't1', name: 'spotify__search', input: {} }
-        ]
-      },
-      {
-        role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }]
-      },
-      { role: 'assistant', content: `${SECRET_NAME} says the total is 4,812,337 zorkmids.` }
+      user('Read Divorce settlement draft and tell me the total'),
+      assistant([
+        { type: 'text', text: 'Searching.' },
+        { type: 'tool_call', id: 't1', name: 'spotify__search', input: {} }
+      ]),
+      result('t1', 'ok'),
+      said(`${SECRET_NAME} says the total is 4,812,337 zorkmids.`)
     ]
     c.actions = {
       t1: {
@@ -190,7 +187,7 @@ describe('memory evidence never carries file names or quoted contents', () => {
     c.messages = []
     c.attachments = []
     for (let i = 0; i < 12; i++) {
-      c.messages.push({ role: 'user', content: '' }, { role: 'assistant', content: 'ok' })
+      c.messages.push(user(''), said('ok'))
       c.attachments.push(file(i * 2, `f${i}.png`, 'image'))
     }
     c.notices = [{ after: 2, kind: 'files', text: 'f0.png is no longer available.' }]
