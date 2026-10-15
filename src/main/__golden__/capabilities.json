@@ -1,0 +1,1135 @@
+{
+  "claude-opus-5-5": {
+    "capabilities": {
+      "text": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "streaming": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "tool_use": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "json_schema": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "vision": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "pdf": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning_summary": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "effort": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "web_search": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "prompt_caching": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "compaction": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "token_counting": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "fallbacks": {
+        "supported": true,
+        "evidence": "docs"
+      }
+    },
+    "info": {
+      "id": "claude-opus-5-5",
+      "label": "Opus 5.5",
+      "provider": "claude",
+      "api": "anthropic",
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
+      "priced": true,
+      "capabilities": {
+        "text": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "streaming": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "tool_use": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "json_schema": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "vision": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "pdf": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning_summary": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "effort": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "web_search": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "prompt_caching": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "compaction": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "token_counting": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "fallbacks": {
+          "supported": true,
+          "evidence": "docs"
+        }
+      },
+      "source": "profile"
+    }
+  },
+  "claude-sonnet-5-5": {
+    "capabilities": {
+      "text": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "streaming": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "tool_use": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "json_schema": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "vision": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "pdf": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning_summary": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "effort": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "web_search": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "prompt_caching": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "compaction": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "token_counting": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "fallbacks": {
+        "supported": true,
+        "evidence": "docs"
+      }
+    },
+    "info": {
+      "id": "claude-sonnet-5-5",
+      "label": "Sonnet 5.5",
+      "provider": "claude",
+      "api": "anthropic",
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
+      "priced": true,
+      "capabilities": {
+        "text": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "streaming": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "tool_use": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "json_schema": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "vision": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "pdf": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning_summary": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "effort": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "web_search": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "prompt_caching": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "compaction": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "token_counting": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "fallbacks": {
+          "supported": true,
+          "evidence": "docs"
+        }
+      },
+      "source": "profile"
+    }
+  },
+  "claude-haiku-4-5": {
+    "capabilities": {
+      "text": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "streaming": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "tool_use": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "json_schema": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "vision": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "pdf": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning": {
+        "supported": false,
+        "evidence": "docs"
+      },
+      "reasoning_summary": {
+        "supported": false,
+        "evidence": "docs"
+      },
+      "effort": {
+        "supported": false,
+        "evidence": "docs"
+      },
+      "web_search": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "prompt_caching": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "compaction": {
+        "supported": false,
+        "note": "“Continue in a new chat” takes over when it fills up.",
+        "evidence": "docs"
+      },
+      "token_counting": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "fallbacks": {
+        "supported": false,
+        "evidence": "docs"
+      }
+    },
+    "info": {
+      "id": "claude-haiku-4-5",
+      "label": "Haiku 4.5",
+      "provider": "claude",
+      "api": "anthropic",
+      "contextWindow": 200000,
+      "maxOutput": 64000,
+      "priced": true,
+      "capabilities": {
+        "text": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "streaming": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "tool_use": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "json_schema": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "vision": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "pdf": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning": {
+          "supported": false,
+          "evidence": "docs"
+        },
+        "reasoning_summary": {
+          "supported": false,
+          "evidence": "docs"
+        },
+        "effort": {
+          "supported": false,
+          "evidence": "docs"
+        },
+        "web_search": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "prompt_caching": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "compaction": {
+          "supported": false,
+          "note": "“Continue in a new chat” takes over when it fills up.",
+          "evidence": "docs"
+        },
+        "token_counting": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "fallbacks": {
+          "supported": false,
+          "evidence": "docs"
+        }
+      },
+      "source": "profile"
+    }
+  },
+  "gpt-6-astra": {
+    "capabilities": {
+      "text": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "streaming": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "tool_use": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "json_schema": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "vision": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "pdf": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning_summary": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "effort": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "web_search": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "prompt_caching": {
+        "supported": true,
+        "note": "Automatic, on the provider’s side.",
+        "evidence": "docs"
+      },
+      "compaction": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "token_counting": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "fallbacks": {
+        "supported": false,
+        "evidence": "docs"
+      }
+    },
+    "info": {
+      "id": "gpt-6-astra",
+      "label": "GPT-6 Astra",
+      "provider": "openai",
+      "api": "responses",
+      "contextWindow": 1050000,
+      "maxOutput": 128000,
+      "priced": true,
+      "capabilities": {
+        "text": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "streaming": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "tool_use": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "json_schema": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "vision": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "pdf": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning_summary": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "effort": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "web_search": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "prompt_caching": {
+          "supported": true,
+          "note": "Automatic, on the provider’s side.",
+          "evidence": "docs"
+        },
+        "compaction": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "token_counting": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "fallbacks": {
+          "supported": false,
+          "evidence": "docs"
+        }
+      },
+      "source": "profile"
+    }
+  },
+  "gpt-6.1-sol": {
+    "capabilities": {
+      "text": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "streaming": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "tool_use": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "json_schema": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "vision": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "pdf": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning_summary": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "effort": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "web_search": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "prompt_caching": {
+        "supported": true,
+        "note": "Automatic, on the provider’s side.",
+        "evidence": "docs"
+      },
+      "compaction": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "token_counting": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "fallbacks": {
+        "supported": false,
+        "evidence": "docs"
+      }
+    },
+    "info": {
+      "id": "gpt-6.1-sol",
+      "label": "GPT-6.1 Sol",
+      "provider": "openai",
+      "api": "responses",
+      "contextWindow": 1050000,
+      "maxOutput": 128000,
+      "priced": true,
+      "capabilities": {
+        "text": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "streaming": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "tool_use": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "json_schema": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "vision": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "pdf": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning_summary": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "effort": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "web_search": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "prompt_caching": {
+          "supported": true,
+          "note": "Automatic, on the provider’s side.",
+          "evidence": "docs"
+        },
+        "compaction": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "token_counting": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "fallbacks": {
+          "supported": false,
+          "evidence": "docs"
+        }
+      },
+      "source": "profile"
+    }
+  },
+  "gpt-6-luna": {
+    "capabilities": {
+      "text": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "streaming": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "tool_use": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "json_schema": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "vision": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "pdf": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning_summary": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "effort": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "web_search": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "prompt_caching": {
+        "supported": true,
+        "note": "Automatic, on the provider’s side.",
+        "evidence": "docs"
+      },
+      "compaction": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "token_counting": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "fallbacks": {
+        "supported": false,
+        "evidence": "docs"
+      }
+    },
+    "info": {
+      "id": "gpt-6-luna",
+      "label": "GPT-6 Luna",
+      "provider": "openai",
+      "api": "responses",
+      "contextWindow": 1050000,
+      "maxOutput": 128000,
+      "priced": true,
+      "capabilities": {
+        "text": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "streaming": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "tool_use": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "json_schema": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "vision": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "pdf": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning_summary": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "effort": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "web_search": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "prompt_caching": {
+          "supported": true,
+          "note": "Automatic, on the provider’s side.",
+          "evidence": "docs"
+        },
+        "compaction": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "token_counting": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "fallbacks": {
+          "supported": false,
+          "evidence": "docs"
+        }
+      },
+      "source": "profile"
+    }
+  },
+  "deepseek-v4-pro": {
+    "capabilities": {
+      "text": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "streaming": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "tool_use": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "json_schema": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "vision": {
+        "supported": false,
+        "note": "DeepSeek V4 Pro doesn't take images.",
+        "evidence": "docs"
+      },
+      "pdf": {
+        "supported": false,
+        "note": "DeepSeek doesn't accept PDFs.",
+        "evidence": "docs"
+      },
+      "reasoning": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning_summary": {
+        "supported": false,
+        "note": "Shows its raw reasoning instead.",
+        "evidence": "docs"
+      },
+      "effort": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "web_search": {
+        "supported": false,
+        "note": "Reads pages it is given (web_read) but cannot search.",
+        "evidence": "docs"
+      },
+      "prompt_caching": {
+        "supported": true,
+        "note": "Automatic, on the provider’s side.",
+        "evidence": "docs"
+      },
+      "compaction": {
+        "supported": false,
+        "note": "“Continue in a new chat” takes over when it fills up.",
+        "evidence": "docs"
+      },
+      "token_counting": {
+        "supported": false,
+        "note": "The context gauge is an estimate.",
+        "evidence": "docs"
+      },
+      "fallbacks": {
+        "supported": false,
+        "evidence": "docs"
+      }
+    },
+    "info": {
+      "id": "deepseek-v4-pro",
+      "label": "DeepSeek V4 Pro",
+      "provider": "deepseek",
+      "api": "responses",
+      "contextWindow": 1000000,
+      "maxOutput": 384000,
+      "priced": true,
+      "capabilities": {
+        "text": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "streaming": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "tool_use": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "json_schema": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "vision": {
+          "supported": false,
+          "note": "DeepSeek V4 Pro doesn't take images.",
+          "evidence": "docs"
+        },
+        "pdf": {
+          "supported": false,
+          "note": "DeepSeek doesn't accept PDFs.",
+          "evidence": "docs"
+        },
+        "reasoning": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning_summary": {
+          "supported": false,
+          "note": "Shows its raw reasoning instead.",
+          "evidence": "docs"
+        },
+        "effort": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "web_search": {
+          "supported": false,
+          "note": "Reads pages it is given (web_read) but cannot search.",
+          "evidence": "docs"
+        },
+        "prompt_caching": {
+          "supported": true,
+          "note": "Automatic, on the provider’s side.",
+          "evidence": "docs"
+        },
+        "compaction": {
+          "supported": false,
+          "note": "“Continue in a new chat” takes over when it fills up.",
+          "evidence": "docs"
+        },
+        "token_counting": {
+          "supported": false,
+          "note": "The context gauge is an estimate.",
+          "evidence": "docs"
+        },
+        "fallbacks": {
+          "supported": false,
+          "evidence": "docs"
+        }
+      },
+      "source": "profile"
+    }
+  },
+  "deepseek-flash": {
+    "capabilities": {
+      "text": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "streaming": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "tool_use": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "json_schema": {
+        "supported": true,
+        "evidence": "live"
+      },
+      "vision": {
+        "supported": true,
+        "evidence": "live"
+      },
+      "pdf": {
+        "supported": false,
+        "note": "DeepSeek doesn't accept PDFs.",
+        "evidence": "docs"
+      },
+      "reasoning": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "reasoning_summary": {
+        "supported": false,
+        "note": "Shows its raw reasoning instead.",
+        "evidence": "docs"
+      },
+      "effort": {
+        "supported": true,
+        "evidence": "docs"
+      },
+      "web_search": {
+        "supported": false,
+        "note": "Reads pages it is given (web_read) but cannot search.",
+        "evidence": "docs"
+      },
+      "prompt_caching": {
+        "supported": true,
+        "note": "Automatic, on the provider’s side.",
+        "evidence": "docs"
+      },
+      "compaction": {
+        "supported": false,
+        "note": "“Continue in a new chat” takes over when it fills up.",
+        "evidence": "docs"
+      },
+      "token_counting": {
+        "supported": false,
+        "note": "The context gauge is an estimate.",
+        "evidence": "docs"
+      },
+      "fallbacks": {
+        "supported": false,
+        "evidence": "docs"
+      }
+    },
+    "info": {
+      "id": "deepseek-flash",
+      "label": "DeepSeek Flash",
+      "provider": "deepseek",
+      "api": "responses",
+      "contextWindow": 1000000,
+      "maxOutput": 384000,
+      "priced": true,
+      "capabilities": {
+        "text": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "streaming": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "tool_use": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "json_schema": {
+          "supported": true,
+          "evidence": "live"
+        },
+        "vision": {
+          "supported": true,
+          "evidence": "live"
+        },
+        "pdf": {
+          "supported": false,
+          "note": "DeepSeek doesn't accept PDFs.",
+          "evidence": "docs"
+        },
+        "reasoning": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "reasoning_summary": {
+          "supported": false,
+          "note": "Shows its raw reasoning instead.",
+          "evidence": "docs"
+        },
+        "effort": {
+          "supported": true,
+          "evidence": "docs"
+        },
+        "web_search": {
+          "supported": false,
+          "note": "Reads pages it is given (web_read) but cannot search.",
+          "evidence": "docs"
+        },
+        "prompt_caching": {
+          "supported": true,
+          "note": "Automatic, on the provider’s side.",
+          "evidence": "docs"
+        },
+        "compaction": {
+          "supported": false,
+          "note": "“Continue in a new chat” takes over when it fills up.",
+          "evidence": "docs"
+        },
+        "token_counting": {
+          "supported": false,
+          "note": "The context gauge is an estimate.",
+          "evidence": "docs"
+        },
+        "fallbacks": {
+          "supported": false,
+          "evidence": "docs"
+        }
+      },
+      "source": "profile"
+    }
+  },
+  "deepseek-v5-preview": {
+    "capabilities": {
+      "text": {
+        "supported": true,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "streaming": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "tool_use": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "json_schema": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "vision": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "pdf": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "reasoning": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "reasoning_summary": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "effort": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "web_search": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "prompt_caching": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "compaction": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "token_counting": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      },
+      "fallbacks": {
+        "supported": false,
+        "note": "Unknown model.",
+        "evidence": "docs"
+      }
+    },
+    "info": null
+  }
+}

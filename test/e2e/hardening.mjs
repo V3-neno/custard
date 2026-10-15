@@ -154,9 +154,7 @@ const spotifyCalls = () => read('/spotify.json', [])
 const newest = () => conversations().sort((a, b) => b.updatedAt - a.updatedAt)[0]
 const results = (c) =>
   (c?.messages ?? []).flatMap((m) =>
-    Array.isArray(m.content)
-      ? m.content.filter((x) => x.type === 'tool_result').map((x) => String(x.content))
-      : []
+    m.parts.filter((x) => x.type === 'tool_result').map((x) => x.text)
   )
 
 try {

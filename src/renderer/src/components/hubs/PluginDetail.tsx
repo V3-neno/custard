@@ -7,6 +7,7 @@ import {
   type TestReport
 } from '../../../../shared/plugins'
 import { cleanError, danger, input, primary, secondary } from '../settings/ui'
+import Select from '../ui/Select'
 import type { MemorySettings } from '../../../../shared/memory'
 
 const stateLabel: Record<PluginStatus['state'], string> = {
@@ -135,9 +136,9 @@ function ConfigForm({
                   onChange={(e) => set(k, e.target.checked)}
                 />
               ) : f.enum ? (
-                <select
+                <Select
                   aria-label={f.title}
-                  className={input}
+                  className="w-full"
                   value={String(current(k, f))}
                   onChange={(e) => set(k, e.target.value)}
                 >
@@ -145,7 +146,7 @@ function ConfigForm({
                   {f.enum.map((o) => (
                     <option key={o}>{o}</option>
                   ))}
-                </select>
+                </Select>
               ) : (
                 <input
                   aria-label={f.title}

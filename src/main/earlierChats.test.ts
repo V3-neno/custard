@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { user } from '../../test/neutral/builders'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -20,9 +21,11 @@ const chat = (id: string, title: string, extra: Partial<Conversation> = {}): Con
   id,
   mode: 'chat',
   title,
+  format: 'custard-chat',
+  version: 1,
   createdAt: new Date(2026, 9, 12, 9).getTime(),
   updatedAt: 0,
-  messages: [{ role: 'user', content: 'hi' }],
+  messages: [user('hi')],
   ...extra
 })
 

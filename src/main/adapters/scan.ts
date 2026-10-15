@@ -155,7 +155,7 @@ const unknownCells = (): Record<Capability, MatrixCell> =>
 // One column per model Custard offers, then (from the last key check) each
 // model a provider lists that Custard doesn't support yet, as unknown.
 export function modelColumns(checks: ScanSources['checks']): MatrixColumn[] {
-  const known: MatrixColumn[] = chatModels.map((m) => ({
+  const known: MatrixColumn[] = chatModels().map((m) => ({
     id: m.id,
     label: m.label,
     provider: m.provider,

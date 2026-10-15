@@ -17,7 +17,7 @@ const pill =
 const quiet =
   'rounded-full border border-forge-700 px-3 py-1 text-xs text-ash-400 transition-colors hover:border-molten-500/50 hover:text-molten-200 disabled:opacity-40'
 
-const modelLabel = (id: string): string => chatModels.find((m) => m.id === id)?.label ?? id
+const modelLabel = (id: string): string => chatModels().find((m) => m.id === id)?.label ?? id
 
 // A thin line where earlier messages were compacted. The messages above it
 // are still all here; the model now sees a summary of them.

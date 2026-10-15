@@ -151,7 +151,7 @@ const chats = () => {
     : []
 }
 const chatStarting = (t) =>
-  chats().find((c) => c.messages[0]?.content?.[0]?.text?.startsWith?.(t) || c.title.startsWith(t))
+  chats().find((c) => c.messages[0]?.parts?.[0]?.text?.startsWith?.(t) || c.title.startsWith(t))
 const turns = () => seen.filter((s) => s.body.stream)
 const sendText = async (text) => {
   const n = turns().length
@@ -440,8 +440,9 @@ try {
   await w.click('button[title=Settings]')
   await w.selectOption('select[title="Default model"]', 'deepseek-flash')
   check(
-    JSON.stringify(await w.locator('select[title="Default effort"] option').allInnerTexts()) ===
-      '["Fast","Balanced","Thorough"]',
+    JSON.stringify(
+      await w.locator('[role=radiogroup][aria-label="Default effort"] [role=radio]').allInnerTexts()
+    ) === '["Fast","Balanced","Thorough"]',
     'its effort list is Fast, Balanced, Thorough'
   )
   await w

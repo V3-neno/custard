@@ -3,13 +3,14 @@
 // also offer). Code that differs by API branches on `api`; what a
 // Responses provider leaves out is listed in `responses`, so a request never
 // asks for a feature the provider would ignore. Adding a provider is a new
-// entry here, its key file and endpoint in main/providers.ts, its models in
-// chat.ts, its prices in pricing.ts and its context limits in context.ts.
+// entry here, its key file and endpoint in main/providers.ts, and its models'
+// profiles in models.ts.
 
 export type ProviderApi = 'anthropic' | 'responses'
 
 // What a Responses API provider supports beyond plain chat and function
-// tools. OpenAI supports all of it.
+// tools. OpenAI supports all of it. Hosted web search is a model fact, in
+// each model's profile (shared/models.ts).
 export type ResponsesFeatures = {
   // Reasoning summaries (reasoning.summary), shown as the model's thinking.
   reasoningSummary: boolean
@@ -18,8 +19,9 @@ export type ResponsesFeatures = {
   encryptedReasoning: boolean
   // The input-token counting endpoint (responses.inputTokens.count).
   tokenCount: boolean
-  // Hosted web search (the web_search tool).
-  webSearch: boolean
+  // prompt_cache_key: requests with the same key are routed to the same
+  // prompt cache, so a chat's repeated prefix is read from it more often.
+  promptCacheKey: boolean
 }
 
 export type ProviderInfo = {
@@ -39,6 +41,9 @@ export type ProviderInfo = {
   // and OpenAI, whose lists stay fixed: their live list only marks which of
   // Custard's models the key can use.
   discoverModels: boolean
+  // Shown under the provider's Available models in Settings: what its model
+  // list says about effort that Custard doesn't use.
+  effortNote?: string
   responses?: ResponsesFeatures
 }
 
@@ -64,7 +69,7 @@ export const providers = {
       reasoningSummary: true,
       encryptedReasoning: true,
       tokenCount: true,
-      webSearch: true
+      promptCacheKey: true
     }
   },
   // DeepSeek's Responses API (api-docs.deepseek.com, checked 2026-10-12):
@@ -79,11 +84,13 @@ export const providers = {
     keyPlaceholder: 'sk-…',
     keyWhere: 'platform.deepseek.com',
     discoverModels: true,
+    effortNote:
+      "DeepSeek's model list also names effort levels (fast, balanced, thorough). Custard doesn't read them yet: the picker's Fast, Balanced and Thorough send low, high and max, the values DeepSeek documents for its Responses API.",
     responses: {
       reasoningSummary: false,
       encryptedReasoning: false,
       tokenCount: false,
-      webSearch: false
+      promptCacheKey: false
     }
   }
 } as const satisfies Record<string, ProviderInfo>
@@ -104,7 +111,7 @@ export const responsesFeatures = (p: Provider): ResponsesFeatures =>
     reasoningSummary: false,
     encryptedReasoning: false,
     tokenCount: false,
-    webSearch: false
+    promptCacheKey: false
   }
 
 export const providerNames = Object.fromEntries(

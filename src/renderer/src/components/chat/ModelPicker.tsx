@@ -33,7 +33,7 @@ function ModelPicker({
   openSignal,
   className
 }: Props): React.JSX.Element {
-  const current = chatModels.find((m) => m.id === settings.model)
+  const current = chatModels().find((m) => m.id === settings.model)
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<Provider>(current?.provider ?? 'claude')
   const box = useRef<HTMLDivElement>(null)
@@ -109,7 +109,7 @@ function ModelPicker({
             ))}
           </div>
           <ul className="space-y-0.5" data-picker-models={tab}>
-            {chatModels
+            {chatModels()
               .filter((m) => m.provider === tab)
               .map((m) => {
                 const a = status(m.id)

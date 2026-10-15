@@ -5,10 +5,9 @@ import type {
   BetaMessageParam,
   MessageCreateParamsStreaming
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import { chatModels } from '../../shared/chat'
+import { profileOf, requireProfile, sentLevel, type ModelProfile } from '../../shared/models'
 import { claudeFilesFrom } from '../attachments/request'
 import {
-  claudeHistory,
   compactionRefused,
   isCompactionRejected,
   recordClaudeCompaction,
@@ -34,11 +33,13 @@ import {
   type RawModel
 } from './common'
 import { capabilitiesOf } from './capabilities'
+import { fromClaudeReply, toClaudeHistory } from './anthropicNeutral'
 import type { OneShotRequest, OneShotResult, ProviderAdapter, TurnEnd, TurnRequest } from './types'
 
-// Claude, through Anthropic's Messages API. The stored chat format is this
-// API's own, so history goes out as it is (less compaction blocks for a model
-// that doesn't compact).
+// Claude, through Anthropic's Messages API. Stored chats are converted with
+// toClaudeHistory (anthropicNeutral.ts): Claude's own replies go back as the
+// blocks it returned (`raw`), less compaction blocks for a model that doesn't
+// compact; everything else is rebuilt from its parts.
 
 // After a mid-answer fallback, blocks the declining model produced before the
 // last `fallback` marker (other than text) must not be sent back to the API.
@@ -56,9 +57,16 @@ const client = (apiKey: string, opts: { timeout?: number; maxRetries?: number } 
 
 async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
   const { requestId, emit, log, signal } = turn
-  const model = chatModels.find((m) => m.id === turn.model) ?? chatModels[0]
-  const history = (): TurnRequest['conversation']['messages'] =>
-    claudeHistory(turn.history(), model.id)
+  // A model with no profile fails here, loudly, rather than going to
+  // another model (chat.ts refuses it before this).
+  const model: ModelProfile = requireProfile(turn.model)
+  const history = (): BetaMessageParam[] =>
+    toClaudeHistory(turn.history(), {
+      model: model.id,
+      files: turn.files,
+      available: turn.available,
+      context: turn.conversation.messageContext
+    })
   const params: MessageCreateParamsStreaming = {
     model: model.id,
     max_tokens: 64000,
@@ -68,10 +76,8 @@ async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
     stream: true
   }
   if (turn.tools.length) params.tools = turn.tools
-  if (model.effort) {
-    params.thinking = { type: 'adaptive', display: 'summarized' }
-    params.output_config = { effort: turn.effort }
-  }
+  if (model.thinking) params.thinking = { type: 'adaptive', display: 'summarized' }
+  if (model.effort) params.output_config = { effort: sentLevel(model.effort, turn.effort) }
   if (model.fallbacks) {
     // If a safety classifier declines, the API retries on Anthropic's
     // recommended fallback model instead of returning a refusal.
@@ -157,7 +163,7 @@ async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
       return full ? 'full-window-tool' : 'cut-off-tool'
     // Before the message goes in, so the record points at it.
     recordClaudeCompaction(turn.conversation, message.content, model.id)
-    log.addAssistant(echoableContent(message.content))
+    log.addAssistant(fromClaudeReply(echoableContent(message.content), model.id))
     if (full) return 'full-window'
     if (message.stop_reason === 'max_tokens') return 'cut-off'
     if (message.stop_reason !== 'tool_use') return 'done'
@@ -166,8 +172,12 @@ async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
   }
 }
 
-// Effort isn't sent: the one-shot calls use Haiku 4.5, which doesn't take
-// it.
+// Thinking and effort as the chat turn sends them, from the model's profile:
+// adaptive thinking for a model whose profile thinks (no `display`: nobody
+// reads a one-shot call's thinking, so it stays the API's default), and
+// `output_config.effort` only when the caller asks for one and the model
+// takes effort. Haiku 4.5 (the Claude summary model) takes neither, so its
+// requests are unchanged; automation steps on Opus and Sonnet get both.
 async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
   const api = client(req.apiKey, {
     ...(req.timeoutMs !== undefined ? { timeout: req.timeoutMs } : {}),
@@ -179,6 +189,10 @@ async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
       : (req.messages as Anthropic.MessageParam[])
   const maxTokens = req.maxTokens ?? 16000
   const tools = req.tools?.length ? { tools: req.tools } : {}
+  const profile = profileOf(req.model)
+  const thinking = profile?.thinking ? { thinking: { type: 'adaptive' as const } } : {}
+  const effort =
+    profile?.effort && req.effort ? { effort: sentLevel(profile.effort, req.effort) } : null
   const m = req.stream
     ? await api.beta.messages
         .stream(
@@ -187,7 +201,9 @@ async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
             max_tokens: maxTokens,
             system: req.system,
             messages: messages as BetaMessageParam[],
-            ...tools
+            ...tools,
+            ...thinking,
+            ...(effort ? { output_config: effort } : {})
           },
           { signal: req.signal }
         )
@@ -199,8 +215,16 @@ async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
           system: req.system,
           messages,
           ...(tools as { tools?: Anthropic.Tool[] }),
-          ...(req.schema
-            ? { output_config: { format: { type: 'json_schema', schema: req.schema.schema } } }
+          ...thinking,
+          ...(req.schema || effort
+            ? {
+                output_config: {
+                  ...(req.schema
+                    ? { format: { type: 'json_schema' as const, schema: req.schema.schema } }
+                    : {}),
+                  ...effort
+                }
+              }
             : {})
         },
         { signal: req.signal }

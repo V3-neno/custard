@@ -26,6 +26,9 @@ import { responsesClient } from './providers'
 import { providerNames, responsesFeatures, type Provider } from '../shared/providers'
 import type { TokenUsage } from '../shared/pricing'
 import { fromOpenAI } from './usage'
+import { fromResponsesReply, toResponsesInput } from './adapters/responsesNeutral'
+import { contextByMessage } from './promptCache'
+import { toolCalls, type Message } from '../shared/neutralChat'
 
 type Emit = (e: ChatEvent) => void
 
@@ -42,8 +45,11 @@ type Turn = {
   // None for a model that takes no effort.
   effort?: Effort
   instructions: string
-  // The history as sent this time (calls to unavailable tools turned into text).
-  history: BetaMessageParam[]
+  // The chat as stored, converted here (toResponsesInput) with this
+  // request's files and the tools offered now.
+  history: Message[]
+  files: Map<number, BetaContentBlockParam[]>
+  available: Set<string>
   conversation: Conversation
   // Checks a request against the model's budget before it is sent; false
   // when it is too large to send.
@@ -80,7 +86,7 @@ const textOf = (content: string | BetaToolResultBlockParam['content']): string =
 // base64 data URLs with detail "high" (at most 2,500 patches, so never
 // rejected for size), PDFs as base64 file data with the file's name, and
 // text files as text, so both providers get exactly the same characters.
-function filePart(b: BetaContentBlockParam): ResponseInputContent | null {
+export function filePart(b: BetaContentBlockParam): ResponseInputContent | null {
   if (b.type === 'image' && b.source.type === 'base64')
     return {
       type: 'input_image',
@@ -105,10 +111,10 @@ const hasFiles = (m: BetaMessageParam): boolean =>
   typeof m.content !== 'string' &&
   m.content.some((b) => b.type === 'image' || b.type === 'document')
 
-// Conversations are stored in Claude's message format so either provider can
-// continue them. This converts that history into OpenAI Responses input.
-// Claude's thinking blocks are left out: they only mean something to Claude.
-// Compaction blocks are Claude's and are left out too.
+// Claude-format messages as Responses input: the one-shot calls (summaries,
+// automation steps) build their messages this way. Stored chats go through
+// toResponsesInput (responsesNeutral.ts) instead. Claude's thinking and
+// compaction blocks are left out: they only mean something to Claude.
 export function toInput(messages: BetaMessageParam[]): ResponseInputItem[] {
   const items: ResponseInputItem[] = []
   for (const m of messages) {
@@ -146,7 +152,8 @@ export function toInput(messages: BetaMessageParam[]): ResponseInputItem[] {
   return items
 }
 
-// The parts of an OpenAI reply that are worth keeping, as Claude-format blocks.
+// The parts of an OpenAI reply that are worth keeping, as Claude-format blocks
+// (fromResponsesReply turns them into the stored message).
 export function toBlocks(output: ResponseOutputItem[]): BetaContentBlockParam[] {
   const blocks: BetaContentBlockParam[] = []
   for (const item of output) {
@@ -173,9 +180,17 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
   const features = responsesFeatures(turn.provider)
   // From the newest compaction this model made, if there is one.
   const start = openaiStart(turn.conversation, turn.model)
+  const context = contextByMessage(turn.conversation.messageContext)
+  const convert = (range: { from?: number; to?: number }): ResponseInputItem[] =>
+    toResponsesInput(turn.history, {
+      files: turn.files,
+      available: turn.available,
+      context,
+      ...range
+    })
   let input: ResponseInputItem[] = [
     ...(start.item ? [start.item] : []),
-    ...toInput(turn.history.slice(start.from))
+    ...convert({ from: start.from })
   ]
   const tools = turn.tools.length ? { tools: turn.tools.map(toFunctionTool) } : {}
   // Without a counting endpoint the estimate decides (see context.measure).
@@ -201,6 +216,8 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
           // encrypted so the model keeps its train of thought across tool
           // calls.
           store: false,
+          // One key per chat, so its repeated start is read from the cache.
+          ...(features.promptCacheKey ? { prompt_cache_key: turn.conversation.id } : {}),
           ...(features.encryptedReasoning
             ? { include: ['reasoning.encrypted_content' as const] }
             : {}),
@@ -229,7 +246,7 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
       const [first, ...rest] = input
       input =
         start.item && first === start.item
-          ? [...toInput(turn.history.slice(0, start.from)), ...rest]
+          ? [...convert({ to: start.from }), ...rest]
           : input.filter((x) => x.type !== 'compaction')
       // Checked against the budget again: the full history is larger.
       step--
@@ -272,21 +289,18 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
     const compaction = output.findLast((o) => o.type === 'compaction')
     if (compaction) recordOpenAICompaction(turn.conversation, compaction, turn.model, turn.provider)
     if (incomplete && calls.length > 0) return 'cut-off-tool'
-    const blocks = toBlocks(output)
-    log.addAssistant(blocks)
+    const reply = fromResponsesReply(output, turn.provider, turn.model)
+    log.addAssistant(reply)
     if (incomplete) return 'cut-off'
     if (calls.length === 0) return 'done'
 
     // One after another, in order.
     const results = await turn.runRound(
-      calls.map((c) => {
-        const block = blocks.find((b) => b.type === 'tool_use' && b.id === c.call_id)
-        return {
-          id: c.call_id,
-          name: c.name,
-          input: block?.type === 'tool_use' ? block.input : {}
-        }
-      })
+      calls.map((c) => ({
+        id: c.call_id,
+        name: c.name,
+        input: toolCalls(reply).find((x) => x.id === c.call_id)?.input ?? {}
+      }))
     )
     if (turn.signal.aborted) return 'done'
     input = dropBeforeCompaction([

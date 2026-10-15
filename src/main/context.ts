@@ -2,11 +2,11 @@ import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { providerOf, type Provider } from '../shared/chat'
+import { builtInProfiles, profileOf, type ModelProfile } from '../shared/models'
 
 // How much of a model's context window a request may use, checked before
 // every model call so a long chat stops cleanly instead of failing at the
-// provider. Limits checked against the providers' docs on 2026-10-07 (see
-// docs/long-chats.md); they are not looked up at run time.
+// provider. The limits are in each model's profile (shared/models.ts).
 
 export type ContextLimits = {
   // Input and output together, in tokens.
@@ -19,19 +19,22 @@ export type ContextLimits = {
   compaction: boolean
 }
 
-export const CONTEXT_LIMITS: Record<string, ContextLimits> = {
-  'claude-opus-5-5': { window: 1_000_000, maxOutput: 128_000, compaction: true },
-  'claude-sonnet-5-5': { window: 1_000_000, maxOutput: 128_000, compaction: true },
-  'claude-haiku-4-5': { window: 200_000, maxOutput: 64_000, compaction: false },
-  'gpt-6-astra': { window: 1_050_000, maxOutput: 128_000, compaction: true },
-  'gpt-6.1-sol': { window: 1_050_000, maxOutput: 128_000, compaction: true },
-  'gpt-6-luna': { window: 1_050_000, maxOutput: 128_000, compaction: true },
-  // DeepSeek: 1M context, up to 384K output, no compaction.
-  'deepseek-flash': { window: 1_000_000, maxOutput: 384_000, compaction: false },
-  'deepseek-v4-pro': { window: 1_000_000, maxOutput: 384_000, compaction: false }
-}
+const limitsOf = (m: ModelProfile): ContextLimits => ({
+  window: m.limits.window,
+  maxOutput: m.limits.maxOutput,
+  compaction: m.compaction
+})
+// The built-in models' limits, as the table they used to be (tests compare
+// them with it).
+export const CONTEXT_LIMITS: Record<string, ContextLimits> = Object.fromEntries(
+  (builtInProfiles as readonly ModelProfile[]).map((m) => [m.id, limitsOf(m)])
+)
 const FALLBACK: ContextLimits = { window: 200_000, maxOutput: 64_000, compaction: false }
-export const limitsFor = (model: string): ContextLimits => CONTEXT_LIMITS[model] ?? FALLBACK
+// A model's limits, from its profile in the registry (shared/models.ts).
+export const limitsFor = (model: string): ContextLimits => {
+  const m = profileOf(model)
+  return m ? limitsOf(m) : FALLBACK
+}
 
 // What a reply may use (Custard's max_tokens), kept free in every request.
 export const OUTPUT_RESERVE = 64_000
@@ -41,8 +44,14 @@ export const MARGIN = 0.05
 export const WARN_AT = 0.75
 // Below this share an estimate is enough; above it, the provider counts.
 export const COUNT_AT = 0.5
-// Compaction starts at this many input tokens on a large model.
-export const COMPACT_TRIGGER = 400_000
+// Compaction starts at this many input tokens on a large model. Every
+// request sends the whole history, so each message near the trigger is
+// billed for all of it: a cache read when the cache is warm, a full write
+// after a pause of over five minutes (about $0.38 at 150,000 tokens on
+// Sonnet 5.5, $1 at 400,000). 150,000 is also Claude's own default.
+// Lower would compact more often, and each compaction is a model call
+// whose summary loses detail.
+export const COMPACT_TRIGGER = 150_000
 // Smallest trigger each provider accepts (Claude: 50,000; OpenAI's
 // compact_threshold: 1,000).
 const MIN_TRIGGER: Record<Provider, number> = { claude: 50_000, openai: 1_000, deepseek: 1_000 }

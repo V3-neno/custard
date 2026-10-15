@@ -1,7 +1,5 @@
-import type {
-  BetaContentBlockParam,
-  BetaMessageParam
-} from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import type { AssistantMessage, Message, Writer } from '../../shared/neutralChat'
 import type { TokenUsage } from '../../shared/pricing'
 import { providerNames, type Provider } from '../../shared/providers'
 import { ProviderError, toProviderError } from '../providerError'
@@ -46,13 +44,9 @@ type WireReply = {
   usage: { input: number; output: number }
 }
 
-// Stored chats are Anthropic message blocks (see types.ts). Convert them on
-// the way out and drop what this provider can't read: Claude's thinking,
-// redacted thinking, fallback markers and compaction blocks. Tool calls the
-// chat isn't offered now were already turned into text by history.ts.
-// PROVIDER-SPECIFIC: tool calls and results in the provider's own form, and
-// attachments (see attachments/request.ts for the per-provider rules).
-function toWire(system: string, messages: BetaMessageParam[] | string): WireMessage[] {
+// One-shot calls (summaries, automation steps) bring Claude-format messages
+// or a bare string; only their text goes.
+function oneShotWire(system: string, messages: BetaMessageParam[] | string): WireMessage[] {
   const out: WireMessage[] = [{ role: 'system', content: system }]
   if (typeof messages === 'string') return [...out, { role: 'user', content: messages }]
   for (const m of messages) {
@@ -65,18 +59,41 @@ function toWire(system: string, messages: BetaMessageParam[] | string): WireMess
   return out
 }
 
-// The provider's reply as stored blocks: text and tool_use only. A
+// A stored chat (shared/neutralChat.ts) on the way out. Only `parts` are
+// sent: `raw` belongs to the provider that wrote it, and thinking, fallback
+// and compaction parts are display copies of another provider's blocks.
+// This sketch sends text and Custard's notes only.
+// PROVIDER-SPECIFIC: tool calls and results in the provider's own form (a
+// call to a tool not in turn.available goes as text, see
+// responsesNeutral.ts), and turn.files in front of their messages (see
+// attachments/request.ts for the per-provider rules).
+function historyWire(system: string, messages: Message[]): WireMessage[] {
+  const out: WireMessage[] = [{ role: 'system', content: system }]
+  for (const m of messages) {
+    const text = (m.parts as { type: string; text?: string }[])
+      .flatMap((p) => (p.type === 'text' || p.type === 'note' ? [p.text ?? ''] : []))
+      .join('\n')
+    if (text) out.push({ role: m.role, content: text })
+  }
+  return out
+}
+
+// The provider's reply as a stored message: text and tool calls only. A
 // provider's own reasoning is never stored (it would reach other providers).
-function toStored(r: WireReply): BetaContentBlockParam[] {
-  return [
-    ...(r.text ? [{ type: 'text' as const, text: r.text }] : []),
-    ...r.calls.map((c) => ({
-      type: 'tool_use' as const,
-      id: c.id,
-      name: c.name,
-      input: c.input as Record<string, unknown>
-    }))
-  ]
+function toStored(r: WireReply, by: Writer): AssistantMessage {
+  return {
+    role: 'assistant',
+    parts: [
+      ...(r.text ? [{ type: 'text' as const, text: r.text }] : []),
+      ...r.calls.map((c) => ({
+        type: 'tool_call' as const,
+        id: c.id,
+        name: c.name,
+        input: c.input
+      }))
+    ],
+    by
+  }
 }
 
 // PROVIDER-SPECIFIC: how usage is reported. Cache fields are zero unless the
@@ -125,7 +142,8 @@ export function templateAdapter(id: Provider): ProviderAdapter {
 
   // PROVIDER-SPECIFIC: the request body and reading the reply. Tools are
   // offered as the provider's function tools; effort maps to the provider's
-  // documented levels (see deepseekEffort in shared/chat.ts for an example).
+  // documented levels (see the effort levels in a model's profile,
+  // shared/models.ts).
   async function complete(
     apiKey: string,
     model: string,
@@ -151,7 +169,7 @@ export function templateAdapter(id: Provider): ProviderAdapter {
   // 'failed' to never keep a partial or declined text as the answer.
   async function sendMessage(req: OneShotRequest): Promise<OneShotResult> {
     // PROVIDER-SPECIFIC: structured output (req.schema) and req.effort.
-    const r = await complete(req.apiKey, req.model, toWire(req.system, req.messages), {
+    const r = await complete(req.apiKey, req.model, oneShotWire(req.system, req.messages), {
       ...(req.tools ? { tools: req.tools } : {}),
       ...(req.maxTokens !== undefined ? { maxTokens: req.maxTokens } : {}),
       ...(req.signal ? { signal: req.signal } : {})
@@ -182,7 +200,7 @@ export function templateAdapter(id: Provider): ProviderAdapter {
     const instructions = turn.system.map((b) => b.text).join('\n\n')
     for (let step = 0; ; step++) {
       if (step === turn.maxSteps) return 'step-limit'
-      const messages = toWire(instructions, turn.history())
+      const messages = historyWire(instructions, turn.history())
       let r: WireReply
       try {
         r = await complete(turn.apiKey, turn.model, messages, { tools: turn.tools, signal })
@@ -198,7 +216,7 @@ export function templateAdapter(id: Provider): ProviderAdapter {
         log.text(r.text)
         emit({ requestId, type: 'text', text: r.text })
       }
-      log.addAssistant(toStored(r))
+      log.addAssistant(toStored(r, { provider: id, model: turn.model }))
       if (r.finish === 'length') return 'cut-off'
       if (!r.calls.length) return 'done'
       // Approvals, the chat guard and the tools themselves run here, above

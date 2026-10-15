@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   chatModels,
   chatSettingsOf,
-  deepseekEffort,
-  deepseekEfforts,
   effortChoices,
   efforts,
   isChatModel,
@@ -61,13 +59,26 @@ describe('a chat’s model', () => {
     ).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' })
   })
 
-  it('otherwise, and for a new chat, the default; unknown values are ignored', () => {
+  it('otherwise, and for a new chat, the default; an unknown effort is ignored', () => {
     expect(chatSettingsOf(null, fallback)).toEqual(fallback)
-    expect(chatSettingsOf(chat({ model: 'gpt-4', effort: 'huge' }), fallback)).toEqual(fallback)
+    expect(chatSettingsOf(chat({ effort: 'huge' }), fallback)).toEqual(fallback)
+  })
+
+  // Phase A3: a model with no profile is never swapped for another one; the
+  // chat keeps it and says it can't be used (it used to move to the default).
+  it('keeps a model with no profile, so the chat can say so', () => {
+    expect(chatSettingsOf(chat({ model: 'gpt-4', effort: 'huge' }), fallback)).toEqual({
+      model: 'gpt-4',
+      effort: fallback.effort
+    })
+    expect(
+      chatSettingsOf(chat({ model: 'gpt-4', context: { model: 'claude-haiku-4-5' } }), fallback)
+        .model
+    ).toBe('gpt-4')
   })
 
   it('knows only the models in the picker', () => {
-    expect(chatModels.every((m) => isChatModel(m.id))).toBe(true)
+    expect(chatModels().every((m) => isChatModel(m.id))).toBe(true)
     for (const x of ['', 'gpt-4', 'claude-opus-4', undefined, '__proto__'])
       expect(isChatModel(x)).toBe(false)
     expect(['low', 'medium', 'high', 'xhigh', 'max'].every(isEffort)).toBe(true)
@@ -77,7 +88,7 @@ describe('a chat’s model', () => {
 
 describe('DeepSeek effort', () => {
   it('Fast, Balanced, Thorough send low, high, max (the documented values)', () => {
-    expect(deepseekEfforts.map((e) => [e.label, e.effort])).toEqual([
+    expect(effortChoices('deepseek').map((e) => [e.label, e.effort])).toEqual([
       ['Fast', 'low'],
       ['Balanced', 'high'],
       ['Thorough', 'max']
@@ -85,7 +96,13 @@ describe('DeepSeek effort', () => {
   })
 
   it('any other level is Balanced', () => {
-    expect(efforts.map(deepseekEffort)).toEqual(['low', 'high', 'high', 'high', 'max'])
+    expect(efforts.map((e) => shownEffort('deepseek', e))).toEqual([
+      'low',
+      'high',
+      'high',
+      'high',
+      'max'
+    ])
   })
 })
 
@@ -104,7 +121,7 @@ describe('effort buttons in the model picker', () => {
   })
 
   it('DeepSeek shows its own three, and any other level as Balanced', () => {
-    expect(effortChoices('deepseek')).toBe(deepseekEfforts)
+    expect(effortChoices('deepseek').map((e) => e.label)).toEqual(['Fast', 'Balanced', 'Thorough'])
     expect(shownEffort('deepseek', 'medium')).toBe('high')
   })
 })

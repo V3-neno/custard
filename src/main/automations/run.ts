@@ -6,7 +6,8 @@ import type {
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { existsSync, readFileSync } from 'fs'
 import type { Automation, RunContext, RunRecord } from '../../shared/automations'
-import { chatModels, introduce } from '../../shared/chat'
+import { introduce } from '../../shared/chat'
+import { profileOf } from '../../shared/models'
 import { toolLabel } from '../../shared/vault'
 import type { VaultGrant } from '../../shared/vaultGrants'
 import type { Guard } from '../fsafe'
@@ -71,8 +72,9 @@ export type RunDeps = {
     snapshot: unknown
   ) => Promise<ToolRun>
   describePlugin: (name: string, input: unknown) => string | null
-  // The model call for this automation's model, or why there can't be one.
-  step: (modelId: string) => Step | string
+  // The model call for this automation's model and effort, or why there
+  // can't be one.
+  step: (modelId: string, effort?: Automation['effort']) => Step | string
   // Saves a question for the user's next chat.
   leaveQuestion: (
     runId: string,
@@ -128,7 +130,7 @@ export function systemFor(
   scheduled: string,
   grants: VaultGrant[]
 ): string {
-  const model = chatModels.find((m) => m.id === a.model)
+  const model = profileOf(a.model)
   return [
     `${model ? introduce(model) : 'You are Claude'}, running the user's automation "${a.name}" for Custard, their personal desktop client.`,
     `Scheduled for ${scheduled}. Nobody is watching and nobody can answer you now. If you can't finish without the user's say, call leave_question (they are asked in their next chat) and carry on with what doesn't depend on it; otherwise never ask. Do the work below with the tools you were given. If something can't be done, say so in one or two sentences at the end instead of trying another way around it.`,
@@ -182,7 +184,7 @@ async function execute(
   } catch {
     return failed(`The skill "${a.skill}" couldn't be read from the vault.`)
   }
-  const step = d.step(a.model)
+  const step = d.step(a.model, a.effort)
   if (typeof step === 'string') return failed(step)
 
   const grants = effectiveGrants(a, d.grants)

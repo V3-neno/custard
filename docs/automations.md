@@ -10,7 +10,8 @@ against a mock provider.
 | Setting     | Meaning                                                                                                                                     |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name, skill | The skill is a folder under `Custard/Skills`; its `SKILL.md` is the run's instructions.                                                     |
-| Model       | Any model Custard offers (Claude or OpenAI). Its API key must be saved.                                                                     |
+| Model       | Any model Custard offers (Claude, OpenAI or DeepSeek). Its API key must be saved.                                                           |
+| Effort      | Buttons under the model with its levels, as in the model picker (see **The effort control** below). Stored as `effort`.                     |
 | Times, days | Daily local times (`07:30, 19:00`); optionally days of the month (`1, 15`). Empty days means every day.                                     |
 | Time zone   | Empty = the computer's. DST keeps local times (see below).                                                                                  |
 | Folders     | Chosen from the folders already allowed under Editable folders.                                                                             |
@@ -18,6 +19,29 @@ against a mock provider.
 | Limits      | Runs per day (default 24, set per automation, 1-96), tool calls per run (30), minutes per run (5), failed runs before it pauses itself (3). |
 
 A new automation starts turned off.
+
+### The effort control
+
+Under the model select, a row of buttons with the model's effort levels from
+its profile, labelled as in the model picker: Low, Medium, High, X-High, Max
+for Claude and OpenAI; Fast, Balanced, Thorough for DeepSeek. One short line
+under them says levels above the middle one (Medium, or Balanced) cost more.
+What the form shows is what is saved.
+
+| Case                                 | The form shows                                                                                                          | Saving stores                       |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| New automation                       | The model's `otherwise` level picked (Medium; Balanced on DeepSeek).                                                    | That level.                         |
+| Saved before there was a choice      | "Not set (the provider's default). Saving sets Medium." with Medium picked.                                             | The picked level.                   |
+| A saved level the model lists        | That level picked (also one set by hand in settings.json).                                                              | That level.                         |
+| A saved level the model doesn't list | The level it is sent as (`shownLevel`), and "Saved as Medium, which DeepSeek Flash doesn't list, so it sends Balanced." | The level shown.                    |
+| A model that takes none (Haiku 4.5)  | The provider's buttons greyed out, and "Haiku 4.5 takes no effort level" (the model's own name).                        | No effort (a saved one is removed). |
+| A model with no profile              | No buttons: "… has no profile, so its effort levels can't be shown. The saved effort (High) is kept."                   | The saved effort, unchanged.        |
+
+Changing the model in the form keeps the picked level where the new model
+lists it and otherwise shows its `otherwise` level (`shownLevel`); a model
+that takes none clears it, and coming back from one starts at `otherwise`. A
+model with no profile is listed in the model select as itself, marked
+"Its profile is missing.", so the select shows what is saved.
 
 ## When it runs
 
@@ -179,8 +203,37 @@ Settings under each automation. A run still marked running when Custard starts
 was cut off by closing: it is marked failed and is not repeated; what it had
 already written stays.
 
+Each run record also keeps the automation's model and effort when the run
+started (`model`, `effort`; no effort when none was set). Records written
+before these were kept, and skipped slots, have neither. The run list shows
+them on a line of their own: "Opus 5.5 · High", "DeepSeek Flash · Balanced"
+(a level the model doesn't list shows as it was sent), "Opus 5.5 · effort not
+set", or just "Haiku 4.5" for a model that takes none. A record without them
+shows as before, with no such line.
+
 The list of edits that Undo uses is shared with chat and now keeps the newest
 200 (it was 50), because a busy automation would otherwise push chat's out.
+
+## Effort and thinking
+
+Each step sends the automation's effort as its model's profile says, the
+same rule as a chat (`sentLevel`):
+
+- **Claude** (`adapters/anthropic.ts`, `sendMessage`): adaptive thinking
+  (`thinking: {type: "adaptive"}`) for a model whose profile thinks (Opus 5.5,
+  Sonnet 5.5), whether or not an effort is set, and `output_config.effort`
+  when one is. Haiku 4.5 gets neither. The output limit is 64,000 tokens,
+  thinking and text together (a model with a lower limit gets its own).
+  Thinking text isn't asked for (no `display`) and isn't kept: each step's
+  thinking is dropped before the next, as before.
+- **OpenAI and DeepSeek** (`adapters/responses.ts`): `reasoning.effort` when an
+  effort is set (DeepSeek's levels: a stored medium or xhigh sends high). No
+  output limit, as before.
+- **Not set** (every automation saved before there was a choice): no effort is
+  sent. Claude still gets adaptive thinking and the 64,000 limit.
+
+The form sets the effort (above). An older Custard that saves settings drops
+it.
 
 ## Not in this step
 

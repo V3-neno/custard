@@ -27,8 +27,9 @@ export type ContinueDeps = {
   load: (id: string) => Conversation | null
   create: (mode: Conversation['mode'], title: string) => Conversation
   save: (c: Conversation) => void
-  // For the provider the original was last sent to; null without a key.
-  summarizer: (original: Conversation) => HandoffSummarizer | null
+  // For the provider the original was last sent to; null without a key, or
+  // why there is none (its model has no profile, so no provider is asked).
+  summarizer: (original: Conversation) => HandoffSummarizer | null | string
   now?: () => number
 }
 
@@ -43,10 +44,10 @@ export async function continueChat(
   let summary: HandoffSummary | null = null
   if (!opts.withoutSummary) {
     const summarize = deps.summarizer(original)
-    if (!summarize)
+    if (!summarize || typeof summarize === 'string')
       return {
         ok: false,
-        error: 'There is no API key to write the summary with.',
+        error: summarize || 'There is no API key to write the summary with.',
         canSkipSummary: true
       }
     try {

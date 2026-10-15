@@ -22,10 +22,9 @@ export function userUrls(c: Conversation): Set<string> {
   const keys = new Set<string>()
   for (const m of c.messages) {
     if (m.role !== 'user') continue
-    const texts =
-      typeof m.content === 'string'
-        ? [m.content]
-        : m.content.flatMap((b) => (b.type === 'text' ? [b.text] : []))
+    // Text parts and Custard's own note (as before B3, when the note was a
+    // text block); never tool results.
+    const texts = m.parts.flatMap((p) => (p.type === 'text' || p.type === 'note' ? [p.text] : []))
     for (const t of texts)
       for (const match of t.match(URL_RE) ?? []) {
         // Trailing punctuation and unbalanced brackets aren't part of a URL.

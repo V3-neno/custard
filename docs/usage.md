@@ -20,7 +20,7 @@ can't price a request in advance), token-counting requests (free), and calls
 that fail before the provider reports usage (for example a turn you stop while
 it is streaming).
 
-Prices live in `src/shared/pricing.ts`, checked on 2026-10-12 against
+Prices live in each model's profile in `src/shared/models.ts` (sources at the top of `src/shared/pricing.ts`), checked on 2026-10-12 against
 platform.claude.com/docs/en/about-claude/pricing and
 developers.openai.com/api/docs/pricing. They are not fetched at run time. A
 model with no known price is counted as a call but not in the cost, and the
