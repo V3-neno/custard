@@ -23,8 +23,8 @@ preserved-thinking test has been run.
 | Preserved thinking with compaction | On Opus/Sonnet 5.5, thinking from before the compaction block isn't carried forward; keeping the original messages and letting the API drop them is a documented option; re-inserting earlier turns after the block causes a 400 [D3] | Reasoning isn't carried between turns in Custard (existing behaviour) |
 
 Not used: Claude's on-demand compaction (`compact-2026-09-04`, replaces history)
-[D5], Claude's context editing (clearing old tool results rewrites history) [D6],
-OpenAI's `/responses/compact` (needs the whole window sent at once) [D9] and
+[D5], Claude's context editing (server-side clearing of old tool results; Custard
+clears them itself for both providers instead, see step 5) [D6], OpenAI's `/responses/compact` (needs the whole window sent at once) [D9] and
 OpenAI's deprecated `truncation`.
 
 ### Sources
@@ -174,6 +174,23 @@ Not deferred: automation questions (shown in every chat until answered) and
 referenced earlier chats, which change only at the user's hand. To check the
 cache, `node scripts/usage-baseline.mjs` lists each long chat's cache writes
 against its cache reads.
+
+**5. Clearing old tool results** (`src/main/clearing.ts`). The cheap step before
+compaction: no model call, and nothing is summarized. Big tool results (2,000
+characters or more) in messages before a mark (`cleared` on the chat) are sent as a
+one-line stub naming the action, its size and how it ended, and telling the model it
+can call the tool again. The saved messages keep every result in full, and the
+tool_use and tool_result pairs stay intact.
+- **Never cleared:** results from the turn being sent and the two before it, small
+  results, errors, and actions whose outcome is unknown or not settled.
+- **The mark moves only forward, in jumps, at the start of a turn**, so requests
+  between jumps start the same way and keep hitting the prompt cache. It moves:
+  - when the request would miss the cache anyway (step 4: cold, or something
+    before the messages changed) and at least about 5,000 tokens can be cleared;
+  - or when the history is past 80% of the compaction trigger and at least about
+    20,000 tokens can be cleared, so compaction comes later or not at all.
+- Only what is sent counts: after a compaction, results before it are not weighed.
+- Tool inputs (for example a long note the model created) are not cleared.
 
 ## What the user sees
 

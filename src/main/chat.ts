@@ -45,7 +45,15 @@ import {
   runChatTool
 } from './earlierChats'
 import { continueChat } from './continue'
-import { capResult, maxResultChars, isContextError, measure } from './context'
+import {
+  capResult,
+  compactTrigger,
+  estimateTokens,
+  isContextError,
+  maxResultChars,
+  measure
+} from './context'
+import { nextMark, withClearedResults } from './clearing'
 import {
   previewNote,
   runVaultTool,
@@ -525,6 +533,28 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   })
   deferredAt.forEach((at, k) => (system[at] = { type: 'text', text: chosen.deferred[k] }))
   for (let i = system.length - 1; i >= 0; i--) if (!system[i].text) system.splice(i, 1)
+  // Old tool results are sent as one-line stubs. The mark moves only in
+  // jumps at the start of a turn: when this request misses the cache anyway,
+  // or when the chat nears compaction (see clearing).
+  {
+    const sentFrom = Math.max(0, ...(conversation.compactions ?? []).map((k) => k.after))
+    const mark = nextMark({
+      messages: conversation.messages,
+      actions: conversation.actions,
+      cleared: conversation.cleared?.before ?? 0,
+      sentFrom,
+      cacheMiss: chosen.reason !== null,
+      history: estimateTokens(
+        withClearedResults(
+          conversation.messages,
+          conversation.actions,
+          conversation.cleared?.before
+        ).slice(sentFrom)
+      ),
+      trigger: compactTrigger(model.id)
+    })
+    if (mark !== null) conversation.cleared = { before: mark, at: Date.now() }
+  }
   // Kept on the chat once a turn has happened, for the next message.
   // Not kept when a Forget or a memory setting changed during the turn: the
   // snapshot may hold what was forgotten.
@@ -541,7 +571,11 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const history = (): Conversation['messages'] => {
     return withMessageContext(
       withoutUnavailableTools(
-        withFiles(conversation.messages, files?.blocks ?? new Map()),
+        withClearedResults(
+          withFiles(conversation.messages, files?.blocks ?? new Map()),
+          conversation.actions,
+          conversation.cleared?.before
+        ),
         available
       ),
       conversation.messageContext
