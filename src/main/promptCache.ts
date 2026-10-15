@@ -32,15 +32,7 @@ import type { MessageContext, PromptSnapshot } from '../shared/chat'
 export const CACHE_TTL_MS = 5 * 60_000
 
 export type Refresh =
-  | 'new'
-  | 'model'
-  | 'changed'
-  | 'cold'
-  | 'memory'
-  | 'forgotten'
-  | 'day'
-  | 'shape'
-  | 'removed'
+  'new' | 'model' | 'changed' | 'cold' | 'memory' | 'forgotten' | 'day' | 'shape' | 'removed'
 
 // Bumped whenever a note that may be in a deferred part is deleted (Forget)
 // or memory settings change, so no chat keeps showing it from a snapshot.

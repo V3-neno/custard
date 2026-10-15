@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/explicit-function-return-type -- plain JS script */
 // Prompt-cache baseline from saved chats, for the token-efficiency phases in
 // docs/ROADMAP.md. Reads each chat's `usage` totals and prints, per chat and
 // overall, how much input was written to the cache versus read from it, and

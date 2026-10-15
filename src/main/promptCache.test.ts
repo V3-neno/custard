@@ -33,7 +33,8 @@ const snap = (over: Partial<PromptSnapshot> = {}): PromptSnapshot => ({
   deferred: [vault(['- likes tea']), '- chat A'],
   ...over
 })
-const next = (over: Partial<Parameters<typeof refreshReason>[1]> = {}) => ({
+type Next = Parameters<typeof refreshReason>[1]
+const next = (over: Partial<Next> = {}): Next => ({
   model: 'claude-opus-5-5',
   fixed: 'f1',
   memory: true,

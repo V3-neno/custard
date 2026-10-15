@@ -398,8 +398,7 @@ export type Compaction = {
 }
 
 export type ContinueResult =
-  | { ok: true; conversation: Conversation }
-  | { ok: false; error: string; canSkipSummary: boolean }
+  { ok: true; conversation: Conversation } | { ok: false; error: string; canSkipSummary: boolean }
 
 export type ChatLink = { id: string; title: string; mode: Mode }
 
