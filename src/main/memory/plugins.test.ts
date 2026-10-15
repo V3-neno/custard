@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { calls, result, said, user } from '../../../test/neutral/builders'
 import {
   existsSync,
   mkdirSync,
@@ -54,6 +55,8 @@ const chat = (actions: string[] = []): Conversation => ({
   id: 'c',
   mode: 'chat',
   title: 't',
+  format: 'custard-chat',
+  version: 1,
   createdAt: 0,
   updatedAt: 0,
   messages: [],
@@ -308,13 +311,10 @@ describe('capture into plugin notes', () => {
     const c = chat()
     c.id = id
     c.messages = [
-      { role: 'user', content: 'Queue Says by Nils Frahm' },
-      {
-        role: 'assistant',
-        content: [{ type: 'tool_use', id: 'q1', name: 'spotify__add_to_queue', input: {} }]
-      },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'q1', content: 'timed out' }] },
-      { role: 'assistant', content: [{ type: 'text', text: "I don't know if it was queued." }] }
+      user('Queue Says by Nils Frahm'),
+      calls({ id: 'q1', name: 'spotify__add_to_queue' }),
+      result('q1', 'timed out'),
+      said("I don't know if it was queued.")
     ]
     c.actions = {
       q1: {

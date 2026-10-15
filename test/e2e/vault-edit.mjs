@@ -71,11 +71,7 @@ const results = () =>
     .filter((f) => f.endsWith('.json'))
     .map((f) => JSON.parse(fs.readFileSync(`${convDir}/${f}`, 'utf8')))
     .flatMap((c) => c.messages)
-    .flatMap((m) =>
-      Array.isArray(m.content)
-        ? m.content.filter((x) => x.type === 'tool_result').map((x) => String(x.content))
-        : []
-    )
+    .flatMap((m) => m.parts.filter((x) => x.type === 'tool_result').map((x) => x.text))
 const openSettings = async () => {
   await w.click('button[title=Settings]')
   await w.waitForSelector('text=Obsidian vault')
@@ -83,7 +79,7 @@ const openSettings = async () => {
 const closeSettings = () => w.click('button:text-is("Done")')
 const allow = async (folder, mode) => {
   await w.fill('input[aria-label="Folder to allow"]', folder)
-  await w.selectOption('select[aria-label="What Claude may do there"]', mode)
+  await w.click(`[role=group][aria-label="What Claude may do there"] button[data-mode=${mode}]`)
   await w.click('button:text-is("Allow")')
   await w.waitForSelector(`ul[aria-label="Editable folders"] >> text=${folder}/`)
 }

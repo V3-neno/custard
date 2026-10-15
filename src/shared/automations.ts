@@ -1,3 +1,5 @@
+import { efforts, type Effort } from './models'
+
 // Automations: a skill the user has Custard run on a schedule while it is
 // open. The user creates them in Settings; nothing here can be changed by a
 // note, a plugin result or a web page.
@@ -22,6 +24,11 @@ export type Automation = {
   skill: string
   // A model id from chatModels().
   model: string
+  // The effort each step asks for, as the user saved it. Absent: none is
+  // sent and the provider uses its own default (automations made before
+  // there was a choice). What is sent follows the model's profile at run
+  // time (sentLevel); a model that takes no effort gets none.
+  effort?: Effort
   // Local times of day, "HH:MM", ascending.
   times: string[]
   // Days of the month (1-31). Empty means every day. A day a month doesn't
@@ -110,6 +117,8 @@ export function checkAutomation(raw: unknown): AutomationCheck {
       name,
       skill,
       model: r.model,
+      // Kept only when it is one of the five levels; anything else is dropped.
+      ...(efforts.includes(r.effort as Effort) ? { effort: r.effort as Effort } : {}),
       times,
       days,
       ...(typeof r.timezone === 'string' && r.timezone ? { timezone: r.timezone } : {}),
@@ -173,6 +182,11 @@ export type RunRecord = {
   summary?: string
   // Questions it left for the user (ids).
   questions?: string[]
+  // The automation's model and effort when the run started (absent on
+  // records written before these were kept, and on skipped slots; no effort
+  // when the automation had none set).
+  model?: string
+  effort?: Effort
 }
 
 // Automation state kept apart from settings.

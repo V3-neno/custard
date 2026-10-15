@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { calls, result, said, user } from '../../../test/neutral/builders'
+const toolResult = result
 import type { Conversation } from '../../shared/chat'
 import { splitSources } from '../../shared/web'
 import { originWarning, rememberLinks, urlOrigin } from './provenance'
@@ -15,6 +17,8 @@ const conv = (messages: Conversation['messages'] = []): Conversation => ({
   id: `c${Math.random()}`,
   mode: 'chat',
   title: 't',
+  format: 'custard-chat',
+  version: 1,
   createdAt: 0,
   updatedAt: 0,
   messages
@@ -22,13 +26,8 @@ const conv = (messages: Conversation['messages'] = []): Conversation => ({
 
 describe('where a URL came from', () => {
   const c = conv([
-    { role: 'user', content: 'Summarise https://news.example.com/story?id=7. Thanks' },
-    {
-      role: 'user',
-      content: [
-        { type: 'tool_result', tool_use_id: 't', content: 'see https://evil.example.net/x' }
-      ]
-    }
+    user('Summarise https://news.example.com/story?id=7. Thanks'),
+    result('t', 'see https://evil.example.net/x')
   ])
   c.sources = [
     { url: 'https://docs.example.org/a', turn: 0, origin: 'search', query: 'example docs' }
@@ -341,11 +340,11 @@ describe('running the web tools', () => {
   // A finished earlier turn that ran one tool, then a new user message.
   const afterTurnWith = (tool: string, result: string): Conversation => {
     const c = conv([
-      { role: 'user', content: 'first' },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 'p', name: tool, input: {} }] },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'p', content: result }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
-      { role: 'user', content: 'now search for something' }
+      user('first'),
+      calls({ id: 'p', name: tool }),
+      toolResult('p', result),
+      said('Done.'),
+      user('now search for something')
     ])
     c.actions = { p: { name: tool, label: tool, write: false, status: 'completed', key: 'p' } }
     return c
@@ -361,7 +360,7 @@ describe('running the web tools', () => {
     warnings = []
     const approvals: string[] = []
     const queries: string[] = []
-    const c = conv([{ role: 'user', content: 'search tea' }])
+    const c = conv([user('search tea')])
     await runWebTool(
       'web_search',
       { query: 'tea' },
@@ -444,12 +443,9 @@ describe('running the web tools', () => {
   // A turn that has already read something from the vault.
   const tainted = (): Conversation => {
     const c = conv([
-      { role: 'user', content: 'what does my note say, then search' },
-      {
-        role: 'assistant',
-        content: [{ type: 'tool_use', id: 'v', name: 'vault_read', input: {} }]
-      },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'v', content: 'secret plan' }] }
+      user('what does my note say, then search'),
+      calls({ id: 'v', name: 'vault_read' }),
+      toolResult('v', 'secret plan')
     ])
     c.actions = {
       v: { name: 'vault_read', label: 'Read', write: false, status: 'completed', key: 'k' }
@@ -458,7 +454,7 @@ describe('running the web tools', () => {
   }
 
   it('searches without asking while nothing from outside is in the turn, and records sources', async () => {
-    const c = conv([{ role: 'user', content: 'search tea' }])
+    const c = conv([user('search tea')])
     const approvals: string[] = []
     const queries: string[] = []
     const r = await runWebTool('web_search', { query: 'q' }, ctx(c, approvals), {
@@ -503,16 +499,11 @@ describe('running the web tools', () => {
   })
 
   it('stops at five searches a turn', async () => {
-    const c = conv([{ role: 'user', content: 'go' }])
+    const c = conv([user('go')])
     c.actions = {}
-    const uses: { type: 'tool_use'; id: string; name: string; input: unknown }[] = []
+    const uses: { id: string; name: string; input: unknown }[] = []
     for (let n = 0; n < 5; n++) {
-      uses.push({
-        type: 'tool_use' as const,
-        id: `s${n}`,
-        name: 'web_search',
-        input: { query: `${n}` }
-      })
+      uses.push({ id: `s${n}`, name: 'web_search', input: { query: `${n}` } })
       c.actions[`s${n}`] = {
         name: 'web_search',
         label: '',
@@ -521,7 +512,7 @@ describe('running the web tools', () => {
         key: ''
       }
     }
-    c.messages.push({ role: 'assistant', content: uses })
+    c.messages.push(calls(...uses))
     const r = await runWebTool('web_search', { query: 'more' }, ctx(c, [], true), {
       search: async () => ok
     })
@@ -530,7 +521,7 @@ describe('running the web tools', () => {
   })
 
   it('reads user URLs straight away and asks for other URLs; declining fetches nothing', async () => {
-    const c = conv([{ role: 'user', content: 'read https://a.example.com/x' }])
+    const c = conv([user('read https://a.example.com/x')])
     const approvals: string[] = []
     const fetched: string[] = []
     const read = async (

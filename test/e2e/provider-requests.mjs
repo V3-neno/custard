@@ -5,6 +5,8 @@
 // with test/e2e/provider-requests.golden.json after, so the move can be shown
 // to change nothing a provider sees:
 //   automation:<provider>  a run of a skill: a vault_list step, then the end
+//                          (the automation has no effort set)
+//   automation-effort:<p>  the same with an effort saved on the automation
 //   search:<provider>      a chat asks for web_search; the search's own call
 //                          (Claude and OpenAI; DeepSeek has no web search)
 // Each request is kept with its method, path, the headers that say how it was
@@ -308,15 +310,18 @@ try {
   })
   await w.click('button:text-is("Done")')
 
-  for (const p of PROVIDERS) {
-    step(`automation: ${p.id}`)
+  // An automation run, recorded under `key`. `effort` absent: the automation
+  // has none set (every automation saved before there was a choice).
+  const automation = async (key, model, who, effort) => {
+    step(key)
     const n = seen.length
     const saved = await w.evaluate(
-      (model) =>
+      ([model, effort]) =>
         window.custard.automations.save({
           name: `req ${model}`,
           skill: 'req-log',
           model,
+          ...(effort ? { effort } : {}),
           times: ['07:30'],
           days: [],
           folders: [],
@@ -324,7 +329,7 @@ try {
           enabled: false,
           limits: { runsPerDay: 24, toolCalls: 30, catchUpRuns: 3 }
         }),
-      p.model
+      [model, effort]
     )
     check(saved.ok, `saved (${saved.problem ?? ''})`)
     await w.evaluate((id) => window.custard.automations.runNow(id), saved.id)
@@ -333,20 +338,40 @@ try {
       'two steps were sent'
     )
     await new Promise((r) => setTimeout(r, 1000))
-    const runs = await w.evaluate(async (id) => {
-      const v = (await window.custard.automations.list()).find((x) => x.automation.id === id)
-      return v?.runs?.map((r) => [r.status, r.reason ?? '', r.summary ?? '', r.calls]) ?? []
-    }, saved.id)
+    const view = await w.evaluate(
+      async (id) => (await window.custard.automations.list()).find((x) => x.automation.id === id),
+      saved.id
+    )
+    const runs = view?.runs?.map((r) => [r.status, r.reason ?? '', r.summary ?? '', r.calls]) ?? []
+    check(
+      view?.automation.effort === effort,
+      `the automation keeps its effort (${view?.automation.effort ?? 'none'})`
+    )
+    // Automation thinking, Phase 2: the record says what the run started with.
+    check(
+      view?.runs?.[0]?.model === model && view?.runs?.[0]?.effort === effort,
+      `the run record has model ${model} and effort ${effort ?? 'none'}`
+    )
     const mine = seen.slice(n).filter((s) => s.kind === 'automation')
     check(
-      mine.every((s) => s.who === p.who),
-      `all to ${p.who}`
+      mine.every((s) => s.who === who),
+      `all to ${who}`
     )
-    record[`automation:${p.id}`] = norm({
+    record[key] = norm({
       requests: mine.map(({ method, path, headers, body }) => ({ method, path, headers, body })),
       runs
     })
   }
+  for (const p of PROVIDERS) await automation(`automation:${p.id}`, p.model, p.who)
+  // The same runs with an effort saved: Opus at high, Haiku 4.5 (which takes
+  // none) at high, OpenAI at xhigh, DeepSeek at medium (sent as high).
+  for (const [key, model, who, effort] of [
+    ['automation-effort:claude', 'claude-opus-5-5', 'anthropic', 'high'],
+    ['automation-effort:claude-haiku', 'claude-haiku-4-5', 'anthropic', 'high'],
+    ['automation-effort:openai', 'gpt-6-astra', 'openai', 'xhigh'],
+    ['automation-effort:deepseek', 'deepseek-flash', 'deepseek', 'medium']
+  ])
+    await automation(key, model, who, effort)
 
   for (const p of PROVIDERS.filter((x) => x.id !== 'deepseek')) {
     step(`search: ${p.id}`)
@@ -404,7 +429,8 @@ try {
     console.log('golden record written')
   } else {
     const want = JSON.parse(fs.readFileSync(GOLDEN, 'utf8'))
-    for (const k of Object.keys(want))
+    // Every key on either side: a new case missing from the golden fails too.
+    for (const k of new Set([...Object.keys(want), ...Object.keys(record)]))
       check(JSON.stringify(want[k]) === JSON.stringify(record[k]), `${k}: identical`)
   }
   check(!errors.length, `no page errors (${errors.join('; ')})`)

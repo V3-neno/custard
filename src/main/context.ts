@@ -44,8 +44,14 @@ export const MARGIN = 0.05
 export const WARN_AT = 0.75
 // Below this share an estimate is enough; above it, the provider counts.
 export const COUNT_AT = 0.5
-// Compaction starts at this many input tokens on a large model.
-export const COMPACT_TRIGGER = 400_000
+// Compaction starts at this many input tokens on a large model. Every
+// request sends the whole history, so each message near the trigger is
+// billed for all of it: a cache read when the cache is warm, a full write
+// after a pause of over five minutes (about $0.38 at 150,000 tokens on
+// Sonnet 5.5, $1 at 400,000). 150,000 is also Claude's own default.
+// Lower would compact more often, and each compaction is a model call
+// whose summary loses detail.
+export const COMPACT_TRIGGER = 150_000
 // Smallest trigger each provider accepts (Claude: 50,000; OpenAI's
 // compact_threshold: 1,000).
 const MIN_TRIGGER: Record<Provider, number> = { claude: 50_000, openai: 1_000, deepseek: 1_000 }

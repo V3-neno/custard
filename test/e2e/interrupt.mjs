@@ -301,7 +301,7 @@ try {
     c2.messages.at(-1).role === 'user' &&
       c2.messages
         .at(-1)
-        .content.some((b) => b.type === 'tool_result' && /^Outcome unknown/.test(b.content)),
+        .parts.some((p) => p.type === 'tool_result' && /^Outcome unknown/.test(p.text)),
     'the saved history is valid again, with an "Outcome unknown" result'
   )
 
