@@ -15,7 +15,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -142,7 +142,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -175,7 +175,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -411,7 +411,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -664,7 +664,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -945,7 +945,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -978,7 +978,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1012,7 +1012,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1046,7 +1046,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1080,7 +1080,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1114,7 +1114,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1148,7 +1148,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1182,7 +1182,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1216,7 +1216,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1250,7 +1250,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1284,7 +1284,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1318,7 +1318,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1352,7 +1352,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1386,7 +1386,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1420,7 +1420,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1454,7 +1454,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1488,7 +1488,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1522,7 +1522,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1556,7 +1556,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1590,7 +1590,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1624,7 +1624,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1658,7 +1658,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1692,7 +1692,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1726,7 +1726,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -1760,7 +1760,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -3953,7 +3953,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -5752,7 +5752,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [
@@ -7570,7 +7570,7 @@
     "context_management": [
      {
       "type": "compaction",
-      "compact_threshold": 400000
+      "compact_threshold": 150000
      }
     ],
     "tools": [

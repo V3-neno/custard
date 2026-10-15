@@ -62,10 +62,13 @@ it was ("counted by Claude" or "Custard's estimate").
 
 **2. Provider compaction** (`src/main/compaction.ts`). On Opus/Sonnet 5.5 and the
 three OpenAI models. The trigger is per model (`compactTrigger`): the lower of
-400,000 and half the model's budget, and never below the provider's minimum. Half
+150,000 and half the model's budget, and never below the provider's minimum. Half
 leaves room for the next tool round and the reply on top of the output allowance
-and margin the budget already keeps. Today that is 400,000 on every compaction
-model (budgets 889,200 and 935,175 tokens).
+and margin the budget already keeps. Today that is 150,000 on every compaction
+model (budgets 889,200 and 935,175 tokens). It was 400,000 until token-efficiency
+phase 2: every message sends the whole history, so a chat near the trigger pays
+for all of it each time, and in full after a pause long enough for the prompt
+cache to expire. 150,000 is also Claude's default trigger.
 
 Custard keeps every message on disk and in the chat; only what is sent shrinks.
 Claude's block stays in the assistant message. A block with no content (a failed

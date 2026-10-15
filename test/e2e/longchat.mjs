@@ -184,8 +184,8 @@ try {
   check(
     /compact-2026-01-12/.test(b1.beta ?? '') &&
       b1.context_management?.edits?.[0]?.type === 'compact_20260112' &&
-      b1.context_management.edits[0].trigger?.value === 400000,
-    'the request asked for compaction at 400,000 input tokens (beta compact-2026-01-12)'
+      b1.context_management.edits[0].trigger?.value === 150000,
+    'the request asked for compaction at 150,000 input tokens (beta compact-2026-01-12)'
   )
   check(
     /record is right|accepted by a tool/.test(b1.context_management.edits[0].instructions ?? '') ||

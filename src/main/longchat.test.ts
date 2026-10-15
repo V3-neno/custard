@@ -185,7 +185,7 @@ describe('context budget', () => {
   })
 
   it("sets each model's compaction trigger from its own budget", () => {
-    // Large models: 400,000, under half their budget.
+    // Large models: 150,000, under half their budget.
     for (const m of ['claude-opus-5-5', 'claude-sonnet-5-5', 'gpt-6-astra', 'gpt-6-luna']) {
       expect(compactTrigger(m)).toBe(COMPACT_TRIGGER)
       expect(compactTrigger(m)).toBeLessThanOrEqual(budgetFor(m) * 0.5)
