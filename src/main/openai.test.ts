@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { said, user } from '../../test/neutral/builders'
 import http from 'http'
 import type { AddressInfo } from 'net'
 import type { ChatEvent, Conversation } from '../shared/chat'
@@ -64,7 +65,7 @@ function turn(
 ): { t: Parameters<typeof runOpenAI>[0]; events: ChatEvent[] } {
   const events: ChatEvent[] = []
   const log = new TurnLog(c, () => {})
-  c.messages.push({ role: 'user', content: 'go' })
+  c.messages.push(user('go'))
   return {
     events,
     t: {
@@ -76,6 +77,8 @@ function turn(
       effort: 'low',
       instructions: 'be brief',
       history: c.messages,
+      files: new Map(),
+      available: new Set(['vault_list']),
       conversation: c,
       fits: async () => true,
       tools: [{ name: 'vault_list', description: 'list', input_schema: { type: 'object' } }],
@@ -93,12 +96,11 @@ const conv = (): Conversation => ({
   id: 'c',
   mode: 'chat',
   title: 't',
+  format: 'custard-chat',
+  version: 1,
   createdAt: 0,
   updatedAt: 0,
-  messages: [
-    { role: 'user', content: 'earlier question' },
-    { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] }
-  ]
+  messages: [user('earlier question'), said('earlier answer')]
 })
 
 describe('OpenAI long chats (mocked Responses API)', () => {
@@ -133,7 +135,7 @@ describe('OpenAI long chats (mocked Responses API)', () => {
 
     const [first, second] = requests.filter((r) => r.path.endsWith('/responses'))
     expect(first.body.context_management).toEqual([
-      { type: 'compaction', compact_threshold: 400_000 }
+      { type: 'compaction', compact_threshold: 150_000 }
     ])
     expect(first.body.store).toBe(false)
     expect(events).toContainEqual({ requestId: 'r', type: 'compacting' })
@@ -151,7 +153,7 @@ describe('OpenAI long chats (mocked Responses API)', () => {
     ])
     expect(c.messages[3].role).toBe('assistant')
     // The stored history keeps every message.
-    expect(c.messages[0]).toEqual({ role: 'user', content: 'earlier question' })
+    expect(c.messages[0]).toEqual(user('earlier question'))
 
     // The next turn starts from the saved item.
     requests.length = 0

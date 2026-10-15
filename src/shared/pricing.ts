@@ -1,4 +1,4 @@
-import { modelProfiles, type ModelProfile } from './models'
+import { allProfiles, builtInProfiles, profileOf, type ModelProfile } from './models'
 
 // What a model call costs, from the providers' published standard rates,
 // checked on 2026-10-12:
@@ -45,17 +45,20 @@ export type Price = Rates & {
 
 const WEB_SEARCH_PER_1K = 10
 
-// Each model's prices, from its profile (shared/models.ts).
+// The built-in models' prices, as the table they used to be (tests compare
+// them with it).
 export const PRICES: Record<string, Price> = Object.fromEntries(
-  (modelProfiles as readonly ModelProfile[]).flatMap((m) => (m.prices ? [[m.id, m.prices]] : []))
+  (builtInProfiles as readonly ModelProfile[]).flatMap((m) => (m.prices ? [[m.id, m.prices]] : []))
 )
 
-// Claude's dated or suffixed ids (from a fallback, say) are priced as their
-// base model.
+// A model's prices, from its profile in the registry (shared/models.ts); a
+// profile without prices is unpriced. Claude's dated or suffixed ids (from a
+// fallback, say), which have no profile, are priced as their base model.
 function priceOf(model: string): Price | null {
-  if (PRICES[model]) return PRICES[model]
-  const base = Object.keys(PRICES).find((k) => model.startsWith(`${k}-`))
-  return base ? PRICES[base] : null
+  const own = profileOf(model)
+  if (own) return own.prices
+  const base = allProfiles().find((m) => m.prices && model.startsWith(`${m.id}-`))
+  return base?.prices ?? null
 }
 
 // Dollars, or null for a model with no known price.

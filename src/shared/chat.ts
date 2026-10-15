@@ -1,34 +1,49 @@
 import type { TokenUsage } from './pricing'
-import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages'
+import type { CHAT_FORMAT, CHAT_VERSION, Message, OldReason } from './neutralChat'
 import type { Workspace } from './plugins'
 import type { Attachment, AttachmentKind } from './attachments'
 import { providers, type Provider, type ProviderApi } from './providers'
 import {
+  allProfiles,
   efforts,
-  modelProfiles,
+  hasProfile,
+  profileOf,
   providerEffort,
   shownLevel,
-  type Effort,
-  type ModelId
+  type BuiltInModelId,
+  type Effort
 } from './models'
 
 export { providerNames, type Provider } from './providers'
 
 // Picking a model picks its provider; the app's tint follows it. A view of
-// the model profiles (shared/models.ts), in picker order: `effort` is
-// whether the model takes effort levels, `fallbacks` whether Claude's
-// server-side fallback is on.
-export const chatModels = modelProfiles.map((m) => ({
-  id: m.id,
-  label: m.label,
-  provider: m.provider,
-  effort: m.effort !== null,
-  fallbacks: m.fallbacks
-}))
+// the registry (shared/models.ts), in picker order: `effort` is whether the
+// model takes effort levels, `fallbacks` whether Claude's server-side
+// fallback is on.
+export type ChatModelEntry = {
+  id: string
+  label: string
+  provider: Provider
+  effort: boolean
+  fallbacks: boolean
+}
+export const chatModels = (): ChatModelEntry[] =>
+  allProfiles().map((m) => ({
+    id: m.id,
+    label: m.label,
+    provider: m.provider,
+    effort: m.effort !== null,
+    fallbacks: m.fallbacks
+  }))
 
-export type ChatModel = ModelId
-export const providerOf = (model: string): Provider =>
-  chatModels.find((m) => m.id === model)?.provider ?? 'claude'
+// A model id, checked against the registry at run time (isChatModel): any
+// id can be stored on a chat or as the default model, and one with no
+// profile is never sent anywhere.
+export type ChatModel = string
+// The provider of a model, for the app's tint and labels. A model with no
+// profile shows as Claude's; nothing is sent for it (requests go through
+// requireProfile).
+export const providerOf = (model: string): Provider => profileOf(model)?.provider ?? 'claude'
 
 // The API a model is reached through (see providers.ts).
 export const apiOf = (model: string): ProviderApi => providers[providerOf(model)].api
@@ -44,17 +59,24 @@ export { efforts, type Effort }
 
 export type ChatSettings = { model: ChatModel; effort: Effort }
 
-export const defaultChatSettings: ChatSettings = { model: 'claude-opus-5-5', effort: 'medium' }
+export const defaultChatSettings: ChatSettings & { model: BuiltInModelId } = {
+  model: 'claude-opus-5-5',
+  effort: 'medium'
+}
 
-export const isChatModel = (id: unknown): id is ChatModel => chatModels.some((m) => m.id === id)
+// Whether Custard has a profile for this model id now.
+export const isChatModel = (id: unknown): id is ChatModel => hasProfile(id)
 export const isEffort = (e: unknown): e is Effort => efforts.includes(e as Effort)
 
 // The model and effort a chat is bound to: its own (picked in the chat, or
 // the one it last used), else the one its last request used, else the
 // default model from Settings. Chats from before Custard kept a model per
-// chat have only the last two.
+// chat have only the last two. A model with no profile stays the chat's
+// model, so the chat says so rather than moving to another model.
 export function chatSettingsOf(c: Conversation | null, fallback: ChatSettings): ChatSettings {
-  const model = [c?.model, c?.context?.model].find(isChatModel) ?? fallback.model
+  const model =
+    [c?.model, c?.context?.model].find((m): m is string => typeof m === 'string' && m !== '') ??
+    fallback.model
   const effort = isEffort(c?.effort) ? c.effort : fallback.effort
   return { model, effort }
 }
@@ -73,10 +95,12 @@ export const shownEffort = (provider: Provider, e: Effort): Effort =>
 //   no-key: the provider's key isn't saved.
 //   rejected: the last check said the provider rejected the key.
 //   removed: the last check's list didn't include this model.
+//   no-profile: Custard has no profile for the id (a chat or the default
+//   model names one that isn't in the registry).
 export type ModelAvailability = {
   id: ChatModel
   available: boolean
-  reason?: 'no-key' | 'rejected' | 'removed'
+  reason?: 'no-key' | 'rejected' | 'removed' | 'no-profile'
 }
 
 export const modes = [
@@ -110,6 +134,9 @@ export type ConversationSummary = {
   pluginId?: string
   // Skills mode: the skill (its folder in Custard/Skills) the chat works on.
   skill?: string
+  // A chat file this build can't open (see neutralChat.ts): listed as "Old
+  // format" with its title only, and never read as a chat.
+  old?: OldReason
 }
 
 // What became of one tool call. Saved as it changes, so a chat reloaded after
@@ -266,9 +293,12 @@ export type Conversation = ConversationSummary & {
   // only place the chat may write. None: the Skills hub chat, which writes
   // nothing. Fixed when the conversation starts.
   skill?: string
-  // Exactly what is sent to the API, so assistant turns keep their thinking
-  // blocks unchanged between requests.
-  messages: BetaMessageParam[]
+  // Custard's own chat format (see neutralChat.ts). Each provider's adapter
+  // converts the messages on the way out; a provider's own blocks are kept
+  // in `raw` only for that provider.
+  format: typeof CHAT_FORMAT
+  version: typeof CHAT_VERSION
+  messages: Message[]
   // By tool_use id.
   actions?: Record<string, ActionRecord>
   notices?: Notice[]
@@ -301,6 +331,17 @@ export type Conversation = ConversationSummary & {
   // notes as they were when sent, shown to the model for the rest of this
   // chat (see main/earlierChats).
   references?: ChatReference[]
+  // Context Custard added to user messages (notes about the plugins a message
+  // was about), by message index. Sent with that message every time, never
+  // shown as part of it (see main/promptCache).
+  messageContext?: MessageContext[]
+  // What the start of the last request held, so the next one can be sent
+  // the same way while the provider's prompt cache is warm (see
+  // main/promptCache).
+  promptCache?: PromptSnapshot
+  // Big tool results in messages before `before` are sent as one-line stubs
+  // (see main/clearing). The messages themselves are kept in full.
+  cleared?: { before: number; at: number }
 }
 
 export type ChatReference = {
@@ -313,6 +354,28 @@ export type ChatReference = {
   text: string
   // The note says its chat held web or plugin text (or doesn't say).
   outside: boolean
+}
+
+export type MessageContext = {
+  // Index of the user message it was added to.
+  at: number
+  // The plugin id the notes are about.
+  plugin: string
+  text: string
+}
+
+export type PromptSnapshot = {
+  // When the chat's last turn ended.
+  at: number
+  model: string
+  // Hash of everything before the messages except the deferred parts.
+  fixed: string
+  // Whether memory was on for the chat.
+  memory: boolean
+  // The memory epoch it was taken in (bumped by Forget and settings).
+  epoch: number
+  // The deferred parts as sent, in order ('' for one left out).
+  deferred: string[]
 }
 
 // Claude's compaction block is part of the assistant message at `after`, as

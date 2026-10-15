@@ -18,6 +18,9 @@
 //   fulltool   the reply fills the context window while calling a tool
 //   fallback   a fallback model takes over mid-answer
 //   compact    Claude compacts the chat, then answers
+// The same scenarios run on Sonnet 5.5 and Haiku 4.5 (claude-turn-sonnet.mjs
+// and claude-turn-haiku.mjs set CLAUDE_TURN_MODEL), each against its own
+// golden file, picked as the default model before the first message.
 // Usage, from the repo root after `npx electron-vite build`:
 //   node test/e2e/claude-turn.mjs <out> <screenshot dir> [--update]
 // with <out>/vault a copy of vault-template/. --update rewrites the golden
@@ -30,13 +33,17 @@ import http from 'http'
 import { createHash } from 'crypto'
 
 const [, , OUT, SHOTS, FLAG] = process.argv
-const GOLDEN = new URL('./claude-turn.golden.json', import.meta.url)
+const MODEL = process.env.CLAUDE_TURN_MODEL
+const GOLDEN = new URL(
+  MODEL ? `./claude-turn-${MODEL}.golden.json` : './claude-turn.golden.json',
+  import.meta.url
+)
 const check = (cond, what) => {
   console.log((cond ? '✓ ' : '✕ ') + what)
   if (!cond) process.exitCode = 1
 }
 const step = (s) => console.log('\n## ' + s)
-const CFG = OUT + '/cfg-claude-turn'
+const CFG = OUT + (MODEL ? `/cfg-claude-turn-${MODEL}` : '/cfg-claude-turn')
 const VAULT = OUT + '/vault'
 fs.rmSync(CFG, { recursive: true, force: true })
 
@@ -51,7 +58,8 @@ function stream(res, blocks, stop, { hang = false, details } = {}) {
       id: 'msg_1',
       type: 'message',
       role: 'assistant',
-      model: 'claude-opus-5-5',
+      // The model the request asked for, as the API answers.
+      model: replyModel,
       content: [],
       stop_reason: null,
       stop_sequence: null,
@@ -109,6 +117,7 @@ function stream(res, blocks, stop, { hang = false, details } = {}) {
   res.end()
 }
 
+let replyModel = 'claude-opus-5-5'
 const text = (...parts) => ({ type: 'text', parts })
 let calls = 0
 const call = () => ({ type: 'tool_use', id: `toolu_${++calls}`, name: 'vault_list', input: {} })
@@ -151,6 +160,7 @@ const server = http.createServer((req, res) => {
     }
     const s = scenarioOf(body)
     seen.push({ scenario: s, body })
+    replyModel = body.model
     const afterTool = isResults(body.messages.at(-1))
     if (s === 'plain')
       return stream(
@@ -274,7 +284,7 @@ const ids = new Map()
 const norm = (v) =>
   JSON.parse(
     JSON.stringify(v, function (k, x) {
-      if (k === 'requestId' || k === 'id' || k === 'tool_use_id') {
+      if (k === 'requestId' || k === 'id' || k === 'tool_use_id' || k === 'callId') {
         if (typeof x !== 'string') return x
         if (!ids.has(x)) ids.set(x, `#${ids.size + 1}`)
         return ids.get(x)
@@ -283,6 +293,9 @@ const norm = (v) =>
       // Background work (memory capture, the chat note) runs on its own
       // clock, apart from the turn.
       if (k === 'memory' || k === 'chatNote') return undefined
+      // The prompt-cache snapshot's memory epoch starts at the app's start
+      // time, and its hash covers the dated system prompt.
+      if ((k === 'epoch' || k === 'fixed') && 'deferred' in this) return `<${k}>`
       // The model and effort a chat keeps (Phase 6), on the saved chat
       // only; the request's own model is still compared.
       if ((k === 'model' || k === 'effort') && 'title' in this && 'mode' in this) return undefined
@@ -305,6 +318,7 @@ try {
   await w.press('input[aria-label="Claude API key"]', 'Enter')
   await w.click('button:has-text("Use an existing vault")')
   await w.waitForSelector('text=· connected')
+  if (MODEL) await w.selectOption('select[title="Default model"]', MODEL)
   await w.click('button:text-is("Done")')
 
   for (const s of [
@@ -375,7 +389,7 @@ try {
         actions: chat.actions ?? {}
       }
     })
-    await w.screenshot({ path: `${SHOTS}/claude-turn-${s}.png` })
+    await w.screenshot({ path: `${SHOTS}/claude-turn-${MODEL ? MODEL + '-' : ''}${s}.png` })
     // A fresh box for the next one.
     await w.fill('textarea', '')
   }
@@ -383,6 +397,9 @@ try {
   step('Compare with the golden record')
   const got = JSON.stringify(record, null, 1)
   fs.writeFileSync(`${OUT}/claude-turn.json`, got)
+
+  // Every request body, for the neutral-format check (test/neutral/README.md).
+  fs.writeFileSync(`${OUT}/requests.json`, JSON.stringify(seen))
   if (FLAG === '--update' || !fs.existsSync(GOLDEN)) {
     fs.writeFileSync(GOLDEN, got + '\n')
     console.log('golden record written')

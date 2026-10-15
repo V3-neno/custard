@@ -242,13 +242,19 @@ try {
 
   await send('Did spotify find what I asked for earlier?')
   await idle()
-  const sys2 = JSON.stringify(chatRequests().at(-1)?.system)
+  // Plugin notes travel with the message that named the plugin, so the
+  // system prompt (and the provider's cache of it) stays the same.
+  const msgs2 = JSON.stringify(chatRequests().at(-1)?.messages)
   check(
-    sys2.includes('<plugin-notes plugin=\\"Spotify\\"') &&
-      sys2.includes('Looked up Nils Frahm') &&
-      sys2.includes('Requested outcome: not checked') &&
-      sys2.includes('Current state in Custard: enabled'),
+    msgs2.includes('<plugin-notes plugin=\\"Spotify\\"') &&
+      msgs2.includes('Looked up Nils Frahm') &&
+      msgs2.includes('Requested outcome: not checked') &&
+      msgs2.includes('Current state in Custard: enabled'),
     'naming Spotify brings its notes from the earlier chat, with its state now'
+  )
+  check(
+    !JSON.stringify(chatRequests().at(-1)?.system).includes('<plugin-notes'),
+    'with that message, not in the system prompt'
   )
   check(summaries().length === 1, 'and asking about it is not itself summarized')
 
@@ -269,6 +275,12 @@ try {
   )
 
   step('Forget this chat, from the history')
+  const others = () => conversations().filter((c) => !c.title.startsWith('From now on I prefer'))
+  const orderBefore = others().map((c) => `${c.id}:${c.updatedAt}`).sort()
+  check(
+    others().some((c) => c.promptCache?.deferred?.some((d) => d.includes('<memory>'))),
+    'before it, other chats keep a prompt snapshot holding memory'
+  )
   await w.click('button[title="Chat history"]')
   const row = w.locator('div.group:has-text("From now on I prefer")')
   await row.hover()
@@ -285,6 +297,15 @@ try {
     'it asked first, listing the note it would delete'
   )
   check(!captures().includes(prefNote), 'the note is deleted')
+  check(
+    conversations().every((c) => !c.promptCache),
+    'no chat file keeps a prompt snapshot after the Forget'
+  )
+  check(
+    JSON.stringify(others().map((c) => `${c.id}:${c.updatedAt}`).sort()) ===
+      JSON.stringify(orderBefore),
+    "and the other chats' places in history are unchanged"
+  )
   check(captures().length === 1, "and the other chat's note is kept")
   await send('I prefer long answers again, remember that')
   await idle()
@@ -430,7 +451,7 @@ try {
   await newChat()
   await send('What happened with spotify before?')
   await idle()
-  const sys3 = JSON.stringify(chatRequests().at(-1)?.system)
+  const sys3 = JSON.stringify(chatRequests().at(-1)?.messages)
   check(
     sys3.includes('Current state in Custard: turned off in Custard (its notes are kept)'),
     'turning Spotify off reaches the model from the app'

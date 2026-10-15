@@ -68,6 +68,11 @@ export class Scheduler {
     return this.active.has(id)
   }
 
+  // Whether any run is going on now.
+  busy(): boolean {
+    return this.active.size > 0
+  }
+
   // Looks for slots that fell due since the last look.
   tick(): void {
     const now = this.d.now()
@@ -184,7 +189,11 @@ export class Scheduler {
       startedAt: this.d.now(),
       status: 'running',
       calls: [],
-      changes: []
+      changes: [],
+      // What it runs with, as the automation is now: a later edit doesn't
+      // change what this record says.
+      model: a.model,
+      ...(a.effort ? { effort: a.effort } : {})
     }
     addRun(this.d.dir, id, run)
     this.active.add(id)

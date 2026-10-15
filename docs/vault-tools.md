@@ -8,7 +8,8 @@ temporary folder and by an end-to-end test against a mock provider.
 **Editing existing notes: only in folders the user allows (2026-10-12).**
 By default the model can only create new notes, and each one needs the user's
 approval. In Settings → Obsidian vault → **Editable folders** the user can allow
-a folder with a mode: create, append or edit. Inside it, Claude changes notes
+a folder with a level: New notes (`create`), Add to end (`append`) or Edit
+text (`edit`). Inside it, Claude changes notes
 without a card for each change. Nothing is ever overwritten wholesale, renamed
 or deleted. See "Editing in allowed folders" below.
 
@@ -118,6 +119,26 @@ offset to continue from, and the next part starts after them. So the caller asks
 for a part that fits (`partSizeFor` in chat; a run reads again with a smaller
 part until the escaped result fits), and no part is cut.
 
+**Finding instead of reading on (`find`, `src/main/textFind.ts`).** `vault_read` and
+`web_read` take an optional `find`: a few words saying what the model is looking
+for. On a note or page longer than 6,000 characters, and without an `offset`, the
+result is then:
+- the sections that match best, about 6,000 characters at most. Each section is
+  the text's own words with its character range and the heading it sits under;
+- the text's headings with their offsets;
+- for a web page, the links whose text or address matches.
+
+The model reads around a part with the usual `offset` (and `version` for a note).
+
+Sections follow the Markdown headings and paragraphs, about 1,200 characters each.
+They are ranked with BM25 over plain words, ignoring case and accents. A heading's
+words count double in the section it starts, and a section holding the whole query,
+or more of its words, ranks higher. Sections scoring under a quarter of the best
+are left out.
+
+This matches words, not meaning. When nothing matches, the result says so and
+reads from the start as without `find`. A short text is returned as it is.
+
 **Every cut says so.** A result Custard shortens ends with a note saying what was
 left out: the chat and run caps, a plugin result over 50,000 characters, `fs_read`,
 `fs_list`, `fs_search` (30 matches, or 5,000 files scanned), a web search (results
@@ -172,6 +193,14 @@ folders can be allowed is the user's choice: core has no list. Modes nest:
 - **create**: new notes, with no approval card, never overwriting;
 - **append**: also add text to the end of an existing note (`vault_append`);
 - **edit**: also change an existing note in place (`vault_edit`).
+
+In Settings each level is a pill button, and the line under the picked one
+says what it includes. A folder's row has the same buttons, so its level is
+changed in place with one click (saved at once, no confirmation). The add row
+goes back to Add to end after every Allow, accepted or refused. A folder typed
+with trailing dots or spaces (`Notes.`) is the same folder as `Notes`.
+`settings.json` still stores one `{ folder, mode }` per folder, with the mode
+ids above; the automation form shows the same level names.
 
 The most specific folder wins. `vault_append` and `vault_edit` are offered
 only when some folder allows them, and a call outside every allowed folder is
@@ -297,7 +326,7 @@ the same turn.
 - nothing in the vault changes.
 
 **Editing** (`src/main/vault/edit.test.ts`, `src/shared/vaultGrants.test.ts`,
-`test/e2e/vault-edit.mjs`): grants and protected places, every edit type,
+`test/e2e/vault-edit.mjs`, `test/e2e/folder-levels.mjs`): grants and protected places, every edit type,
 atomic failure, stale version, frontmatter, links, limits, records and undo; and
 in the app, no card inside an allowed folder, refusal outside, Settings add and
 remove, Recent changes and Undo, and the outside-text rule (cards with the diff

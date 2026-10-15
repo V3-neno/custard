@@ -1,6 +1,6 @@
 # Providers
 
-Custard talks to each provider through one of two APIs: Anthropic's Messages API (Claude) or the OpenAI Responses API (OpenAI, DeepSeek). Each provider is one entry in `src/shared/providers.ts`; its adapter is in `src/main/adapters/registry.ts`, its key file in `src/main/providers.ts` and its address in `src/main/endpoints.ts`. Each of its models has one profile in `src/shared/models.ts`: label, context limits, prices, thinking, effort levels, fallbacks, files, hosted search and live evidence. `chatModels`, `CONTEXT_LIMITS` and `PRICES` are views of those profiles. TypeScript flags the other tables that need an entry: attachment rules (`attachments/request.ts`), Design's chat-output note (`design/capabilities.ts`), the orb colours (`Orb.tsx`) and the context minimum (`MIN_TRIGGER`). The theme is a `data-provider` block in `src/renderer/src/assets/main.css`, which TypeScript can't check.
+Custard talks to each provider through one of two APIs: Anthropic's Messages API (Claude) or the OpenAI Responses API (OpenAI, DeepSeek). Each provider is one entry in `src/shared/providers.ts`; its adapter is in `src/main/adapters/registry.ts`, its key file in `src/main/providers.ts` and its address in `src/main/endpoints.ts`. Each of its models has one profile in `src/shared/models.ts`: label, context limits, prices, thinking, effort levels, fallbacks, files, hosted search and live evidence. At run time main holds them in a registry (`src/main/modelRegistry.ts`), together with any models the user adds or changes in models.json in Custard's data folder (see [models-file.md](models-file.md); built-in providers only, read at startup and on Reload in Settings). The renderer copies the registry over IPC before it draws; `chatModels()`, `limitsFor`, prices and capabilities read it. A model id with no profile in the registry is never sent anywhere: the chat, Settings → Default model and new chats show "can't be used right now. Its profile is missing" with Pick a different model, main refuses the send, and automations stop as before. TypeScript flags the other tables that need an entry: attachment rules (`attachments/request.ts`), Design's chat-output note (`design/capabilities.ts`), the orb colours (`Orb.tsx`) and the context minimum (`MIN_TRIGGER`). The theme is a `data-provider` block in `src/renderer/src/assets/main.css`, which TypeScript can't check.
 
 To add a provider, follow [adding-a-provider.md](adding-a-provider.md): the steps in order, a template adapter (`src/main/adapters/template.ts`) and walkthroughs for Qwen and Claude on Amazon Bedrock.
 
@@ -10,7 +10,7 @@ A packaged build always sends a provider's requests to its official address. A d
 
 Each provider has an adapter in `src/main/adapters/` (the interface is in `types.ts`, the registry in `registry.ts`). Claude uses `anthropic.ts`. OpenAI and DeepSeek share `responses.ts`, which reads each provider's flags from `src/shared/providers.ts`. Everything that calls a model goes through the adapter: chat turns (`streamMessage`), one-shot calls (`sendMessage`: captures, chat notes, Continue in a new chat, automation steps) and web searches (`webSearch`). Vault tools, plugins, approvals and the chat guard sit above it and never ask which provider is answering.
 
-- **Automation steps** (`automations/model.ts`) are one `sendMessage` call each, with the run's tools and no retries. Claude waits for the reply over a stream with a 16,000-token limit; a Responses provider sends one plain request with no limit. These are the requests the steps sent before they moved (`test/e2e/provider-requests.mjs` compares them). What a reply means for the run is the same for every provider: declined, too long, or the provider couldn't finish ends the run with the reason; cut off while calling a tool ends it without running the call; cut off with text only keeps the text, and the run log says it ended early at the output limit.
+- **Automation steps** (`automations/model.ts`) are one `sendMessage` call each, with the run's tools and no retries. Claude waits for the reply over a stream with a 64,000-token limit (thinking and text together), and gets adaptive thinking when the model's profile thinks; a Responses provider sends one plain request with no limit. The automation's effort, when one is set, is sent as the model's profile says (none for Haiku 4.5). `test/e2e/provider-requests.mjs` records these requests, with effort set and not set. What a reply means for the run is the same for every provider: declined, too long, or the provider couldn't finish ends the run with the reason; cut off while calling a tool ends it without running the call; cut off with text only keeps the text, and the run log says it ended early at the output limit.
 - **Web search** (`web/search.ts`) runs in a call of its own holding only the query: Claude's hosted search tool for Claude, OpenAI's `web_search` for OpenAI. DeepSeek has no hosted search, so its adapter answers that search isn't available; it is never offered the `web_search` tool, and the capability matrix says so. Whether a model has search is still decided in one place (`webTools`, from the provider's profile and `claudeSearchTool`), which both the tool list and the matrix read.
 - **A declined one-shot call.** OpenAI and DeepSeek decline with a refusal part; `sendMessage` reports it as `refused`, as it does for Claude's refusal stop, so a refusal is never kept as a summary or a step's answer. Memory captures, chat notes (and their titles) and Continue all go through two summarizers (`memory/summarize.ts`, `handoff.ts`) that throw on `refused`, `cut-off`, `too-long` and `failed`; each caller treats the throw as "no summary" and writes nothing. In a chat, a refusal part is the model's own words and is shown as its reply; Claude's refusal has no words, so Custard shows a notice.
 
@@ -50,21 +50,23 @@ Each chat keeps its own model and effort (`model` and `effort` on the saved chat
 - **Default model.** Settings → General → Default model is what a new chat starts on. Changing it changes no existing chat. Continue and Handoff start the new chat on the model of the one they carry on.
 - **Older chats.** A chat saved before this keeps the model its last request used (`context.model`), or the default if it has none.
 - **Can't be used now.** Worked out from what Custard already knows, with no request: no key saved for the provider (`no-key`), the last Save/Refresh check had the key rejected (`rejected`), or the last successful check didn't list the model as usable with this key (`removed`). A check that couldn't reach the provider changes nothing. The chat then shows a notice above the message box with Pick a different model, and nothing can be sent until another model is picked. The picker greys such models out with the reason. With no keys at all, the notice points to Settings.
-- **Effort.** The chat's effort goes into every request (`streamMessage` and `sendMessage`). A model that takes none (Haiku 4.5) gets none, without a notice.
+- **Effort.** The chat's effort goes into every chat request (`streamMessage`). One-shot calls (`sendMessage`) send the effort their caller gives: summaries pass `low`, automation steps their own effort when one is set, and nothing else passes one. A model that takes none (Haiku 4.5, the Claude summary model) gets none, without a notice. Claude's `sendMessage` also turns adaptive thinking on for a model whose profile thinks; the chat turn does too, with `display: summarized`, which the one-shot call leaves out.
 - **Providers in Settings.** After a successful check, each provider's section lists Available models; a model the key can't use is struck through with "Your key can't use this model".
 
 ### Switching provider in a chat
 
-Chats are stored in one format, Anthropic's message blocks, and each adapter converts to and from it on every request. So a chat started with one provider can go on with another, and nothing about the stored chat changes when you switch.
+Chats are stored in Custard's own format (`format: "custard-chat"`, `version: 1`; types in `src/shared/neutralChat.ts`). Each message is a list of parts: text, tool calls, tool results, Custard's note after a stopped round, and display copies of thinking, fallback markers and compaction. An assistant message says which provider and model wrote it (`by`). Where a provider's own blocks say more than the parts rebuild (Claude's thinking with its signature, compaction, fallback markers, fields the API adds), they are kept as `raw`, and only that provider is sent them. Each adapter converts the stored chat on every request (`toClaudeHistory` in `adapters/anthropicNeutral.ts`, `toResponsesInput` in `adapters/responsesNeutral.ts`) and converts its reply back (`fromClaudeReply`, `fromResponsesReply`). So a chat started with one provider can go on with another, and nothing about the stored chat changes when you switch.
+
+A chat file without that format and a known version (a chat saved before B3, one from a newer Custard, or a file that can't be read) is an old chat. History lists it as "Old format" by title; opening it shows that it can't be opened and offers Delete; nothing sends from it or reads it as a chat. History's "Delete all old chats" removes them. There is no migration.
 
 When the history goes to a provider other than the one that wrote it:
 
-- Blocks only the original provider can read are dropped: Claude's thinking (and redacted thinking), Claude's fallback markers, and compaction blocks of either provider. Reasoning from a Responses provider is never stored, so it never reaches another provider.
+- Blocks only the original provider can read are not sent: Claude's thinking (and redacted thinking), Claude's fallback markers, and compaction of either provider. They are in `raw`, which goes back only to its own provider. Reasoning from a Responses provider is never stored, so it never reaches another provider.
 - Everything else is kept. Text stays text, and tool calls and their results become the other API's function calls and outputs.
 - A tool call to a tool this chat isn't offered now is sent as plain text (`history.ts`).
 - Attached files are sent again in the new provider's form, or refused with a note when it can't take them (a PDF to DeepSeek, say).
 
-A provider-neutral stored format was kept as a possible cleanup if the round-trip test showed problems. The test (`test/e2e/round-trip.mjs`: Claude, then DeepSeek, then OpenAI, then Claude, with tool calls) showed none against stand-ins, so it isn't built. Claude's thinking being accepted back after other providers' turns is untested live.
+The round-trip test (`test/e2e/round-trip.mjs`: Claude, then DeepSeek, then OpenAI, then Claude, with tool calls) pins what each provider is sent, against stand-ins. The switch to this format (B3) changed no request: every golden's request hashes are the same as before it, and `src/main/adapters/neutral.test.ts` checks the converters against the pre-B3 path for every stored history in the goldens and the unit tests. Claude's thinking being accepted back after other providers' turns is untested live.
 
 ## Registry design
 
@@ -73,14 +75,14 @@ A provider-neutral stored format was kept as a possible cleanup if the round-tri
 There is no discovery at runtime. A provider exists because it has an entry in `providers` (`src/shared/providers.ts`); `Provider` is that object's keys, and `providerIds` its order (the picker's and Settings' order). Every table keyed by provider is a `Record<Provider, …>`, so a new entry fails the typecheck until it has an adapter (`registry.ts`), a key file, an address, attachment rules, Design's note, orb colours and a context minimum.
 
 - `adapterFor(provider)`: the adapter for a provider.
-- `adapterForModel(model)`: looks the model up in `chatModels` by id; an unknown id falls back to Claude.
+- `adapterForModel(model)`: the adapter of the model's provider, from its profile; an id with no profile throws (`NoProfileError`) rather than going to Claude.
 - `allModels()`: every provider's own models, from `listModels(null)`. No request, no key.
 
 Plugins can't add providers, and Settings can't add an address.
 
 ### How availability is worked out
 
-`availabilityFrom` in `adapters/checks.ts`, for each model in `chatModels`, from two local facts only (no request):
+`availabilityFrom` in `adapters/checks.ts`, for each model in `chatModels()`, from two local facts only (no request):
 
 1. Is a key saved for its provider? No: `no-key`.
 2. What did the last Save/Refresh check say (`model-checks.json`)? Key rejected (401/403): `rejected`. A successful list without this model: `removed`. Couldn't reach the provider, or never checked: available.
@@ -98,7 +100,7 @@ The chat picker, the chat's "can't be used now" notice and the Automations picke
 | Automations: the picker, the run loop and the run log (`automations/run.ts`)              | Each step's request (`sendMessage` with tools)                                        |
 | Summaries: evidence, schemas, what gets written (`memory/`, `handoff.ts`, `chatNotes.ts`) | The summary model (`summaryModel`) and structured output on the wire                  |
 | Whether search is offered (`webTools`) and the search tool's results to the model         | Running the search (`webSearch`)                                                      |
-| The stored chat format and `history.ts` (tool calls a chat can't use become text)         | Converting that format to the provider's input and back                               |
+| The stored chat format (`neutralChat.ts`) and `history.ts` (calls to tools not offered become text) | Converting that format to the provider's input (`toClaudeHistory`, `toResponsesInput`) and its reply back (`fromClaudeReply`, `fromResponsesReply`) |
 | Cost meter and usage log (`usage.ts`)                                                     | Reading the provider's usage (`claudeParts`, `fromOpenAI`) and its prices             |
 
 ## Known wrinkles
@@ -106,7 +108,7 @@ The chat picker, the chat's "can't be used now" notice and the Automations picke
 Stated plainly so nobody has to rediscover them.
 
 - **Search: one decision, two runners.** Whether a model has hosted search, and which, is its profile's `search` (`hasHostedSearch` in `shared/models.ts`); `webTools`, the capability matrix, `claudeSearchTool` and the Responses adapter all read it. The adapter's `webSearch()` runs the search, so a provider with a new kind of hosted search still needs a runner.
-- **Chats are stored in Anthropic's block format.** Every other provider is a conversion on each request (`toInput`/`toBlocks` in `openai.ts`). A new Anthropic block type needs a decision in every converter; a provider-specific item (OpenAI's encrypted reasoning, DeepSeek's reasoning text) is never stored, so it can't reach another provider, and is only passed back within a turn.
+- **Chats are stored in Custard's format, with Claude's own blocks kept as `raw`.** Each provider is a conversion on each request. A new Claude block type lands in `raw` and needs a decision only in `fromClaudeReply` (whether it shows as a part). A provider-specific item (OpenAI's encrypted reasoning, DeepSeek's reasoning text) is never stored, so it can't reach another provider, and is only passed back within a turn. One-shot calls (`sendMessage`: summaries, automation steps) still build Claude-shaped messages and convert them with `toInput`.
 - **Effort levels are profile data.** Each model's profile lists its levels: the picker's label, Settings' label, the stored value and what is sent, plus the level any other stored value shows as. DeepSeek's Fast, Balanced and Thorough store and send low, high and max (Neno's call, 2026-10-13). The picker shows one row of buttons per provider, so a provider's models must share their levels (a test checks it).
 - **The Claude adapter is hard-wired to `claude`.** Its id, its key check and `anthropicEndpoint()` say `claude`. A second Anthropic-API provider (Bedrock, Vertex) means making it take an id and a client first.
 - **One key string per provider.** `apiKey.ts`, the key IPC, Settings and `OneShotRequest.apiKey` all hold one string. Providers that need a region, an account or a key pair don't fit without changing that.
@@ -128,7 +130,7 @@ Stated plainly so nobody has to rediscover them.
 
 **Weak points.**
 
-1. The stored format is Anthropic's, so every other provider depends on two converters staying in step with Anthropic's block types.
+1. Fixed in B3: the stored format is Custard's own, so a provider depends only on its own converter. Claude's blocks are still kept verbatim in `raw` for Claude.
 2. Provider names still appear in code: Claude's adapter and address, and `providerOf` falling back to Claude. (DeepSeek's effort and `claudeSearchTool`'s id patterns are profile data since model profiles Phase A2.)
 3. Fixed: a model's facts were spread over six files; since Phase A2 they are one profile per model in `src/shared/models.ts`.
 4. `runOpenAI` (`openai.ts`) serves two providers through flags; each quirk of a third adds a flag there.
@@ -147,7 +149,6 @@ Stated plainly so nobody has to rediscover them.
 - "Has hosted search" as a pure function in the profile layer, read by both `webTools` and the adapters, so search lives in one place.
 - Credentials as a per-provider shape (key, or key plus region, or an AWS profile), stored the same encrypted way.
 - An adapter conformance suite: the golden scenarios as one harness each adapter runs against its stand-in, instead of one script per API.
-- A provider-neutral stored format, only if a provider appears that can't be converted cleanly from Anthropic's blocks.
 
 ## DeepSeek
 

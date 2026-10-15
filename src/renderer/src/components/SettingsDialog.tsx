@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   providerIds,
   providerInfo,
@@ -23,7 +23,10 @@ import DesignTab from './settings/DesignTab'
 import CapabilitiesTab from './settings/CapabilitiesTab'
 import EditableFolders from './settings/EditableFolders'
 import Automations from './settings/Automations'
+import ModelsFile from './settings/ModelsFile'
 import { cleanError, primary, secondary } from './settings/ui'
+import Select from './ui/Select'
+import PillGroup from './ui/PillGroup'
 
 type Props = {
   onClose: () => void
@@ -197,10 +200,14 @@ function KeySection({
 // with (or switched to); changing this changes no existing chat.
 function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JSX.Element {
   const [s, setS] = useState<ChatSettings | null>(null)
+  const modelBox = useRef<HTMLSelectElement>(null)
   useEffect(() => {
     window.custard.settings.get().then(setS)
   }, [])
   if (!s) return <section className="mb-6" />
+  // A stored default with no profile is kept, not replaced: Settings and
+  // every new chat say so until another model is picked.
+  const known = isChatModel(s.model)
   // The default model's effort levels, labelled as Settings always has
   // them (see settingsLabel in shared/models.ts).
   const levels = profileOf(s.model)?.effort ?? null
@@ -208,52 +215,70 @@ function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JS
     setS(next)
     window.custard.settings.set(next).then(onChanged)
   }
-  const select =
-    'rounded-lg border border-forge-700 bg-forge-900 px-2 py-1.5 text-sm outline-none focus:border-molten-500/60'
   return (
     <section className="mb-6" data-default-model>
       <h3 className="mb-1 text-sm font-medium">Default model</h3>
       <p className="mb-3 text-sm text-ash-300">
         New chats start on it. Each chat keeps its own model; pick another under the message box.
       </p>
-      <div className="flex gap-2">
-        <select
-          title="Default model"
-          className={`${select} flex-1`}
-          value={s.model}
-          onChange={(e) => {
-            const id = e.target.value
-            if (!isChatModel(id)) return
-            save({ model: id, effort: shownLevel(profileOf(id)?.effort ?? null, s.effort) })
-          }}
+      {!known && (
+        <p
+          role="status"
+          data-default-model-notice="no-profile"
+          className="mb-3 rounded-2xl border border-forge-700 bg-forge-900 px-4 py-2.5 text-sm text-ash-300"
         >
-          {providerIds.map((p) => (
-            <optgroup key={p} label={providerNames[p]}>
-              {chatModels
-                .filter((m) => m.provider === p)
-                .map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-            </optgroup>
-          ))}
-        </select>
-        {levels && (
-          <select
-            title="Default effort"
-            className={select}
-            value={shownLevel(levels, s.effort)}
-            onChange={(e) => isEffort(e.target.value) && save({ ...s, effort: e.target.value })}
+          {s.model} can&apos;t be used right now. Its profile is missing, so new chats can&apos;t be
+          sent until you pick a different model.{' '}
+          <button
+            onClick={() => modelBox.current?.focus()}
+            className="text-molten-300 hover:underline"
           >
-            {levels.levels.map((l) => (
-              <option key={l.value} value={l.value}>
-                {l.settingsLabel}
-              </option>
-            ))}
-          </select>
+            Pick a different model
+          </button>
+        </p>
+      )}
+      <Select
+        ref={modelBox}
+        title="Default model"
+        aria-label="Default model"
+        className="w-full"
+        value={s.model}
+        onChange={(e) => {
+          const id = e.target.value
+          if (!isChatModel(id)) return
+          save({ model: id, effort: shownLevel(profileOf(id)?.effort ?? null, s.effort) })
+        }}
+      >
+        {!known && (
+          <option value={s.model} disabled>
+            {s.model} (no profile)
+          </option>
         )}
-      </div>
+        {providerIds.map((p) => (
+          <optgroup key={p} label={providerNames[p]}>
+            {chatModels()
+              .filter((m) => m.provider === p)
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+          </optgroup>
+        ))}
+      </Select>
+      {levels && (
+        <p className="mt-3 mb-1 text-xs text-ash-400" aria-hidden>
+          Default effort
+        </p>
+      )}
+      {levels && (
+        <PillGroup
+          label="Default effort"
+          options={levels.levels.map((l) => ({ value: l.value, label: l.settingsLabel }))}
+          value={shownLevel(levels, s.effort)}
+          onChange={(e) => isEffort(e) && save({ ...s, effort: e })}
+        />
+      )}
     </section>
   )
 }
@@ -366,6 +391,8 @@ function MemorySection(): React.JSX.Element {
 
 function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('general')
+  // Bumped by Reload of the models file, so the model lists read it again.
+  const [modelsVersion, setModelsVersion] = useState(0)
   const [vault, setVault] = useState<VaultInfo>(null)
 
   useEffect(() => {
@@ -440,7 +467,13 @@ function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Eleme
               Keys are encrypted with Windows secure storage and stay on this computer. Pick a model
               from any provider under the message box.
             </p>
-            <DefaultModelSection onChanged={onChanged} />
+            <DefaultModelSection key={modelsVersion} onChanged={onChanged} />
+            <ModelsFile
+              onReloaded={() => {
+                setModelsVersion((n) => n + 1)
+                onChanged()
+              }}
+            />
             {providerIds.map((p) => (
               <KeySection key={p} provider={p} onChanged={onChanged} />
             ))}

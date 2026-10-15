@@ -300,6 +300,41 @@ describe('Run now and closing', () => {
     expect(r.status).toBe('failed')
     expect(r.reason).toMatch(/closed/)
   })
+  // Automation thinking, Phase 2: the record says what the run started with.
+  it('a run record keeps the model and effort the run started with', async () => {
+    const list = [make({ effort: 'high' })]
+    const t = setup(list, '2026-03-01T07:00:00Z')
+    t.s.runNow('a1')
+    await t.s.idle()
+    // Changed after the run: the record still says what it ran with.
+    list[0] = make({ model: 'gpt-6-astra', effort: 'low' })
+    const [r] = loadRuns(dir, 'a1').runs
+    expect([r.status, r.model, r.effort]).toEqual(['completed', 'claude-opus-5-5', 'high'])
+  })
+  it('with no effort set, the record has the model and no effort', async () => {
+    const t = setup([make()], '2026-03-01T07:00:00Z')
+    t.s.runNow('a1')
+    await t.s.idle()
+    const [r] = loadRuns(dir, 'a1').runs
+    expect(r.model).toBe('claude-opus-5-5')
+    expect('effort' in r).toBe(false)
+  })
+  it('records written before model and effort were kept still load as they were', () => {
+    const old = {
+      id: 'r0',
+      automationId: 'a1',
+      kind: 'scheduled' as const,
+      slot: '2026-03-01T08:00',
+      startedAt: 1,
+      endedAt: 2,
+      status: 'completed' as const,
+      calls: [{ label: 'Listed the vault', outcome: 'completed' }],
+      changes: [],
+      summary: 'Done.'
+    }
+    saveRuns(dir, 'a1', { state: { failures: 0 }, runs: [old] })
+    expect(loadRuns(dir, 'a1').runs).toEqual([old])
+  })
   it('a deleted automation queued to run does not run', async () => {
     const list = [make()]
     const t = setup(list, '2026-03-01T07:00:00Z')
@@ -353,6 +388,22 @@ describe('checkAutomation', () => {
       limits: { runsPerDay: 9999, toolCalls: -4, minutes: 'x' }
     })
     expect(c.ok && c.automation.limits).toMatchObject({ runsPerDay: 96, toolCalls: 1, minutes: 5 })
+  })
+  // Automation thinking, Phase 2: effort is kept only as one of the five
+  // levels; anything else is dropped and the automation still loads.
+  it('keeps a valid effort and drops any other value', () => {
+    for (const e of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      const c = checkAutomation({ ...base, effort: e })
+      expect(c.ok && c.automation.effort).toBe(e)
+    }
+    for (const e of ['High', 'none', 'fast', '', 3, null, true, { level: 'high' }]) {
+      const c = checkAutomation({ ...base, effort: e })
+      expect(c.ok).toBe(true)
+      expect(c.ok && 'effort' in c.automation).toBe(false)
+    }
+    // None set (every automation saved before effort existed).
+    const old = checkAutomation(base)
+    expect(old.ok && 'effort' in old.automation).toBe(false)
   })
   it('sorts and dedupes times and days', () => {
     const c = checkAutomation({ ...base, times: ['19:00', '07:30', '19:00'], days: [15, 1, 15] })

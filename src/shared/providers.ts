@@ -19,6 +19,9 @@ export type ResponsesFeatures = {
   encryptedReasoning: boolean
   // The input-token counting endpoint (responses.inputTokens.count).
   tokenCount: boolean
+  // prompt_cache_key: requests with the same key are routed to the same
+  // prompt cache, so a chat's repeated prefix is read from it more often.
+  promptCacheKey: boolean
 }
 
 export type ProviderInfo = {
@@ -65,7 +68,8 @@ export const providers = {
     responses: {
       reasoningSummary: true,
       encryptedReasoning: true,
-      tokenCount: true
+      tokenCount: true,
+      promptCacheKey: true
     }
   },
   // DeepSeek's Responses API (api-docs.deepseek.com, checked 2026-10-12):
@@ -85,7 +89,8 @@ export const providers = {
     responses: {
       reasoningSummary: false,
       encryptedReasoning: false,
-      tokenCount: false
+      tokenCount: false,
+      promptCacheKey: false
     }
   }
 } as const satisfies Record<string, ProviderInfo>
@@ -105,7 +110,8 @@ export const responsesFeatures = (p: Provider): ResponsesFeatures =>
   providerInfo(p).responses ?? {
     reasoningSummary: false,
     encryptedReasoning: false,
-    tokenCount: false
+    tokenCount: false,
+    promptCacheKey: false
   }
 
 export const providerNames = Object.fromEntries(

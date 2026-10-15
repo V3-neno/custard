@@ -8,7 +8,7 @@ import type { AuthResult, ModelListing } from './types'
 // The models Custard has a profile for, for one provider, in picker order,
 // not checked against the provider.
 export const knownModels = (provider: Provider): ListedModel[] =>
-  chatModels
+  chatModels()
     .filter((m) => m.provider === provider)
     .map((m) => ({ ...modelInfo(m.id)!, available: 'unchecked' as const }))
 

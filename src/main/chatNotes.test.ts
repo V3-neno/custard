@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { said, user } from '../../test/neutral/builders'
 import {
   existsSync,
   mkdirSync,
@@ -37,14 +38,16 @@ const newChat = (id = 'chat-1234abcd', title = 'Evening music'): Conversation =>
   id,
   mode: 'chat',
   title,
+  format: 'custard-chat',
+  version: 1,
   createdAt: new Date(2026, 9, 12, 9).getTime(),
   updatedAt: 0,
   messages: []
 })
 
 function talk(c: Conversation, text: string): void {
-  c.messages.push({ role: 'user', content: text })
-  c.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'Sure.' }] })
+  c.messages.push(user(text))
+  c.messages.push(said('Sure.'))
 }
 
 function notes(extra: Partial<ChatNoteDeps> = {}): ChatNotes {

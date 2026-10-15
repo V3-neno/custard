@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { assistant, said, user } from '../../../test/neutral/builders'
+import { toolResults } from '../../shared/neutralChat'
 import {
   existsSync,
   mkdirSync,
@@ -28,26 +30,22 @@ type Act = { name: string; status: ActionStatus; result?: string; write?: boolea
 
 let seq = 0
 function turn(c: Conversation, request: string, acts: Act[] = [], answer = 'Done.'): void {
-  c.messages.push({ role: 'user', content: request })
+  c.messages.push(user(request))
   if (acts.length) {
     const ids = acts.map(() => `tu_${++seq}`)
-    c.messages.push({
-      role: 'assistant',
-      content: acts.map((a, i) => ({
-        type: 'tool_use',
-        id: ids[i],
-        name: a.name,
-        input: { secret: 'RAW-INPUT' }
-      }))
-    })
-    c.messages.push({
-      role: 'user',
-      content: acts.map((a, i) => ({
-        type: 'tool_result',
-        tool_use_id: ids[i],
-        content: a.result ?? ''
-      }))
-    })
+    c.messages.push(
+      assistant(
+        acts.map((a, i) => ({
+          type: 'tool_call',
+          id: ids[i],
+          name: a.name,
+          input: { secret: 'RAW-INPUT' }
+        }))
+      )
+    )
+    c.messages.push(
+      toolResults(acts.map((a, i) => ({ callId: ids[i], text: a.result ?? '', isError: false })))
+    )
     c.actions ??= {}
     acts.forEach((a, i) => {
       c.actions![ids[i]] = {
@@ -60,13 +58,15 @@ function turn(c: Conversation, request: string, acts: Act[] = [], answer = 'Done
       }
     })
   }
-  c.messages.push({ role: 'assistant', content: [{ type: 'text', text: answer }] })
+  c.messages.push(said(answer))
 }
 
 const newChat = (id = 'chat-1', title = 'Spotify test'): Conversation => ({
   id,
   mode: 'chat',
   title,
+  format: 'custard-chat',
+  version: 1,
   createdAt: 0,
   updatedAt: 0,
   messages: []

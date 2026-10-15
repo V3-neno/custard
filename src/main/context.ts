@@ -2,7 +2,7 @@ import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { providerOf, type Provider } from '../shared/chat'
-import { modelProfiles, type ModelProfile } from '../shared/models'
+import { builtInProfiles, profileOf, type ModelProfile } from '../shared/models'
 
 // How much of a model's context window a request may use, checked before
 // every model call so a long chat stops cleanly instead of failing at the
@@ -19,15 +19,22 @@ export type ContextLimits = {
   compaction: boolean
 }
 
-// Each model's limits, from its profile (shared/models.ts).
+const limitsOf = (m: ModelProfile): ContextLimits => ({
+  window: m.limits.window,
+  maxOutput: m.limits.maxOutput,
+  compaction: m.compaction
+})
+// The built-in models' limits, as the table they used to be (tests compare
+// them with it).
 export const CONTEXT_LIMITS: Record<string, ContextLimits> = Object.fromEntries(
-  (modelProfiles as readonly ModelProfile[]).map((m) => [
-    m.id,
-    { window: m.limits.window, maxOutput: m.limits.maxOutput, compaction: m.compaction }
-  ])
+  (builtInProfiles as readonly ModelProfile[]).map((m) => [m.id, limitsOf(m)])
 )
 const FALLBACK: ContextLimits = { window: 200_000, maxOutput: 64_000, compaction: false }
-export const limitsFor = (model: string): ContextLimits => CONTEXT_LIMITS[model] ?? FALLBACK
+// A model's limits, from its profile in the registry (shared/models.ts).
+export const limitsFor = (model: string): ContextLimits => {
+  const m = profileOf(model)
+  return m ? limitsOf(m) : FALLBACK
+}
 
 // What a reply may use (Custard's max_tokens), kept free in every request.
 export const OUTPUT_RESERVE = 64_000
@@ -37,8 +44,14 @@ export const MARGIN = 0.05
 export const WARN_AT = 0.75
 // Below this share an estimate is enough; above it, the provider counts.
 export const COUNT_AT = 0.5
-// Compaction starts at this many input tokens on a large model.
-export const COMPACT_TRIGGER = 400_000
+// Compaction starts at this many input tokens on a large model. Every
+// request sends the whole history, so each message near the trigger is
+// billed for all of it: a cache read when the cache is warm, a full write
+// after a pause of over five minutes (about $0.38 at 150,000 tokens on
+// Sonnet 5.5, $1 at 400,000). 150,000 is also Claude's own default.
+// Lower would compact more often, and each compaction is a model call
+// whose summary loses detail.
+export const COMPACT_TRIGGER = 150_000
 // Smallest trigger each provider accepts (Claude: 50,000; OpenAI's
 // compact_threshold: 1,000).
 const MIN_TRIGGER: Record<Provider, number> = { claude: 50_000, openai: 1_000, deepseek: 1_000 }
