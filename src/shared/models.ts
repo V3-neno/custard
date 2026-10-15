@@ -56,11 +56,17 @@ export type ModelProfile = {
   files: { images: boolean; pdf: boolean; imageTokens: ImageTokens }
   search: HostedSearch
   // Seen working in a live test, rather than only documented (Settings →
-  // Capabilities marks these `live`). Only tests recorded on a known model.
+  // Capabilities marks these `live`). Only tests recorded on a known model;
+  // never from the models file.
   live?: Capability[]
+  // Where the profile came from: absent for a built-in one; `file` for a
+  // model the user's models file adds; `customised` for a built-in one the
+  // file changes, with the fields whose values it changed (main/modelsFile).
+  origin?: 'file' | 'customised'
+  changed?: string[]
 }
 
-const EFFORT_LABELS: Record<Effort, string> = {
+export const EFFORT_LABELS: Record<Effort, string> = {
   low: 'Low',
   medium: 'Medium',
   high: 'High',
@@ -238,6 +244,18 @@ export const builtInProfiles = [
     live: ['vision', 'json_schema']
   }
 ] as const satisfies readonly ModelProfile[]
+
+// What Settings lists about the user's models file (main/modelsFile.ts).
+//   missing: there is no file; empty: it has nothing in it; ok: it was read
+//   (each entry loaded or rejected); error: it couldn't be used at all, so
+//   no entry from it is loaded.
+export type ModelsFileReport = {
+  path: string
+  status: 'missing' | 'empty' | 'ok' | 'error'
+  error?: string
+  loaded: { id: string; label: string; provider: Provider; origin: 'file' | 'customised' }[]
+  rejected: { index: number; id?: string; reason: string }[]
+}
 
 export type BuiltInModelId = (typeof builtInProfiles)[number]['id']
 

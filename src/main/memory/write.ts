@@ -10,6 +10,7 @@ import {
   type Guard
 } from '../fsafe'
 import { resolveInVault, safeName } from './paths'
+import { bumpMemoryEpoch } from '../promptCache'
 
 // Where automatic memory goes. Each capture is a new note, created only if
 // nothing has that name yet, and Custard never opens it for writing again.
@@ -263,6 +264,8 @@ export function chatCaptures(vault: string, chatId: string): string[] {
 
 // Deletes the given notes. Returns those that are gone afterwards.
 export function deleteNotes(vault: string, notes: string[]): string[] {
+  // A chat's next request mustn't show these from its last prompt.
+  if (notes.length) bumpMemoryEpoch()
   return notes.filter((n) => {
     try {
       // Removed by its real folder, checked to be inside the real vault just

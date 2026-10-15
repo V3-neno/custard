@@ -3,7 +3,16 @@ import type { Conversation } from '../../shared/chat'
 import { answerProposal, runProposeTool, type AcceptDeps } from './propose'
 
 const chat = (): Conversation =>
-  ({ id: 'c1', mode: 'code', title: 't', createdAt: 0, updatedAt: 0, messages: [] }) as Conversation
+  ({
+    format: 'custard-chat',
+    version: 1,
+    id: 'c1',
+    mode: 'code',
+    title: 't',
+    createdAt: 0,
+    updatedAt: 0,
+    messages: []
+  }) as Conversation
 const plugins = [{ id: 'spotify', name: 'Spotify' }]
 
 describe('workspace_propose', () => {

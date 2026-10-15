@@ -13,7 +13,13 @@ import {
 import { attachments } from '../attachments'
 import { getApiKey } from '../apiKey'
 import { handle } from '../ipc'
-import { getChatSettings, getConversation, getDesignSettings, setDesignSettings } from '../store'
+import {
+  conversationExists,
+  getChatSettings,
+  getConversation,
+  getDesignSettings,
+  setDesignSettings
+} from '../store'
 import { providerOf } from '../../shared/chat'
 import { discoverCapabilities } from './capabilities'
 import { JobTracker, JobError } from './jobs'
@@ -125,7 +131,9 @@ export function registerDesignHandlers(): void {
   try {
     reconcileDesign({
       service: s,
-      chatExists: (chat) => getConversation(chat) !== null,
+      // Any chat file counts, an old chat's too (store.ts), so an old chat
+      // listed in History keeps its outputs until it is deleted.
+      chatExists: conversationExists,
       forgetChat: designChatDeleted,
       prune: () => pruneImages(images, s.jobs.list(), (c, a) => s.artifacts.get(c, a))
     })

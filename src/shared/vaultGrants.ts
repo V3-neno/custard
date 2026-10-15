@@ -9,11 +9,24 @@
 export type GrantMode = 'create' | 'append' | 'edit'
 export type VaultGrant = { folder: string; mode: GrantMode }
 
+// Shown in Settings and the automation form. The levels nest, so each help
+// line says what the level includes.
 export const GRANT_MODES: { id: GrantMode; label: string; help: string }[] = [
-  { id: 'create', label: 'Create', help: 'New notes only' },
-  { id: 'append', label: 'Append', help: 'New notes, and adding to the end of notes' },
-  { id: 'edit', label: 'Edit', help: 'New notes, adding to notes, and changing text in notes' }
+  { id: 'create', label: 'New notes', help: 'New notes only. Existing notes stay as they are.' },
+  {
+    id: 'append',
+    label: 'Add to end',
+    help: 'New notes, and adding text to the end of existing notes.'
+  },
+  {
+    id: 'edit',
+    label: 'Edit text',
+    help: 'New notes, adding to the end, and changing text in place. Includes everything Add to end allows.'
+  }
 ]
+
+export const grantLabel = (mode: GrantMode): string =>
+  GRANT_MODES.find((m) => m.id === mode)?.label ?? mode
 
 const RANK: Record<GrantMode, number> = { create: 0, append: 1, edit: 2 }
 export const modeAllows = (have: GrantMode, need: GrantMode): boolean => RANK[have] >= RANK[need]
@@ -69,6 +82,22 @@ export function placeKind(path: string): 'own' | 'derived' | null {
   if (p[1] === 'plugins' && p.length >= 4 && p[3] === 'activity') return 'derived'
   if (p[1] === 'plugins' && p.length === 4 && p[3] === 'overview.md') return 'own'
   return null
+}
+
+// The key one folder is kept under: the same comparison normalizeGrants uses
+// to keep one entry per folder.
+export const folderKey = (folder: string): string => fold(folder)
+
+// A folder as typed in Settings, tidied the way Windows reads it: "/" or "\"
+// between folders, and trailing dots and spaces dropped from each name. A name
+// that would be left empty ("." or "..") is kept as typed, so normalizeGrants
+// still refuses it.
+export function cleanFolderInput(text: string): string {
+  return text
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map((s) => s.replace(/[. ]+$/, '') || s)
+    .join('/')
 }
 
 export type GrantNormalization = { grants: VaultGrant[]; dropped: number }

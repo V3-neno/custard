@@ -72,8 +72,9 @@ export type RunDeps = {
     snapshot: unknown
   ) => Promise<ToolRun>
   describePlugin: (name: string, input: unknown) => string | null
-  // The model call for this automation's model, or why there can't be one.
-  step: (modelId: string) => Step | string
+  // The model call for this automation's model and effort, or why there
+  // can't be one.
+  step: (modelId: string, effort?: Automation['effort']) => Step | string
   // Saves a question for the user's next chat.
   leaveQuestion: (
     runId: string,
@@ -183,7 +184,7 @@ async function execute(
   } catch {
     return failed(`The skill "${a.skill}" couldn't be read from the vault.`)
   }
-  const step = d.step(a.model)
+  const step = d.step(a.model, a.effort)
   if (typeof step === 'string') return failed(step)
 
   const grants = effectiveGrants(a, d.grants)

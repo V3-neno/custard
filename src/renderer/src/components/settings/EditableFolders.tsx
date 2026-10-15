@@ -1,7 +1,56 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { VaultEditEntry } from '../../../../shared/vault'
-import { GRANT_MODES, type GrantMode, type VaultGrant } from '../../../../shared/vaultGrants'
+import {
+  cleanFolderInput,
+  folderKey,
+  GRANT_MODES,
+  type GrantMode,
+  type VaultGrant
+} from '../../../../shared/vaultGrants'
 import { cleanError, danger, input, secondary } from './ui'
+
+const DEFAULT_MODE: GrantMode = 'append'
+
+// One level out of three that nest, as the row of pill buttons the automation
+// effort picker uses, with what the picked level allows written under it.
+function LevelPicker({
+  value,
+  onPick,
+  label
+}: {
+  value: GrantMode
+  onPick: (mode: GrantMode) => void
+  label: string
+}): React.JSX.Element {
+  return (
+    <div>
+      <div role="group" aria-label={label} className="flex gap-1">
+        {GRANT_MODES.map((m) => {
+          const on = m.id === value
+          return (
+            <button
+              key={m.id}
+              type="button"
+              aria-pressed={on}
+              data-mode={m.id}
+              onClick={() => !on && onPick(m.id)}
+              className={`focus-ring flex-1 rounded-full border px-1.5 py-1 text-xs ${
+                on
+                  ? 'border-molten-500/60 text-molten-200'
+                  : 'border-forge-700 text-ash-300 hover:text-molten-200'
+              }`}
+            >
+              {m.label}
+            </button>
+          )
+        })}
+      </div>
+      <p className="mt-1 text-xs text-ash-500" data-mode-help>
+        {GRANT_MODES.find((m) => m.id === value)?.help}
+      </p>
+    </div>
+  )
+}
 
 // Folders Claude may change without asking about each edit, and a list of
 // what it changed, with Undo. Nothing is allowed until the user adds a folder.
@@ -9,7 +58,7 @@ export default function EditableFolders(): React.JSX.Element {
   const [grants, setGrants] = useState<VaultGrant[]>([])
   const [edits, setEdits] = useState<VaultEditEntry[]>([])
   const [folder, setFolder] = useState('')
-  const [mode, setMode] = useState<GrantMode>('append')
+  const [mode, setMode] = useState<GrantMode>(DEFAULT_MODE)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
 
@@ -34,19 +83,17 @@ export default function EditableFolders(): React.JSX.Element {
   }
 
   const add = async (): Promise<void> => {
-    const f = folder
-      .split(/[\\/]+/)
-      .filter(Boolean)
-      .join('/')
+    const f = cleanFolderInput(folder)
     if (!f) return
-    const key = f.toLowerCase()
+    // Compared the way the saved list keeps one entry per folder.
+    const key = folderKey(f)
     setError(null)
     try {
-      const others = grants.filter((g) => g.folder.toLowerCase() !== key)
+      const others = grants.filter((g) => folderKey(g.folder) !== key)
       const saved = await window.custard.vault.setGrants([...others, { folder: f, mode }])
       setGrants(saved)
       // A folder the app refuses (hidden, "..", a drive) is dropped on save.
-      if (saved.some((g) => g.folder.toLowerCase() === key)) setFolder('')
+      if (saved.some((g) => folderKey(g.folder) === key)) setFolder('')
       else
         setError(
           "That folder can't be allowed. Use a folder inside the vault, like Projects/Notes."
@@ -54,6 +101,9 @@ export default function EditableFolders(): React.JSX.Element {
     } catch (e) {
       setError(cleanError(e))
     }
+    // Accepted or refused, the next folder starts from the default level, so
+    // a wider level picked for one folder isn't carried to another.
+    setMode(DEFAULT_MODE)
   }
 
   const undo = async (id: string): Promise<void> => {
@@ -69,27 +119,39 @@ export default function EditableFolders(): React.JSX.Element {
       <p className="mb-3 text-sm text-ash-300">
         Folders where Claude can change notes without asking each time. Nothing is allowed until you
         add a folder. Elsewhere, a new note still needs your approval and existing notes can&apos;t
-        be changed. Custard&apos;s memory, skills, captures and plugin activity notes stay protected
-        unless you add that exact folder.
+        be changed. The levels nest: Add to end includes New notes, and Edit text includes both.
+      </p>
+      <p className="mb-3 text-xs text-ash-500" data-protected-help>
+        Always protected, even inside an allowed folder: Custard/Memory.md, Custard/Skills,
+        Custard/Captures, Custard/Chats, and each plugin&apos;s Activity folder and Overview.md
+        under Custard/Plugins. Skills, Captures, Chats or an Activity folder can be allowed only by
+        adding that exact folder. Memory.md and Overview.md are notes, so no folder can allow them.
       </p>
       {grants.length > 0 && (
         <ul className="mb-3 space-y-1.5" aria-label="Editable folders">
           {grants.map((g) => (
             <li
               key={g.folder}
-              className="flex items-center gap-2 rounded-lg border border-forge-700 bg-forge-900 px-3 py-1.5 text-sm"
+              data-folder={g.folder}
+              className="rounded-lg border border-forge-700 bg-forge-900 px-3 py-1.5 text-sm"
             >
-              <span className="min-w-0 flex-1 truncate">{g.folder}/</span>
-              <span className="text-xs text-molten-300">
-                {GRANT_MODES.find((m) => m.id === g.mode)?.label}
-              </span>
-              <button
-                aria-label={`Remove ${g.folder}`}
-                onClick={() => void save(grants.filter((x) => x.folder !== g.folder))}
-                className="text-xs text-ash-500 hover:text-ember-600"
-              >
-                Remove
-              </button>
+              <div className="mb-1.5 flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate">{g.folder}/</span>
+                <button
+                  aria-label={`Remove ${g.folder}`}
+                  onClick={() => void save(grants.filter((x) => x.folder !== g.folder))}
+                  className="text-xs text-ash-500 hover:text-ember-600"
+                >
+                  Remove
+                </button>
+              </div>
+              <LevelPicker
+                label={`What Claude may do in ${g.folder}`}
+                value={g.mode}
+                onPick={(m) =>
+                  void save(grants.map((x) => (x.folder === g.folder ? { ...x, mode: m } : x)))
+                }
+              />
             </li>
           ))}
         </ul>
@@ -103,22 +165,12 @@ export default function EditableFolders(): React.JSX.Element {
           placeholder="Folder in the vault, like Projects/Notes"
           className={input}
         />
-        <select
-          aria-label="What Claude may do there"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as GrantMode)}
-          title={GRANT_MODES.find((m) => m.id === mode)?.help}
-          className="rounded-lg border border-forge-700 bg-forge-900 px-2 text-sm outline-none"
-        >
-          {GRANT_MODES.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
         <button onClick={() => void add()} disabled={!folder.trim()} className={secondary}>
           Allow
         </button>
+      </div>
+      <div className="mt-2">
+        <LevelPicker label="What Claude may do there" value={mode} onPick={setMode} />
       </div>
       {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
 

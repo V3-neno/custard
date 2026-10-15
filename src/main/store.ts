@@ -9,17 +9,20 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync
 } from 'fs'
-import { join } from 'path'
+import { basename, join } from 'path'
 import {
   defaultChatSettings,
+  isMode,
   type ChatSettings,
   type Conversation,
   type ConversationSummary,
   type Mode,
   type UsageMonth
 } from '../shared/chat'
+import { CHAT_FORMAT, CHAT_VERSION, oldReason, type OldChat } from '../shared/neutralChat'
 import { charger, normalizeBudget, UsageLedger, type Charge } from './usage'
 import type { SecurityDefaults } from '../shared/plugins'
 import { readSettingsFile, writeSettingsFile } from './settingsFile'
@@ -39,38 +42,83 @@ const settingsFile = (): string => join(app.getPath('userData'), 'settings.json'
 // Conversations saved before modes existed belong to Chat.
 const withMode = (c: Conversation): Conversation => ({ ...c, mode: c.mode ?? 'chat' })
 
-// Every mode's when `mode` is null.
+// One file in the chats folder: a chat in Custard's format, or an old chat
+// this build can't open (see neutralChat.ts). Of an old chat only the title,
+// mode and date are read, for History; nothing else in it is ever used.
+type ChatFile = { chat: Conversation } | { old: OldChat }
+
+const chatFiles = (): string[] => readdirSync(dir()).filter((f) => f.endsWith('.json'))
+
+function readChatFile(name: string): ChatFile {
+  const full = join(dir(), name)
+  const id = name.slice(0, -'.json'.length)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(full, 'utf8'))
+  } catch {
+    parsed = undefined
+  }
+  const reason = parsed === undefined ? 'unreadable' : oldReason(parsed)
+  if (reason === null) return { chat: withMode(parsed as Conversation) }
+  const x = (typeof parsed === 'object' && parsed !== null ? parsed : {}) as Record<string, unknown>
+  let updatedAt = typeof x.updatedAt === 'number' ? x.updatedAt : 0
+  if (!updatedAt)
+    try {
+      updatedAt = statSync(full).mtimeMs
+    } catch {
+      // Listed last.
+    }
+  return {
+    old: {
+      id,
+      mode: isMode(x.mode) ? x.mode : 'chat',
+      title: typeof x.title === 'string' && x.title.trim() ? x.title : 'Untitled chat',
+      updatedAt,
+      old: reason
+    }
+  }
+}
+
+// Every mode's when `mode` is null. Old chats are listed with their title
+// only.
 export function listConversations(mode: Mode | null): ConversationSummary[] {
-  return readdirSync(dir())
-    .filter((f) => f.endsWith('.json'))
-    .flatMap((f) => {
+  return chatFiles()
+    .flatMap((f): ConversationSummary[] => {
+      let file: ChatFile
       try {
-        const c = withMode(JSON.parse(readFileSync(join(dir(), f), 'utf8')))
-        return mode === null || c.mode === mode
-          ? [
-              {
-                id: c.id,
-                mode: c.mode,
-                title: c.title,
-                updatedAt: c.updatedAt,
-                ...(c.memory?.temporary ? { temporary: true } : {}),
-                ...(c.workspace?.kind === 'internal' ? { pluginId: c.workspace.pluginId } : {}),
-                ...(c.skill ? { skill: c.skill } : {}),
-                // Where the chat stands, from its note in Custard/Chats.
-                ...(c.chatNote && (c.chatNote.status === 'saved' || c.chatNote.status === 'edited')
-                  ? {
-                      ...(c.chatNote.state ? { summary: c.chatNote.state } : {}),
-                      ...(c.chatNote.title ? { noteTitle: c.chatNote.title } : {}),
-                      ...(c.chatNote.goal ? { goal: c.chatNote.goal } : {}),
-                      ...(c.chatNote.tags?.length ? { tags: c.chatNote.tags } : {})
-                    }
-                  : {})
-              }
-            ]
-          : []
+        file = readChatFile(f)
       } catch {
         return []
       }
+      if ('old' in file) {
+        const o = file.old
+        return mode === null || o.mode === mode
+          ? [{ id: o.id, mode: o.mode, title: o.title, updatedAt: o.updatedAt, old: o.old }]
+          : []
+      }
+      const c = file.chat
+      return mode === null || c.mode === mode
+        ? [
+            {
+              id: c.id,
+              mode: c.mode,
+              title: c.title,
+              updatedAt: c.updatedAt,
+              ...(c.memory?.temporary ? { temporary: true } : {}),
+              ...(c.workspace?.kind === 'internal' ? { pluginId: c.workspace.pluginId } : {}),
+              ...(c.skill ? { skill: c.skill } : {}),
+              // Where the chat stands, from its note in Custard/Chats.
+              ...(c.chatNote && (c.chatNote.status === 'saved' || c.chatNote.status === 'edited')
+                ? {
+                    ...(c.chatNote.state ? { summary: c.chatNote.state } : {}),
+                    ...(c.chatNote.title ? { noteTitle: c.chatNote.title } : {}),
+                    ...(c.chatNote.goal ? { goal: c.chatNote.goal } : {}),
+                    ...(c.chatNote.tags?.length ? { tags: c.chatNote.tags } : {})
+                  }
+                : {})
+            }
+          ]
+        : []
     })
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }
@@ -112,35 +160,65 @@ export function updateConversation(
   return c
 }
 
-// Every saved conversation, whatever its mode (for links between chats).
-// Every saved chat's id, from the file names (a file that can't be read
-// still counts).
-export const conversationIds = (): string[] =>
-  readdirSync(dir())
-    .filter((f) => f.endsWith('.json'))
-    .map((f) => f.slice(0, -'.json'.length))
+// Every saved chat's id, from the file names (a file that can't be read, and
+// an old chat, still count: the startup sweeps keep their files).
+export const conversationIds = (): string[] => chatFiles().map((f) => f.slice(0, -'.json'.length))
 
+// Whether there is a chat file for this id, old or new.
+export const conversationExists = (id: string): boolean => existsSync(file(id))
+
+// Every chat in Custard's format, whatever its mode (for links between
+// chats). Old chats are left out.
 export function allConversations(): Conversation[] {
-  return readdirSync(dir())
-    .filter((f) => f.endsWith('.json'))
-    .flatMap((f) => {
-      try {
-        return [withMode(JSON.parse(readFileSync(join(dir(), f), 'utf8')))]
-      } catch {
-        return []
-      }
-    })
+  return chatFiles().flatMap((f) => {
+    try {
+      const r = readChatFile(f)
+      return 'chat' in r ? [r.chat] : []
+    } catch {
+      return []
+    }
+  })
 }
 
+// A chat in Custard's format, or null: there is no such chat, or it is an
+// old chat (see oldChat), which nothing may read as a chat.
 export function getConversation(id: string): Conversation | null {
   if (!existsSync(file(id))) return null
-  return withMode(JSON.parse(readFileSync(file(id), 'utf8')))
+  const r = readChatFile(`${basename(file(id))}`)
+  return 'chat' in r ? r.chat : null
 }
+
+// The old chat with this id, or null.
+export function oldChat(id: string): OldChat | null {
+  if (!existsSync(file(id))) return null
+  const r = readChatFile(`${basename(file(id))}`)
+  return 'old' in r ? r.old : null
+}
+
+// Every old chat's id.
+export const oldChatIds = (): string[] =>
+  chatFiles().flatMap((f) => {
+    try {
+      const r = readChatFile(f)
+      return 'old' in r ? [r.old.id] : []
+    } catch {
+      return []
+    }
+  })
 
 export function newConversation(mode: Mode, firstMessage: string): Conversation {
   const now = Date.now()
   const title = firstMessage.trim().replace(/\s+/g, ' ').slice(0, 60) || 'New chat'
-  return { id: randomUUID(), mode, title, createdAt: now, updatedAt: now, messages: [] }
+  return {
+    format: CHAT_FORMAT,
+    version: CHAT_VERSION,
+    id: randomUUID(),
+    mode,
+    title,
+    createdAt: now,
+    updatedAt: now,
+    messages: []
+  }
 }
 
 // Saved often during a turn (after every tool call), so written to a
@@ -150,6 +228,27 @@ export function saveConversation(c: Conversation): void {
   const target = file(c.id)
   writeFileSync(`${target}.tmp`, JSON.stringify(c))
   renameSync(`${target}.tmp`, target)
+}
+
+// Removes the prompt-cache snapshot (see main/promptCache) from every chat,
+// saved or in a turn: it holds a copy of the memory the chat last sent, so
+// after a Forget nothing forgotten stays on disk there. Each chat's next
+// message rebuilds its prompt (one cache write). Saved without touching
+// updatedAt, so the history order doesn't change.
+export function clearPromptSnapshots(): void {
+  for (const c of live.values()) delete c.promptCache
+  for (const f of readdirSync(dir()).filter((f) => f.endsWith('.json'))) {
+    const path = join(dir(), f)
+    try {
+      const c = JSON.parse(readFileSync(path, 'utf8')) as Conversation
+      if (!c.promptCache) continue
+      delete c.promptCache
+      writeFileSync(`${path}.tmp`, JSON.stringify(c))
+      renameSync(`${path}.tmp`, path)
+    } catch (err) {
+      console.error('Clearing a prompt snapshot:', f, err)
+    }
+  }
 }
 
 export function deleteConversation(id: string): void {

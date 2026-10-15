@@ -1,4 +1,5 @@
 import type {
+  BetaContentBlockParam,
   BetaMessageParam,
   BetaTextBlockParam,
   BetaTool,
@@ -6,6 +7,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import type { ListedModel, ModelCapabilities, ProviderErrorKind } from '../../shared/adapter'
 import type { ChatEvent, Conversation, Effort } from '../../shared/chat'
+import type { Message } from '../../shared/neutralChat'
 import type { TokenUsage } from '../../shared/pricing'
 import type { Provider, ProviderApi } from '../../shared/providers'
 import type { TurnLog } from '../turn'
@@ -16,9 +18,12 @@ import type { SearchOutcome } from '../web/search'
 // it and never asks which provider it is talking to; an adapter only turns
 // Custard's requests into its provider's API and back.
 //
-// Conversations stay in one stored format (Anthropic's message blocks) so any
-// provider can continue any chat; an adapter converts on the way out and the
-// way back. Failures are thrown as ProviderError (see providerError.ts).
+// Conversations are stored in Custard's own format (shared/neutralChat.ts) so
+// any provider can continue any chat: an adapter converts the history on the
+// way out (with the request's files and calls to tools not offered now as
+// text), and its replies on the way back. A provider's own blocks are kept
+// in `raw` and go back only to that provider. Failures are thrown as
+// ProviderError (see providerError.ts).
 //
 // Keys come from apiKey.ts for each call and are never kept by an adapter.
 
@@ -55,13 +60,18 @@ export type OneShotRequest = {
   // Tools the model may call; the calls come back in `calls`, unrun.
   tools?: BetaTool[]
   // The output limit. Without one, Claude gets 16,000 (its API needs a
-  // limit) and a Responses provider gets none.
+  // limit; automation steps ask for more) and a Responses provider gets
+  // none.
   maxTokens?: number
   // Claude: wait for the reply over a stream, as long replies need (the SDK
   // refuses a plain request it expects to run past its timeout). A Responses
   // provider sends one plain request either way.
   stream?: boolean
-  // Responses providers only; Claude's one-shot model (Haiku 4.5) takes none.
+  // Sent as the model's profile says (sentLevel), and only for a model that
+  // takes effort: summaries pass low (Claude's summary model, Haiku 4.5,
+  // takes none), automation steps their own level when one is set. Claude
+  // also turns adaptive thinking on for a model whose profile thinks,
+  // whatever the effort.
   effort?: Effort
   timeoutMs?: number
   retries?: number
@@ -89,9 +99,14 @@ export type TurnRequest = {
   effort: Effort
   system: BetaTextBlockParam[]
   // The chat as it stands, in the stored format, read again before each
-  // model call (tool rounds add to it). The adapter drops what its provider
-  // can't take.
-  history: () => BetaMessageParam[]
+  // model call (tool rounds add to it). The adapter converts it, dropping
+  // what its provider can't take.
+  history: () => Message[]
+  // This request's attached files, by the index of the message they came
+  // with (attachments/request.ts), put in front of it on the way out.
+  files: Map<number, BetaContentBlockParam[]>
+  // The tools offered now: earlier calls to any other tool go as text.
+  available: Set<string>
   conversation: Conversation
   tools: BetaTool[]
   maxSteps: number
