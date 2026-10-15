@@ -23,8 +23,8 @@ preserved-thinking test has been run.
 | Preserved thinking with compaction | On Opus/Sonnet 5.5, thinking from before the compaction block isn't carried forward; keeping the original messages and letting the API drop them is a documented option; re-inserting earlier turns after the block causes a 400 [D3] | Reasoning isn't carried between turns in Custard (existing behaviour) |
 
 Not used: Claude's on-demand compaction (`compact-2026-09-04`, replaces history)
-[D5], Claude's context editing (clearing old tool results rewrites history) [D6],
-OpenAI's `/responses/compact` (needs the whole window sent at once) [D9] and
+[D5], Claude's context editing (server-side clearing of old tool results; Custard
+clears them itself for both providers instead, see step 5) [D6], OpenAI's `/responses/compact` (needs the whole window sent at once) [D9] and
 OpenAI's deprecated `truncation`.
 
 ### Sources
@@ -62,13 +62,17 @@ it was ("counted by Claude" or "Custard's estimate").
 
 **2. Provider compaction** (`src/main/compaction.ts`). On Opus/Sonnet 5.5 and the
 three OpenAI models. The trigger is per model (`compactTrigger`): the lower of
-400,000 and half the model's budget, and never below the provider's minimum. Half
+150,000 and half the model's budget, and never below the provider's minimum. Half
 leaves room for the next tool round and the reply on top of the output allowance
-and margin the budget already keeps. Today that is 400,000 on every compaction
-model (budgets 889,200 and 935,175 tokens).
+and margin the budget already keeps. Today that is 150,000 on every compaction
+model (budgets 889,200 and 935,175 tokens). It was 400,000 until token-efficiency
+phase 2: every message sends the whole history, so a chat near the trigger pays
+for all of it each time, and in full after a pause long enough for the prompt
+cache to expire. 150,000 is also Claude's default trigger.
 
 Custard keeps every message on disk and in the chat; only what is sent shrinks.
-Claude's block stays in the assistant message. A block with no content (a failed
+Claude's block stays in the assistant message (in its `raw` blocks, with a
+`compaction` part for display; see providers.md). A block with no content (a failed
 compaction, which the API ignores) isn't shown as one. OpenAI's item is kept beside
 the messages and only sent back to the model that made it. The compaction
 instructions ask for a text-only summary with no tool calls, and to keep action
@@ -135,6 +139,59 @@ outcome unknown. Both tool loops (Claude and OpenAI) go through the same check.
   messages, not the handoff. Forget also forgets a chat's continuations.
 - Searches: a handoff or a provider summary counts like notes, so searches keep
   asking for the exact query.
+
+**4. Prompt cache** (`src/main/promptCache.ts`). Both providers cache the start of
+a request: tools, then the system prompt, then the messages. Claude reads a cached
+prefix at a tenth of the input rate and writes one at 1.25 times it, so a change
+anywhere in the system prompt bills the whole history again. Custard keeps the
+start of a chat's requests the same from one message to the next:
+- **Plugin notes go with their message.** The notes about plugins a message names
+  (or that the chat has used) are added to that user message as a text block, kept
+  on the chat (`messageContext`) and sent with it every time after. A plugin's notes
+  are added again only when they changed. The saved message itself is not changed,
+  and memory captures and handoffs never see the notes.
+- **Deferred parts.** The vault prompt (memory captures, `Memory.md`, the skills
+  list, the date) and the list of earlier chats change while a chat goes on,
+  because other turns write notes. A chat keeps sending the versions from its last
+  request (`promptCache` on the chat) and takes the newest only when:
+  - nothing has been sent for 5 minutes, so the cache is cold anyway;
+  - the model, the tools or the rest of the system prompt changed, so the cache
+    misses anyway;
+  - memory was turned off for the chat or in Settings, or a chat was forgotten (a
+    counter bumped on Forget, on deleting notes and on memory settings);
+  - the date changed, a part appeared or went (the vault was reached or lost), or
+    a line was taken out of `Memory.md`.
+
+  So new captures, new earlier chats and new memory lines wait at most until the
+  cache would have expired, while Forget, memory switched off and lines removed
+  from `Memory.md` take effect at the next message. A capture note deleted by hand
+  in Obsidian waits like an addition.
+
+- **OpenAI** requests carry `prompt_cache_key` set to the chat's id, so a chat's
+  requests reach the same cache (`promptCacheKey` in `shared/providers.ts`; off for
+  DeepSeek).
+
+Not deferred: automation questions (shown in every chat until answered) and
+referenced earlier chats, which change only at the user's hand. To check the
+cache, `node scripts/usage-baseline.mjs` lists each long chat's cache writes
+against its cache reads.
+
+**5. Clearing old tool results** (`src/main/clearing.ts`). The cheap step before
+compaction: no model call, and nothing is summarized. Big tool results (2,000
+characters or more) in messages before a mark (`cleared` on the chat) are sent as a
+one-line stub naming the action, its size and how it ended, and telling the model it
+can call the tool again. The saved messages keep every result in full, and the
+tool_use and tool_result pairs stay intact.
+- **Never cleared:** results from the turn being sent and the two before it, small
+  results, errors, and actions whose outcome is unknown or not settled.
+- **The mark moves only forward, in jumps, at the start of a turn**, so requests
+  between jumps start the same way and keep hitting the prompt cache. It moves:
+  - when the request would miss the cache anyway (step 4: cold, or something
+    before the messages changed) and at least about 5,000 tokens can be cleared;
+  - or when the history is past 80% of the compaction trigger and at least about
+    20,000 tokens can be cleared, so compaction comes later or not at all.
+- Only what is sent counts: after a compaction, results before it are not weighed.
+- Tool inputs (for example a long note the model created) are not cleared.
 
 ## What the user sees
 

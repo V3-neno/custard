@@ -65,11 +65,7 @@ const conversations = () => {
 const newest = () => conversations().sort((a, b) => b.updatedAt - a.updatedAt)[0]
 const lastResult = () =>
   (newest()?.messages ?? [])
-    .flatMap((m) =>
-      Array.isArray(m.content)
-        ? m.content.filter((x) => x.type === 'tool_result').map((x) => String(x.content))
-        : []
-    )
+    .flatMap((m) => m.parts.filter((x) => x.type === 'tool_result').map((x) => x.text))
     .at(-1) ?? ''
 
 const app = await electron.launch({

@@ -55,7 +55,7 @@ export const vaultTools: BetaTool[] = [
   },
   {
     name: 'vault_read',
-    description: `Read a note's Markdown, ${READ_LIMITS.part.toLocaleString('en-US')} characters at a time. The first line says which characters you got, the note's version, and whether more follows; for the next part pass the offset and version it gives. If the note changed in between, you're told to start again.`,
+    description: `Read a note's Markdown, ${READ_LIMITS.part.toLocaleString('en-US')} characters at a time. The first line says which characters you got, the note's version, and whether more follows; for the next part pass the offset and version it gives. If the note changed in between, you're told to start again. When you need something specific from a long note, pass \`find\` with what you are looking for: you get only the sections that match, each with its offset, and the note's headings.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -71,6 +71,11 @@ export const vaultTools: BetaTool[] = [
         version: {
           type: 'string',
           description: 'The version from the previous part, so a change in between is caught.'
+        },
+        find: {
+          type: 'string',
+          description:
+            'What you are looking for in the note, in a few words. Returns the matching sections with their offsets instead of reading from the start. Ignored with offset.'
         }
       },
       required: ['path']

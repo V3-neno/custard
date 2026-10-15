@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { user } from '../../../test/neutral/builders'
 import {
   mkdirSync,
   mkdtempSync,
@@ -547,9 +548,11 @@ describe('vault safeguards', () => {
       id: 'c',
       mode: 'chat',
       title: 't',
+      format: 'custard-chat',
+      version: 1,
       createdAt: 0,
       updatedAt: 0,
-      messages: [{ role: 'user', content: 'go' }]
+      messages: [user('go')]
     }
     const log = new TurnLog(conv, () => undefined)
     const calls: Call[] = [

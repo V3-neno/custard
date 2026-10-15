@@ -25,6 +25,8 @@ import EditableFolders from './settings/EditableFolders'
 import Automations from './settings/Automations'
 import ModelsFile from './settings/ModelsFile'
 import { cleanError, primary, secondary } from './settings/ui'
+import Select from './ui/Select'
+import PillGroup from './ui/PillGroup'
 
 type Props = {
   onClose: () => void
@@ -213,8 +215,6 @@ function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JS
     setS(next)
     window.custard.settings.set(next).then(onChanged)
   }
-  const select =
-    'rounded-lg border border-forge-700 bg-forge-900 px-2 py-1.5 text-sm outline-none focus:border-molten-500/60'
   return (
     <section className="mb-6" data-default-model>
       <h3 className="mb-1 text-sm font-medium">Default model</h3>
@@ -237,50 +237,48 @@ function DefaultModelSection({ onChanged }: { onChanged: () => void }): React.JS
           </button>
         </p>
       )}
-      <div className="flex gap-2">
-        <select
-          ref={modelBox}
-          title="Default model"
-          className={`${select} flex-1`}
-          value={s.model}
-          onChange={(e) => {
-            const id = e.target.value
-            if (!isChatModel(id)) return
-            save({ model: id, effort: shownLevel(profileOf(id)?.effort ?? null, s.effort) })
-          }}
-        >
-          {!known && (
-            <option value={s.model} disabled>
-              {s.model} (no profile)
-            </option>
-          )}
-          {providerIds.map((p) => (
-            <optgroup key={p} label={providerNames[p]}>
-              {chatModels()
-                .filter((m) => m.provider === p)
-                .map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-            </optgroup>
-          ))}
-        </select>
-        {levels && (
-          <select
-            title="Default effort"
-            className={select}
-            value={shownLevel(levels, s.effort)}
-            onChange={(e) => isEffort(e.target.value) && save({ ...s, effort: e.target.value })}
-          >
-            {levels.levels.map((l) => (
-              <option key={l.value} value={l.value}>
-                {l.settingsLabel}
-              </option>
-            ))}
-          </select>
+      <Select
+        ref={modelBox}
+        title="Default model"
+        aria-label="Default model"
+        className="w-full"
+        value={s.model}
+        onChange={(e) => {
+          const id = e.target.value
+          if (!isChatModel(id)) return
+          save({ model: id, effort: shownLevel(profileOf(id)?.effort ?? null, s.effort) })
+        }}
+      >
+        {!known && (
+          <option value={s.model} disabled>
+            {s.model} (no profile)
+          </option>
         )}
-      </div>
+        {providerIds.map((p) => (
+          <optgroup key={p} label={providerNames[p]}>
+            {chatModels()
+              .filter((m) => m.provider === p)
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+          </optgroup>
+        ))}
+      </Select>
+      {levels && (
+        <p className="mt-3 mb-1 text-xs text-ash-400" aria-hidden>
+          Default effort
+        </p>
+      )}
+      {levels && (
+        <PillGroup
+          label="Default effort"
+          options={levels.levels.map((l) => ({ value: l.value, label: l.settingsLabel }))}
+          value={shownLevel(levels, s.effort)}
+          onChange={(e) => isEffort(e) && save({ ...s, effort: e })}
+        />
+      )}
     </section>
   )
 }

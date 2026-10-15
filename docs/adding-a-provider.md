@@ -35,10 +35,10 @@ Add an entry to `providers`. The key (`qwen`, say) becomes the `Provider` type e
 
 What an adapter must get right, whichever route:
 
-- **Stored chats are Anthropic message blocks.** Convert on the way out, drop what the provider can't read (Claude's thinking, redacted thinking, fallback markers, compaction blocks), and store only `text` and `tool_use` blocks back. Never store the provider's own reasoning: it would reach other providers.
+- **Stored chats are in Custard's format** (`src/shared/neutralChat.ts`). `turn.history()` returns the stored messages; convert them on the way out (`toResponsesInput` for a Responses provider; a new API needs its own converter, see `historyWire` in the template) with `turn.files` in front of their messages and calls to tools not in `turn.available` as text. Send only the parts a provider can read: never another provider's `raw`. Store the reply as an `AssistantMessage` with `by` set, through `log.addAssistant`: text and tool calls as parts, and `raw` only if your provider must get its own blocks back. Never store the provider's own reasoning: it would reach other providers.
 - **Every way a reply can end maps to a stop.** For `sendMessage`: `refused`, `cut-off`, `too-long`, `failed`, `done`. Summaries and automation steps rely on these to never keep a declined or partial text (Phase 8). For `streamMessage`: the `TurnEnd` values in `types.ts`.
 - **Errors are `ProviderError` with the key hidden** (`toProviderError(err, name, key)`). A rejected key must come out as kind `auth`, or Settings and the picker can't say the key was rejected. `errorKind` in `providerError.ts` only knows the Anthropic and OpenAI SDKs' error classes; another SDK needs its own mapping.
-- **Approvals, the chat guard and tools are not the adapter's job.** It calls `turn.runRound(calls)` and reads the results from `turn.history()` at the next step.
+- **Approvals, the chat guard and tools are not the adapter's job.** It calls `turn.runRound(calls)` and reads the results from `turn.history()` at the next step (TurnLog stores them as one `tool_result` message).
 
 ### 3. Registry line
 

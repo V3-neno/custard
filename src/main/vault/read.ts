@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import { promises as fsp } from 'fs'
 import { relative, sep } from 'path'
 import { resolveInVault } from '../memory/paths'
+import { find, findQuery, FIND_LIMITS, formatFound, outline } from '../textFind'
 
 // vault_read in parts. Each part says which characters of the note it holds,
 // whether more follows, and the note's version (a hash of the whole note), so
@@ -65,7 +66,7 @@ function partEnd(text: string, from: number, size: number): number {
 // starts after the end the header names).
 export async function readPart(
   vault: string,
-  input: { path?: unknown; offset?: unknown; version?: unknown },
+  input: { path?: unknown; offset?: unknown; version?: unknown; find?: unknown },
   size: number = READ_LIMITS.part
 ): Promise<string> {
   const full = resolveInVault(vault, input.path)
@@ -83,6 +84,25 @@ export async function readPart(
     throw new ReadError(
       `offset ${n(offset)} is past the end of ${path} (${n(text.length)} characters).`
     )
+  // `find` on a long note: the sections that match, each with its offset,
+  // and the note's headings, instead of the next part (see textFind).
+  const q = input.offset === undefined ? findQuery(input.find) : null
+  if (q && text.length > FIND_LIMITS.minText) {
+    const found = find(text, q, Math.min(FIND_LIMITS.budget, size))
+    if (found)
+      return [
+        `[${path} · version ${version} · ${n(text.length)} characters · the parts matching "${q}"]`,
+        formatFound(found),
+        outline(text),
+        `[To read around a part, call vault_read with its offset and version "${version}".]`
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+  }
+  const nothing =
+    q && text.length > FIND_LIMITS.minText
+      ? `[Nothing in ${path} matched "${q}"; here is its start.]\n`
+      : ''
   const end = partEnd(text, offset, Math.max(1, Math.min(size, READ_LIMITS.part)))
   const whole = offset === 0 && end === text.length
   const more = end < text.length
@@ -92,5 +112,5 @@ export async function readPart(
   const foot = more
     ? `\n[Part ends at character ${n(end)} of ${n(text.length)}; more follows. For the next part, call vault_read with offset ${end} and version "${version}".]`
     : ''
-  return `${head}\n${text.slice(offset, end)}${foot}`
+  return `${nothing}${head}\n${text.slice(offset, end)}${foot}`
 }
