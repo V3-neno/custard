@@ -594,6 +594,20 @@ describe('named cases', () => {
     expect(plain.raw).toBeUndefined()
   })
 
+  it('the messages before a refused compaction item: the same as the old slice', async () => {
+    // openai.ts: when the model turns compaction down, the messages the item
+    // stood for are sent instead (toResponsesInput with `to`).
+    const n = await cases['round trip Claude, DeepSeek, OpenAI, Claude']()
+    const available = new Set(['vault_list'])
+    const files = new Map([[0, [TEXT_FILE]]])
+    for (let to = 0; to <= n.length; to++) {
+      const old = toInput(
+        withoutUnavailableTools(withFiles(legacyOf(n), files), available).slice(0, to)
+      )
+      expect(toResponsesInput(n, { files, available, to })).toEqual(old)
+    }
+  })
+
   it('a reply converts the same way the stored blocks do', () => {
     const output = [
       {

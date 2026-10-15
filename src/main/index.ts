@@ -37,12 +37,10 @@ import { isPluginContents } from './plugins/runtime'
 import { registerWidgetHandlers, widgets } from './widgets'
 import { designChatDeleted, registerDesignHandlers } from './design'
 import {
-  deleteConversation,
   getChatSettings,
   getVaultPath,
   listConversations,
   oldChat,
-  oldChatIds,
   setChatSettings,
   setVaultPath,
   getVaultGrants,
@@ -67,15 +65,13 @@ import {
   starterSkillFolders
 } from './vaultTemplate'
 import { createSkill, readSkill, skillEntries } from './skillsHub'
+import { deleteChat, deleteOldChats, type ChatCleanup } from './chatDelete'
 
-// Deleting a chat: its file, its widget records, its attached files and its
-// Design outputs. Nothing in the vault (memory, notes in Custard/Chats,
-// captures), usage totals or settings.
-async function deleteChat(id: string): Promise<void> {
-  deleteConversation(id)
-  widgets().conversationDeleted(id)
-  await attachments().deleteChat(id)
-  designChatDeleted(id)
+// What goes with a chat when it is deleted (chatDelete.ts).
+const cleanup: ChatCleanup = {
+  widgets: (id) => widgets().conversationDeleted(id),
+  attachments: (id) => attachments().deleteChat(id),
+  design: designChatDeleted
 }
 
 function vaultInfo(): VaultInfo {
@@ -232,15 +228,11 @@ app.whenReady().then(() => {
       throw new Error(
         'This chat is still answering. Stop it or wait for it to finish, then delete it.'
       )
-    await deleteChat(id)
+    await deleteChat(id, cleanup)
   })
   // Every old chat (see store.ts), each removed the way Delete removes one.
   // The window asks first.
-  handle('conversations:deleteOld', async () => {
-    const ids = oldChatIds()
-    for (const id of ids) await deleteChat(id)
-    return ids.length
-  })
+  handle('conversations:deleteOld', async () => (await deleteOldChats(cleanup)).deleted)
   handle('vault:get', () => vaultInfo())
   handle('vault:pick', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)

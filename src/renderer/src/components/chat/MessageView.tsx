@@ -6,7 +6,7 @@ import type { ActionRecord, ActionStatus, Notice, WebSource } from '../../../../
 import { splitSources } from '../../../../shared/web'
 import { ToolLabelsContext } from '../../toolLabels'
 import type { Message } from '../../../../shared/neutralChat'
-import { messageItems } from './messageItems'
+import { messageItems } from '../../../../shared/chatLayout'
 
 // The orb is the "buffer": it glows while Claude works and holds the
 // collapsible thinking summary once there is one.

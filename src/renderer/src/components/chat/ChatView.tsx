@@ -3,6 +3,7 @@ import { chatHasOutsideText } from '../../../../shared/outsideText'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isOldChat, isToolResults, type OldChat } from '../../../../shared/neutralChat'
 import OldChatView from './OldChat'
+import { atMessage, callOutcomes, turnProposals, turnSources } from '../../../../shared/chatLayout'
 import {
   chatSettingsOf,
   isChatModel,
@@ -10,9 +11,7 @@ import {
   providerNames,
   providerOf,
   type ModelAvailability,
-  type ActionRecord,
   type ChatLink,
-  type WebSource,
   type ChatSettings,
   type Conversation,
   type ConversationSummary,
@@ -629,60 +628,9 @@ function ChatView(props: Props): React.JSX.Element {
     refreshList()
   }
 
-  // Each tool call's outcome. Chats saved before outcomes were recorded only
-  // know which calls failed.
-  const actions = useMemo(() => {
-    const all: Record<string, ActionRecord> = { ...(current?.actions ?? {}) }
-    for (const m of current?.messages ?? [])
-      if (m.role === 'user')
-        for (const b of m.parts)
-          if (b.type === 'tool_result' && b.isError && !all[b.callId])
-            all[b.callId] = { name: '', label: '', write: false, status: 'failed', key: '' }
-    return all
-  }, [current])
-
-  // Where each turn ends (the message before the next thing the user wrote)
-  // mapped to its sources and its answer text.
-  const turnSources = useMemo(() => {
-    const out = new Map<number, { sources: WebSource[]; answer: string }>()
-    const msgs = current?.messages ?? []
-    const all = current?.sources ?? []
-    if (!all.length) return out
-    let start = -1
-    msgs.forEach((m, i) => {
-      if (m.role === 'user' && !isToolResults(m)) start = i
-      const next = msgs[i + 1]
-      const ends = !next || (next.role === 'user' && !isToolResults(next))
-      if (!ends || start < 0) return
-      const sources = all.filter((s) => s.turn === start)
-      if (!sources.length) return
-      const answer = msgs
-        .slice(start, i + 1)
-        .filter((x) => x.role === 'assistant')
-        .flatMap((x) => x.parts.flatMap((b) => (b.type === 'text' ? [b.text] : [])))
-        .join('\n')
-      out.set(i, { sources, answer })
-    })
-    return out
-  }, [current])
-
-  // Hub chat offers to enter a workspace, shown where their turn ends.
-  const turnProposals = useMemo(() => {
-    const out = new Map<number, NonNullable<Conversation['proposals']>>()
-    const msgs = current?.messages ?? []
-    const all = current?.proposals ?? []
-    if (!all.length) return out
-    let start = -1
-    msgs.forEach((m, i) => {
-      if (m.role === 'user' && !isToolResults(m)) start = i
-      const next = msgs[i + 1]
-      const ends = !next || (next.role === 'user' && !isToolResults(next))
-      if (!ends || start < 0) return
-      const here = all.filter((p) => p.turn === start)
-      if (here.length) out.set(i, here)
-    })
-    return out
-  }, [current])
+  const actions = useMemo(() => callOutcomes(current), [current])
+  const sourcesAt = useMemo(() => turnSources(current), [current])
+  const proposalsAt = useMemo(() => turnProposals(current), [current])
   const [proposalError, setProposalError] = useState<{ id: string; error: string } | null>(null)
   const answerProposal = async (id: string, yes: boolean): Promise<void> => {
     if (!current || live) return
@@ -908,60 +856,50 @@ function ChatView(props: Props): React.JSX.Element {
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 pt-8 pb-6">
               {current?.continuedFrom && <HandoffCard k={current.continuedFrom} onOpen={open} />}
-              {current?.messages.map((m, i) => (
-                <Fragment key={i}>
-                  {(current.compactions ?? [])
-                    .filter((k) => k.after === i)
-                    .slice(-1)
-                    .map((k) => (
-                      <CompactionLine key={`k${i}`} k={k} />
-                    ))}
-                  {!isToolResults(m) && (
-                    // A reply that continues after vault actions sits flush with the part before it.
-                    <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
-                      <MessageView message={m} actions={actions} />
-                      <SentFiles
-                        chat={current.id}
-                        files={(current.attachments ?? []).filter((a) => a.message === i)}
-                      />
-                      <SentReferences
-                        items={(current.references ?? []).filter((r) => r.message === i)}
-                        onOpen={openIn}
-                      />
-                    </div>
-                  )}
-                  {turnProposals.get(i)?.map((p) => (
-                    <ProposalCard
-                      key={p.id}
-                      p={p}
-                      names={p.target === 'skill' ? skillNames : pluginNames}
-                      busy={!!live}
-                      error={proposalError?.id === p.id ? proposalError.error : undefined}
-                      onAnswer={(yes) => void answerProposal(p.id, yes)}
-                    />
-                  ))}
-                  {turnSources.has(i) && (
-                    <SourcesList
-                      sources={turnSources.get(i)!.sources}
-                      answer={turnSources.get(i)!.answer}
-                    />
-                  )}
-                  {notices
-                    // The length notice below says it, with the way on.
-                    .filter(
-                      (n) => n.after === i + 1 && !(showLength && n === lastNotice && tooLong)
-                    )
-                    .map((n, j) => (
-                      <NoticeLine
-                        key={j}
-                        notice={n}
-                        onContinue={
-                          canContinue && n === lastNotice ? () => send(CONTINUE) : undefined
-                        }
+              {current?.messages.map((m, i) => {
+                const here = atMessage(current, i)
+                return (
+                  <Fragment key={i}>
+                    {here.compaction && <CompactionLine key={`k${i}`} k={here.compaction} />}
+                    {!isToolResults(m) && (
+                      // A reply that continues after vault actions sits flush with the part before it.
+                      <div className={isToolResults(current.messages[i - 1]) ? '-mt-6' : ''}>
+                        <MessageView message={m} actions={actions} />
+                        <SentFiles chat={current.id} files={here.files} />
+                        <SentReferences items={here.references} onOpen={openIn} />
+                      </div>
+                    )}
+                    {proposalsAt.get(i)?.map((p) => (
+                      <ProposalCard
+                        key={p.id}
+                        p={p}
+                        names={p.target === 'skill' ? skillNames : pluginNames}
+                        busy={!!live}
+                        error={proposalError?.id === p.id ? proposalError.error : undefined}
+                        onAnswer={(yes) => void answerProposal(p.id, yes)}
                       />
                     ))}
-                </Fragment>
-              ))}
+                    {sourcesAt.has(i) && (
+                      <SourcesList
+                        sources={sourcesAt.get(i)!.sources}
+                        answer={sourcesAt.get(i)!.answer}
+                      />
+                    )}
+                    {here.notices
+                      // The length notice below says it, with the way on.
+                      .filter((n) => !(showLength && n === lastNotice && tooLong))
+                      .map((n, j) => (
+                        <NoticeLine
+                          key={j}
+                          notice={n}
+                          onContinue={
+                            canContinue && n === lastNotice ? () => send(CONTINUE) : undefined
+                          }
+                        />
+                      ))}
+                  </Fragment>
+                )
+              })}
               {showLength && !handoff && (
                 <LengthNotice
                   use={current.context}
