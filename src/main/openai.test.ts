@@ -133,7 +133,7 @@ describe('OpenAI long chats (mocked Responses API)', () => {
 
     const [first, second] = requests.filter((r) => r.path.endsWith('/responses'))
     expect(first.body.context_management).toEqual([
-      { type: 'compaction', compact_threshold: 400_000 }
+      { type: 'compaction', compact_threshold: 150_000 }
     ])
     expect(first.body.store).toBe(false)
     expect(events).toContainEqual({ requestId: 'r', type: 'compacting' })
