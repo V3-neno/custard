@@ -68,7 +68,8 @@ and margin the budget already keeps. Today that is 400,000 on every compaction
 model (budgets 889,200 and 935,175 tokens).
 
 Custard keeps every message on disk and in the chat; only what is sent shrinks.
-Claude's block stays in the assistant message. A block with no content (a failed
+Claude's block stays in the assistant message (in its `raw` blocks, with a
+`compaction` part for display; see providers.md). A block with no content (a failed
 compaction, which the API ignores) isn't shown as one. OpenAI's item is kept beside
 the messages and only sent back to the model that made it. The compaction
 instructions ask for a text-only summary with no tool calls, and to keep action

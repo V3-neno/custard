@@ -91,7 +91,10 @@ message box. Nothing is dropped without saying so.
   - removing a file from the box deletes its copy;
   - deleting a chat deletes its folder;
   - drafts older than a day are deleted at startup;
-  - so are folders of chats that no longer exist.
+  - so are folders of chats that no longer exist. Any file in the chats
+    folder counts as existing (`conversationIds`, from the file names), so an
+    old chat listed in History as "Old format" keeps its files until it is
+    deleted; Delete and Delete all old chats remove them.
 
   A temporary chat's files last exactly as long as the chat. Forget removes
   memory notes, not the chat or its files.
@@ -110,6 +113,11 @@ providers' usual handling of request data still applies). Neno chose this
   action.
 - Claude gets `image` and `document` blocks; OpenAI gets one user message with
   `input_image`, `input_file` and `input_text` parts.
+- The stored chat holds no file blocks: each request builds them from
+  `conversation.attachments` (`prepareFiles`) and puts them in front of their
+  message as it converts the stored chat (`toClaudeHistory` and
+  `toResponsesInput` take the files by message index). Before Claude's newest
+  compaction, files aren't sent (`claudeFilesFrom`).
 - Files are resent with the history on every request, since neither API keeps
   state here (OpenAI runs with `store: false`). Claude's prompt caching makes
   repeats cheaper; OpenAI has no equivalent to rely on.
