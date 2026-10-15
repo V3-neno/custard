@@ -119,6 +119,26 @@ offset to continue from, and the next part starts after them. So the caller asks
 for a part that fits (`partSizeFor` in chat; a run reads again with a smaller
 part until the escaped result fits), and no part is cut.
 
+**Finding instead of reading on (`find`, `src/main/textFind.ts`).** `vault_read` and
+`web_read` take an optional `find`: a few words saying what the model is looking
+for. On a note or page longer than 6,000 characters, and without an `offset`, the
+result is then:
+- the sections that match best, about 6,000 characters at most. Each section is
+  the text's own words with its character range and the heading it sits under;
+- the text's headings with their offsets;
+- for a web page, the links whose text or address matches.
+
+The model reads around a part with the usual `offset` (and `version` for a note).
+
+Sections follow the Markdown headings and paragraphs, about 1,200 characters each.
+They are ranked with BM25 over plain words, ignoring case and accents. A heading's
+words count double in the section it starts, and a section holding the whole query,
+or more of its words, ranks higher. Sections scoring under a quarter of the best
+are left out.
+
+This matches words, not meaning. When nothing matches, the result says so and
+reads from the start as without `find`. A short text is returned as it is.
+
 **Every cut says so.** A result Custard shortens ends with a note saying what was
 left out: the chat and run caps, a plugin result over 50,000 characters, `fs_read`,
 `fs_list`, `fs_search` (30 matches, or 5,000 files scanned), a web search (results

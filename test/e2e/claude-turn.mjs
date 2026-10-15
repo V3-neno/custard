@@ -293,6 +293,9 @@ const norm = (v) =>
       // Background work (memory capture, the chat note) runs on its own
       // clock, apart from the turn.
       if (k === 'memory' || k === 'chatNote') return undefined
+      // The prompt-cache snapshot's memory epoch starts at the app's start
+      // time, and its hash covers the dated system prompt.
+      if ((k === 'epoch' || k === 'fixed') && 'deferred' in this) return `<${k}>`
       // The model and effort a chat keeps (Phase 6), on the saved chat
       // only; the request's own model is still compared.
       if ((k === 'model' || k === 'effort') && 'title' in this && 'mode' in this) return undefined

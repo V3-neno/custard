@@ -42,6 +42,9 @@ export function toResponsesInput(
     available: Set<string>
     from?: number
     to?: number
+    // The context added in front of earlier messages, by index
+    // (promptCache.contextByMessage).
+    context?: Map<number, string>
   }
 ): ResponseInputItem[] {
   const stale = new Set<string>()
@@ -81,8 +84,15 @@ export function toResponsesInput(
         : { kind: 'text', text: p.text }
     )
     const files = opts.files?.get(i)
+    const context = opts.context?.get(i)
+    // A message with context and nothing typed (and no files): the context.
+    const typedOnly = m.parts.length === 1 && m.parts[0].type === 'text'
+    if (context !== undefined && typedOnly && !files && !m.parts[0].text.trim()) {
+      items.push({ role: 'user', content: context })
+      continue
+    }
     // A message with files: the files, then its text if it has any.
-    const pieces: Piece[] = files
+    const withFiles: Piece[] = files
       ? [
           ...files.map((b): Piece =>
             b.type === 'text' ? { kind: 'text', text: b.text } : { kind: 'file', block: b }
@@ -94,6 +104,9 @@ export function toResponsesInput(
             : own)
         ]
       : own
+    // Context goes first, in front of the files.
+    const pieces: Piece[] =
+      context !== undefined ? [{ kind: 'text', text: context }, ...withFiles] : withFiles
     const sent = pieces.map((x): Piece =>
       x.kind === 'result' && stale.has(x.callId)
         ? { kind: 'text', text: staleResult(x.text, x.isError) }

@@ -27,6 +27,7 @@ import { providerNames, responsesFeatures, type Provider } from '../shared/provi
 import type { TokenUsage } from '../shared/pricing'
 import { fromOpenAI } from './usage'
 import { fromResponsesReply, toResponsesInput } from './adapters/responsesNeutral'
+import { contextByMessage } from './promptCache'
 import { toolCalls, type Message } from '../shared/neutralChat'
 
 type Emit = (e: ChatEvent) => void
@@ -179,8 +180,14 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
   const features = responsesFeatures(turn.provider)
   // From the newest compaction this model made, if there is one.
   const start = openaiStart(turn.conversation, turn.model)
+  const context = contextByMessage(turn.conversation.messageContext)
   const convert = (range: { from?: number; to?: number }): ResponseInputItem[] =>
-    toResponsesInput(turn.history, { files: turn.files, available: turn.available, ...range })
+    toResponsesInput(turn.history, {
+      files: turn.files,
+      available: turn.available,
+      context,
+      ...range
+    })
   let input: ResponseInputItem[] = [
     ...(start.item ? [start.item] : []),
     ...convert({ from: start.from })
@@ -209,6 +216,8 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
           // encrypted so the model keeps its train of thought across tool
           // calls.
           store: false,
+          // One key per chat, so its repeated start is read from the cache.
+          ...(features.promptCacheKey ? { prompt_cache_key: turn.conversation.id } : {}),
           ...(features.encryptedReasoning
             ? { include: ['reasoning.encrypted_content' as const] }
             : {}),
