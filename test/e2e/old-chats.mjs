@@ -136,7 +136,13 @@ const requests = () => {
 const newChats = () =>
   fs
     .readdirSync(CHATS)
-    .map((f) => JSON.parse(fs.readFileSync(`${CHATS}/${f}`, 'utf8') || 'null'))
+    .map((f) => {
+      try {
+        return JSON.parse(fs.readFileSync(`${CHATS}/${f}`, 'utf8'))
+      } catch {
+        return null
+      }
+    })
     .filter((c) => c?.format === 'custard-chat' && c.version === 1)
 const rows = () => w.locator('aside .group')
 const titles = async () =>

@@ -664,7 +664,14 @@ describe.runIf(!!E2E)('an e2e run: every stored chat and every request it sent',
     return found.flatMap((conv) =>
       readdirSync(conv)
         .filter((f) => f.endsWith('.json'))
-        .map((f) => JSON.parse(readFileSync(join(conv, f), 'utf8')) as E2EChat)
+        .flatMap((f): E2EChat[] => {
+          try {
+            return [JSON.parse(readFileSync(join(conv, f), 'utf8'))]
+          } catch {
+            // A file old-chats.mjs left unreadable on purpose.
+            return []
+          }
+        })
         // An old chat a suite wrote on purpose (old-chat checks) is never sent.
         .filter((c) => Array.isArray(c.messages) && (isStoredChat(c) || !c.format))
     )
