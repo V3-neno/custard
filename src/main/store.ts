@@ -152,6 +152,27 @@ export function saveConversation(c: Conversation): void {
   renameSync(`${target}.tmp`, target)
 }
 
+// Removes the prompt-cache snapshot (see main/promptCache) from every chat,
+// saved or in a turn: it holds a copy of the memory the chat last sent, so
+// after a Forget nothing forgotten stays on disk there. Each chat's next
+// message rebuilds its prompt (one cache write). Saved without touching
+// updatedAt, so the history order doesn't change.
+export function clearPromptSnapshots(): void {
+  for (const c of live.values()) delete c.promptCache
+  for (const f of readdirSync(dir()).filter((f) => f.endsWith('.json'))) {
+    const path = join(dir(), f)
+    try {
+      const c = JSON.parse(readFileSync(path, 'utf8')) as Conversation
+      if (!c.promptCache) continue
+      delete c.promptCache
+      writeFileSync(`${path}.tmp`, JSON.stringify(c))
+      renameSync(`${path}.tmp`, path)
+    } catch (err) {
+      console.error('Clearing a prompt snapshot:', f, err)
+    }
+  }
+}
+
 export function deleteConversation(id: string): void {
   rmSync(file(id), { force: true })
 }

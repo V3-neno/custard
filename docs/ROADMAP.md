@@ -55,6 +55,17 @@ Basic skills in Chat arrived with the starter vault in Phase 2. This phase build
 - **Spotify** (done, now a plugin): search, now playing, devices, queue, open and transfer. See [SPOTIFY.md](SPOTIFY.md).
 - Later for plugins: UI panels, vault access through a reviewed capability, signed plugins from other people.
 
+## Token efficiency
+
+Each phase is measured against a baseline taken first with `scripts/usage-baseline.mjs` (cache writes against cache reads, and cost per message, from saved chats).
+
+1. **Stable prompt cache** (started). Keep what a chat sends before its messages the same from one message to the next, so the provider's prompt cache keeps hitting. Context that changes during a chat (memory captures, earlier chats, plugin notes, automation questions) is refreshed only when the cache has expired anyway, or travels with the message it belongs to. OpenAI requests carry a `prompt_cache_key` per chat.
+2. **Earlier compaction.** Lower the compaction trigger from 400,000 input tokens to about 150,000, checked against real chats once phase 1 is in.
+3. **Clear old tool results before compacting.** Replace old pages, notes and plugin output with one-line stubs, in batches so the cache breaks rarely; the action record keeps the facts. Full compaction runs only when that isn't enough.
+4. **Intent-filtered reads.** An optional `find` on `web_read` and `vault_read` returns the matching sections with offsets and a heading outline instead of the next 20,000–40,000 characters. Later, maybe a `chat_find` over everything a chat has read.
+
+Alongside: shorter plugin output (Spotify's metadata blob) and a review of the default effort, since output tokens cost five times input.
+
 ## Phase 6: Polish and reach
 
 - Windows installer and auto-update.

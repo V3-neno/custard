@@ -201,6 +201,8 @@ export async function runOpenAI(turn: Turn): Promise<OpenAIEnd> {
           // encrypted so the model keeps its train of thought across tool
           // calls.
           store: false,
+          // One key per chat, so its repeated start is read from the cache.
+          ...(features.promptCacheKey ? { prompt_cache_key: turn.conversation.id } : {}),
           ...(features.encryptedReasoning
             ? { include: ['reasoning.encrypted_content' as const] }
             : {}),

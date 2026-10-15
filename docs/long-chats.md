@@ -136,6 +136,42 @@ outcome unknown. Both tool loops (Claude and OpenAI) go through the same check.
 - Searches: a handoff or a provider summary counts like notes, so searches keep
   asking for the exact query.
 
+**4. Prompt cache** (`src/main/promptCache.ts`). Both providers cache the start of
+a request: tools, then the system prompt, then the messages. Claude reads a cached
+prefix at a tenth of the input rate and writes one at 1.25 times it, so a change
+anywhere in the system prompt bills the whole history again. Custard keeps the
+start of a chat's requests the same from one message to the next:
+- **Plugin notes go with their message.** The notes about plugins a message names
+  (or that the chat has used) are added to that user message as a text block, kept
+  on the chat (`messageContext`) and sent with it every time after. A plugin's notes
+  are added again only when they changed. The saved message itself is not changed,
+  and memory captures and handoffs never see the notes.
+- **Deferred parts.** The vault prompt (memory captures, `Memory.md`, the skills
+  list, the date) and the list of earlier chats change while a chat goes on,
+  because other turns write notes. A chat keeps sending the versions from its last
+  request (`promptCache` on the chat) and takes the newest only when:
+  - nothing has been sent for 5 minutes, so the cache is cold anyway;
+  - the model, the tools or the rest of the system prompt changed, so the cache
+    misses anyway;
+  - memory was turned off for the chat or in Settings, or a chat was forgotten (a
+    counter bumped on Forget, on deleting notes and on memory settings);
+  - the date changed, a part appeared or went (the vault was reached or lost), or
+    a line was taken out of `Memory.md`.
+
+  So new captures, new earlier chats and new memory lines wait at most until the
+  cache would have expired, while Forget, memory switched off and lines removed
+  from `Memory.md` take effect at the next message. A capture note deleted by hand
+  in Obsidian waits like an addition.
+
+- **OpenAI** requests carry `prompt_cache_key` set to the chat's id, so a chat's
+  requests reach the same cache (`promptCacheKey` in `shared/providers.ts`; off for
+  DeepSeek).
+
+Not deferred: automation questions (shown in every chat until answered) and
+referenced earlier chats, which change only at the user's hand. To check the
+cache, `node scripts/usage-baseline.mjs` lists each long chat's cache writes
+against its cache reads.
+
 ## What the user sees
 
 - **While a provider compacts:** "Summarizing earlier messages to make room" in the

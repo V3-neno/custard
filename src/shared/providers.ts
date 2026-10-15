@@ -20,6 +20,9 @@ export type ResponsesFeatures = {
   tokenCount: boolean
   // Hosted web search (the web_search tool).
   webSearch: boolean
+  // prompt_cache_key: requests with the same key are routed to the same
+  // prompt cache, so a chat's repeated prefix is read from it more often.
+  promptCacheKey: boolean
 }
 
 export type ProviderInfo = {
@@ -64,7 +67,8 @@ export const providers = {
       reasoningSummary: true,
       encryptedReasoning: true,
       tokenCount: true,
-      webSearch: true
+      webSearch: true,
+      promptCacheKey: true
     }
   },
   // DeepSeek's Responses API (api-docs.deepseek.com, checked 2026-10-12):
@@ -83,7 +87,8 @@ export const providers = {
       reasoningSummary: false,
       encryptedReasoning: false,
       tokenCount: false,
-      webSearch: false
+      webSearch: false,
+      promptCacheKey: false
     }
   }
 } as const satisfies Record<string, ProviderInfo>
@@ -104,7 +109,8 @@ export const responsesFeatures = (p: Provider): ResponsesFeatures =>
     reasoningSummary: false,
     encryptedReasoning: false,
     tokenCount: false,
-    webSearch: false
+    webSearch: false,
+    promptCacheKey: false
   }
 
 export const providerNames = Object.fromEntries(

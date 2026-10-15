@@ -38,7 +38,8 @@ describe('providers', () => {
       reasoningSummary: true,
       encryptedReasoning: true,
       tokenCount: true,
-      webSearch: true
+      webSearch: true,
+      promptCacheKey: true
     })
     expect(providers.claude.api).toBe('anthropic')
   })
@@ -49,7 +50,8 @@ describe('providers', () => {
       reasoningSummary: false,
       encryptedReasoning: false,
       tokenCount: false,
-      webSearch: false
+      webSearch: false,
+      promptCacheKey: false
     })
   })
 
