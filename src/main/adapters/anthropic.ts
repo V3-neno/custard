@@ -64,7 +64,8 @@ async function streamMessage(turn: TurnRequest): Promise<TurnEnd> {
     toClaudeHistory(turn.history(), {
       model: model.id,
       files: turn.files,
-      available: turn.available
+      available: turn.available,
+      context: turn.conversation.messageContext
     })
   const params: MessageCreateParamsStreaming = {
     model: model.id,
