@@ -228,7 +228,11 @@ function ChatView(props: Props): React.JSX.Element {
       .then((c) => {
         restoring.current = false
         if (c && !isOldChat(c)) setCurrent(c)
-        else openChats.delete(mode)
+        else {
+          openChats.delete(mode)
+          // An old chat opened from another mode's History.
+          if (isOldChat(c)) setOldChat(c)
+        }
       })
       .catch(() => {
         restoring.current = false

@@ -71,11 +71,7 @@ const results = () =>
     .filter((f) => f.endsWith('.json'))
     .map((f) => JSON.parse(fs.readFileSync(`${convDir}/${f}`, 'utf8')))
     .flatMap((c) => c.messages)
-    .flatMap((m) =>
-      Array.isArray(m.content)
-        ? m.content.filter((x) => x.type === 'tool_result').map((x) => String(x.content))
-        : []
-    )
+    .flatMap((m) => m.parts.filter((x) => x.type === 'tool_result').map((x) => x.text))
 const openSettings = async () => {
   await w.click('button[title=Settings]')
   await w.waitForSelector('text=Obsidian vault')

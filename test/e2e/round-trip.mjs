@@ -395,11 +395,19 @@ try {
   const e1 = await turn('round trip one')
   check(e1.at(-1).type === 'done', `ended without an error (${e1.at(-1).type})`)
   await w.waitForSelector('text=Claude found it.')
-  const stored = chat().messages.flatMap((m) =>
-    Array.isArray(m.content) ? m.content.map((c) => c.type) : ['text']
+  // Claude's own blocks are kept as raw (for Claude only); the parts show
+  // them and carry the calls and results for every provider.
+  const stored = chat().messages
+  const raw = stored.flatMap((m) => (m.raw?.blocks ?? []).map((c) => c.type))
+  const parts = stored.flatMap((m) => m.parts.map((p) => p.type))
+  for (const t of ['thinking', 'tool_use', 'compaction', 'fallback'])
+    check(raw.includes(t), `the chat keeps Claude's ${t} block`)
+  for (const t of ['thinking', 'tool_call', 'tool_result', 'compaction', 'fallback'])
+    check(parts.includes(t), `and a ${t} part`)
+  check(
+    stored.every((m) => !m.raw || m.raw.provider === 'claude'),
+    'only Claude replies have raw blocks'
   )
-  for (const t of ['thinking', 'tool_use', 'tool_result', 'compaction', 'fallback'])
-    check(stored.includes(t), `the chat keeps Claude's ${t} block`)
 
   step('2. DeepSeek Flash')
   let n = seen.length
@@ -501,9 +509,7 @@ try {
   step('The chat as it stands')
   const c = chat()
   const users = c.messages.filter(
-    (m) =>
-      typeof m.content === 'string' ||
-      m.content.some((x) => x.type === 'text' && /round trip/.test(x.text))
+    (m) => m.role === 'user' && m.parts.some((x) => x.type === 'text' && /round trip/.test(x.text))
   )
   check(users.length === 4, `4 user messages (${users.length})`)
   for (const t of ['Claude found it.', 'DeepSeek found it.', 'OpenAI found it.', 'Claude is back.'])

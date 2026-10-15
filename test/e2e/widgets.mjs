@@ -69,15 +69,11 @@ const conversations = () => {
 const chat = (title) => conversations().find((c) => c.title.startsWith(title))
 const results = (c) =>
   (c?.messages ?? []).flatMap((m) =>
-    Array.isArray(m.content)
-      ? m.content.filter((x) => x.type === 'tool_result').map((x) => String(x.content))
-      : []
+    m.parts.filter((x) => x.type === 'tool_result').map((x) => x.text)
   )
 const toolUses = (c) =>
   (c?.messages ?? []).flatMap((m) =>
-    Array.isArray(m.content)
-      ? m.content.filter((x) => x.type === 'tool_use').map((x) => x.name)
-      : []
+    m.parts.filter((x) => x.type === 'tool_call').map((x) => x.name)
   )
 const until = async (f, ms = 15000) => {
   const end = Date.now() + ms

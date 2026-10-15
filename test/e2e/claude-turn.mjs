@@ -284,7 +284,7 @@ const ids = new Map()
 const norm = (v) =>
   JSON.parse(
     JSON.stringify(v, function (k, x) {
-      if (k === 'requestId' || k === 'id' || k === 'tool_use_id') {
+      if (k === 'requestId' || k === 'id' || k === 'tool_use_id' || k === 'callId') {
         if (typeof x !== 'string') return x
         if (!ids.has(x)) ids.set(x, `#${ids.size + 1}`)
         return ids.get(x)
