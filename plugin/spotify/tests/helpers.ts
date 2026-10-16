@@ -7,6 +7,10 @@ import {
 import type { FetchInit, PluginResponse } from 'custard-plugin-sdk'
 import { SpotifyClient } from '../src/client'
 import { SeenTracks, tools, type SpotifyDeps } from '../src/tools'
+import { timing } from '../src/verify'
+
+// Tests never wait for the real follow-up delay.
+timing.verifyDelayMs = 0
 
 export type Call = {
   method: string
@@ -44,7 +48,7 @@ export const makeTrack = (
 
 // A fake Spotify behind the plugin context: records every request and
 // answers from `handler`.
-export function setup(handler: (c: Call) => PluginResponse | Promise<PluginResponse>): {
+export function setup(handler: (c: Call) => PluginResponse | Promise<PluginResponse>, timeZone?: string): {
   t: ReturnType<typeof tools>
   deps: SpotifyDeps
   calls: Call[]
@@ -68,7 +72,8 @@ export function setup(handler: (c: Call) => PluginResponse | Promise<PluginRespo
   const deps: SpotifyDeps = {
     client: new SpotifyClient(ctx),
     seen: new SeenTracks(),
-    openExternal: (u) => ctx.openExternal(u)
+    openExternal: (u) => ctx.openExternal(u),
+    timeZone
   }
   return { t: tools(deps), deps, calls, ctx }
 }
@@ -78,6 +83,13 @@ export const queueCalls = (calls: Call[]): Call[] =>
 
 export function seed(deps: SpotifyDeps, n: number): void {
   for (let i = 1; i <= n; i++) deps.seen.add(makeTrack(i))
+}
+
+// Parses the trailing "<tag>: {json}" line of a read tool result.
+export function payload(content: string, tag: string): Record<string, any> {
+  const line = content.split('\n').find((l) => l.startsWith(`${tag}: `))
+  if (!line) throw new Error(`No ${tag} line in: ${content.slice(0, 200)}`)
+  return JSON.parse(line.slice(tag.length + 2))
 }
 
 export type { FetchCall }

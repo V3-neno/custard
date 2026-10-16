@@ -9,7 +9,8 @@ const deps = (ctx: PluginContext): SpotifyDeps => ({
   client: new SpotifyClient(ctx),
   seen,
   openExternal: (url) => ctx.openExternal(url),
-  signal: ctx.signal
+  signal: ctx.signal,
+  timeZone: typeof ctx.config.timeZone === 'string' ? ctx.config.timeZone : undefined
 })
 type Input = Record<string, unknown>
 
@@ -30,6 +31,9 @@ export default definePlugin({
     search: (i: Input, ctx) => tools(deps(ctx)).search(i),
     now_playing: async (i: Input, ctx) => withWidgetData(await tools(deps(ctx)).now_playing(i)),
     devices: (i: Input, ctx) => tools(deps(ctx)).devices(i),
+    recently_played: (i: Input, ctx) => tools(deps(ctx)).recently_played(i),
+    top_items: (i: Input, ctx) => tools(deps(ctx)).top_items(i),
+    artist_genres: (i: Input, ctx) => tools(deps(ctx)).artist_genres(i),
     add_to_queue: (i: Input, ctx) => tools(deps(ctx)).add_to_queue(i),
     open: async (i: Input, ctx) => {
       const started = Date.now()

@@ -18,7 +18,7 @@ const metadata = (text: string): PlaybackMetadata => {
   return JSON.parse(line.slice('playback_metadata: '.length))
 }
 
-test('reported volume case: 11 minus 5 sends exactly 6 once; subsequent 5 is preserved, not corrected', async () => {
+test('reported volume case: 11 minus 5 sends exactly 6 once; a later 5 is reported as not observed, never corrected', async () => {
   const requests: { method: string; url: string; body?: string }[] = []
   let wrote = false
   const ctx = createContext({ fetch: (url, init) => {
@@ -29,13 +29,17 @@ test('reported volume case: 11 minus 5 sends exactly 6 once; subsequent 5 is pre
   } })
   const accepted = await plugin.tools.adjust_volume({ direction: 'lower', amount_percent: 5, device_id: 'test-tv' }, ctx)
   assert.match(content(accepted), /accepted adjust_volume to 6%/)
-  assert.equal(requests.length, 2)
+  // Accepted and verified are separate: the follow-up read saw 5%, not the requested 6%.
+  assert.match(content(accepted), /Playback has not been verified/)
+  assert.match(content(accepted), /verification: not_observed — volume is reported at 5%; 6% was requested/)
+  // preflight, one write, one follow-up read: no corrective second write.
+  assert.equal(requests.length, 3)
   assert.deepEqual(requests[1], {
     method: 'PUT', url: 'https://api.spotify.com/v1/me/player/volume?device_id=test-tv&volume_percent=6', body: undefined
   })
   const observed = metadata(content(await plugin.tools.now_playing({}, ctx)))
   assert.equal(observed.device?.volume_percent, 5)
-  assert.equal(requests.length, 3)
+  assert.equal(requests.length, 4)
   assert.equal(requests.filter((request) => request.method !== 'GET').length, 1)
 })
 
@@ -51,15 +55,20 @@ test('next then previous dispatches one of each, on same device, without inventi
     return response(204)
   } })
   assert.equal(metadata(content(await plugin.tools.now_playing({}, ctx))).track?.title, 'Song 1')
-  await plugin.tools.next_track({ device_id: 'test-tv' }, ctx)
+  const next = await plugin.tools.next_track({ device_id: 'test-tv' }, ctx)
+  assert.match(content(next), /verification: confirmed/)
   assert.equal(metadata(content(await plugin.tools.now_playing({}, ctx))).track?.title, 'Song 2')
   const previous = await plugin.tools.previous_track({ device_id: 'test-tv' }, ctx)
-  assert.match(content(previous), /not been verified/)
+  // A changed track is observed, but the plugin does not claim it is the intended one.
+  assert.match(content(previous), /verification: confirmed — the current track now differs from before/)
+  assert.match(content(previous), /was not checked/)
+  assert.match(content(previous), /does not prove this command caused the change/)
   assert.equal(metadata(content(await plugin.tools.now_playing({}, ctx))).track?.title, 'Song 3')
   assert.deepEqual(requests.filter((request) => request.method !== 'GET'), [
     { method: 'POST', url: 'https://api.spotify.com/v1/me/player/next?device_id=test-tv', body: undefined },
     { method: 'POST', url: 'https://api.spotify.com/v1/me/player/previous?device_id=test-tv', body: undefined }
   ])
-  assert.equal(requests.length, 7)
+  // 3 now_playing reads + 2 x (preflight, write, follow-up read)
+  assert.equal(requests.length, 9)
   assert.deepEqual(ctx.opened, [])
 })
