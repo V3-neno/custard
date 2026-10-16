@@ -86,6 +86,7 @@ export function seed(deps: SpotifyDeps, n: number): void {
 }
 
 // Parses the trailing "<tag>: {json}" line of a read tool result.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON payload for test assertions
 export function payload(content: string, tag: string): Record<string, any> {
   const line = content.split('\n').find((l) => l.startsWith(`${tag}: `))
   if (!line) throw new Error(`No ${tag} line in: ${content.slice(0, 200)}`)

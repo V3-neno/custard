@@ -14,7 +14,7 @@ const base = (): Player => ({
 const changed = (f: (p: Player) => void): Player => { const p = base(); f(p); return p }
 
 // before: the preflight snapshot. after: the follow-up snapshot, a status code, or a thrown failure.
-function scripted(before: Player, after: Player | number | 'throw') {
+function scripted(before: Player, after: Player | number | 'throw'): ReturnType<typeof setup> {
   let wrote = false
   return setup((c) => {
     if (c.method !== 'GET') { wrote = true; return json(204) }
@@ -123,7 +123,7 @@ test('the follow-up waits for the configured delay', async () => {
 
 // ---- transfer ----------------------------------------------------------------
 
-function transferSetup(after: Player | null) {
+function transferSetup(after: Player | null): ReturnType<typeof setup> {
   let wrote = false
   return setup((c) => {
     if (c.method === 'PUT') { wrote = true; return json(204) }
@@ -154,7 +154,7 @@ test('transfer: accepted but not observed, as in the earlier paused-on-EMAX test
 
 // ---- queue -------------------------------------------------------------------
 
-function queueSetup(before: number[] | 'fail', after: number[] | 'fail') {
+function queueSetup(before: number[] | 'fail', after: number[] | 'fail'): ReturnType<typeof setup> {
   let posted = 0
   const s = setup((c) => {
     if (c.method === 'POST') { posted++; return json(204) }

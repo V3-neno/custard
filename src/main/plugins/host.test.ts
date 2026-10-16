@@ -1169,6 +1169,8 @@ describe('the Spotify reference plugin through the host', () => {
     'account-scope:user-read-playback-state',
     'account-scope:user-read-currently-playing',
     'account-scope:user-modify-playback-state',
+    'account-scope:user-read-recently-played',
+    'account-scope:user-top-read',
     'action:add_to_queue',
     'action:open',
     'action:transfer_playback',

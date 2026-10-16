@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- assertions read untyped JSON payloads */
 import { assert, test } from 'custard-plugin-sdk/testing'
 import { observationClock, parseInstant, resolveZone, toLocalIso } from '../src/time'
 import { id, json, payload, setup } from './helpers'
@@ -56,7 +57,7 @@ test('observation clock never throws on a bad instant', () => {
 // ---- recently_played -------------------------------------------------------
 
 test('recently_played maps entries, keeps UTC and adds local time, labels lag', async () => {
-  const { t, calls } = setup((c) => json(200, {
+  const { t, calls } = setup(() => json(200, {
     items: [play(1, '2026-10-09T16:35:00.123Z'), play(2, '2026-10-09T16:30:00Z')],
     cursors: { after: '1791563700123', before: '1791563400000' }
   }))
