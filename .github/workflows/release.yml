@@ -79,7 +79,11 @@ jobs:
       # --publish never: the release job uploads, so three jobs never race to
       # create the same draft.
       - run: npm run ${{ matrix.script }} -- ${{ matrix.args }} --publish never
-      - uses: actions/upload-artifact@v5
+        env:
+          # electron-builder skips signing on PR builds; the macOS signature is
+          # ad-hoc (no secrets), and Apple Silicon won't run an unsigned app.
+          CSC_FOR_PULL_REQUEST: 'true'
+      - uses: actions/upload-artifact@v6
         with:
           name: custard-${{ runner.os }}-${{ runner.arch }}
           path: |
@@ -98,7 +102,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           path: installers
           merge-multiple: true
