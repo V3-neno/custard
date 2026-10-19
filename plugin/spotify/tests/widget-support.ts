@@ -10,14 +10,23 @@ export function snapshot(now = 1000000): Snapshot {
     actions: { availability: { next_track: true, pause_playback: true, resume_playback: true, seek: true } }
   })
 }
-export function deferred<T>() {
+export type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void; reject: (reason?: unknown) => void }
+export function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void
   let reject!: (reason?: unknown) => void
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
 export async function flush(): Promise<void> { for (let i = 0; i < 12; i++) await Promise.resolve() }
-export function context() {
+export type TestContext = {
+  ctx: WidgetContext & { visible: boolean; restored: boolean; input: unknown }
+  calls: { tool: string; input: Record<string, unknown> }[]
+  heights: number[]
+  clock: () => number
+  advance: (ms: number) => void
+  respond: (f: (tool: string) => Promise<WidgetCallResult>) => void
+}
+export function context(): TestContext {
   const calls: { tool: string; input: Record<string, unknown> }[] = []
   const heights: number[] = []
   let now = 1000000
@@ -45,17 +54,17 @@ export class ElementDouble {
   listeners = new Map<string, Set<() => void>>()
   constructor(readonly tagName: string, readonly ownerDocument: DocumentDouble) {}
   set innerHTML(_value: string) { throw new Error('HTML interpolation is forbidden') }
-  append(...els: ElementDouble[]) { this.children.push(...els) }
-  replaceChildren(...els: ElementDouble[]) { this.children = els }
-  setAttribute(k: string, v: string) { this.attributes[k] = v }
-  addEventListener(k: string, fn: () => void) {
+  append(...els: ElementDouble[]): void { this.children.push(...els) }
+  replaceChildren(...els: ElementDouble[]): void { this.children = els }
+  setAttribute(k: string, v: string): void { this.attributes[k] = v }
+  addEventListener(k: string, fn: () => void): void {
     if (!this.listeners.has(k)) this.listeners.set(k, new Set())
     this.listeners.get(k)!.add(fn)
   }
-  removeEventListener(k: string, fn: () => void) { this.listeners.get(k)?.delete(fn) }
-  emit(k: string) { if (!this.disabled) for (const fn of this.listeners.get(k) ?? []) fn() }
+  removeEventListener(k: string, fn: () => void): void { this.listeners.get(k)?.delete(fn) }
+  emit(k: string): void { if (!this.disabled) for (const fn of this.listeners.get(k) ?? []) fn() }
   all(): ElementDouble[] { return [this, ...this.children.flatMap((c) => c.all())] }
-  find(text: string) { return this.all().find((e) => e.textContent === text)! }
+  find(text: string): ElementDouble { return this.all().find((e) => e.textContent === text)! }
   get listenerCount(): number { return [...this.listeners.values()].reduce((n, s) => n + s.size, 0) }
 }
 export class DocumentDouble {
@@ -66,10 +75,10 @@ export class DocumentDouble {
     setTimeout: (fn: () => void) => { const id = ++this.next; this.frames.set(id, fn); return id },
     clearTimeout: (id: number) => { this.frames.delete(id) }
   }
-  createElement(tag: string) { return new ElementDouble(tag, this) }
-  tick() { const frames = [...this.frames.values()]; this.frames.clear(); frames.forEach((fn) => fn()) }
+  createElement(tag: string): ElementDouble { return new ElementDouble(tag, this) }
+  tick(): void { const frames = [...this.frames.values()]; this.frames.clear(); frames.forEach((fn) => fn()) }
 }
-export const rootDouble = () => {
+export const rootDouble = (): { doc: DocumentDouble; element: ElementDouble; root: HTMLElement } => {
   const doc = new DocumentDouble()
   const element = doc.createElement('div')
   return { doc, element, root: element as unknown as HTMLElement }

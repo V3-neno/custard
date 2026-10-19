@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   check:
-    name: Typecheck and unit tests
+    name: Typecheck, lint and unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -43,8 +43,8 @@ jobs:
             exit 1
           fi
       - run: npm ci
-      # Lint isn't a gate: main has lint errors in plugin/spotify tests.
       - run: npm run typecheck
+      - run: npm run lint
       - run: npm test
 
   build:

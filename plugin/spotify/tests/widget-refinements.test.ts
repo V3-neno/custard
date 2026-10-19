@@ -1,11 +1,11 @@
 import { assert, test } from 'custard-plugin-sdk/testing'
 import type { WidgetCallResult } from 'custard-plugin-sdk/widget'
-import { fromMetadata, readSnapshot } from '../src/widget-data'
+import { fromMetadata, readSnapshot, type Snapshot } from '../src/widget-data'
 import { actionNotice, PlayerController, STALE_MS } from '../widget/controller'
 import { createPlayerWidget } from '../widget/player'
 import { context, deferred, flush, rootDouble, snapshot } from './widget-support'
 
-const volumeSnapshot = (volume = 50) => ({ ...snapshot(), volume, volumeSupported: true })
+const volumeSnapshot = (volume = 50): Snapshot => ({ ...snapshot(), volume, volumeSupported: true })
 
 test('volume data is validated without inventing zero or support', () => {
   for (const value of [0, 50, 100]) {
