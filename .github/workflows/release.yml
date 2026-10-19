@@ -1,0 +1,118 @@
+# Builds the Windows and macOS installers on their own runners (each needs its
+# own esbuild binary, see electron-builder.yml) and, for a v* tag, puts them in
+# a draft GitHub Release that Neno publishes by hand. Run it by hand (Actions >
+# Release > Run workflow) to get the installers as workflow artifacts without
+# a release (this works once the workflow is on main). Nothing is signed
+# with a certificate: see .github/release/notes.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+  # Builds (no release) when a PR changes the packaging itself, so a broken
+  # installer shows up before merge. macOS minutes are the expensive part.
+  pull_request:
+    paths:
+      - electron-builder.yml
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Typecheck, lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            script: build:win
+            args: --x64
+          - name: macOS Apple Silicon
+            os: macos-latest
+            script: build:mac
+            args: --arm64
+          # GitHub's last Intel macOS image; Intel macOS runners end with it
+          # (announced for fall 2027).
+          - name: macOS Intel
+            os: macos-15-intel
+            script: build:mac
+            args: --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # --publish never: the release job uploads, so three jobs never race to
+      # create the same draft.
+      - run: npm run ${{ matrix.script }} -- ${{ matrix.args }} --publish never
+        env:
+          # electron-builder skips signing on PR builds; the macOS signature is
+          # ad-hoc (no secrets), and Apple Silicon won't run an unsigned app.
+          CSC_FOR_PULL_REQUEST: 'true'
+      - uses: actions/upload-artifact@v6
+        with:
+          name: custard-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Draft GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Checksums
+        run: cd installers && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" installers/* \
+            --draft \
+            --title "Custard $GITHUB_REF_NAME" \
+            --notes-file .github/release/notes.md

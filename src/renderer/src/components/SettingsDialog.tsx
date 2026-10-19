@@ -389,6 +389,53 @@ function MemorySection(): React.JSX.Element {
   )
 }
 
+// Obsidian is a separate download (Custard can't include it). Offers it when
+// nothing on this computer opens obsidian:// links, otherwise opens the
+// connected vault there.
+function ObsidianRow({ connected }: { connected: boolean }): React.JSX.Element | null {
+  const [installed, setInstalled] = useState<boolean | null>(null)
+  const [opened, setOpened] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    window.custard.obsidian.installed().then(setInstalled, () => setInstalled(false))
+  }, [])
+  if (installed === null || (installed && !connected)) return null
+  const open = async (): Promise<void> => {
+    try {
+      setError(null)
+      await window.custard.obsidian.openVault()
+      setOpened(true)
+    } catch (e) {
+      setError(cleanError(e))
+    }
+  }
+  return (
+    <div className="mt-3">
+      {installed ? (
+        <button onClick={open} className={secondary}>
+          Open in Obsidian
+        </button>
+      ) : (
+        <div className="flex items-center gap-3">
+          <button onClick={() => window.custard.obsidian.download()} className={secondary}>
+            Get Obsidian
+          </button>
+          <span className="text-xs text-ash-400">
+            Obsidian isn&apos;t installed. It&apos;s free from obsidian.md.
+          </span>
+        </div>
+      )}
+      {opened && (
+        <p className="mt-2 text-xs text-ash-400">
+          If Obsidian can&apos;t find the vault, choose Open folder as vault there and pick this
+          folder.
+        </p>
+      )}
+      {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
+    </div>
+  )
+}
+
 function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('general')
   // Bumped by Reload of the models file, so the model lists read it again.
@@ -464,8 +511,8 @@ function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Eleme
         ) : (
           <>
             <p className="mb-5 -mt-1 text-sm text-ash-400">
-              Keys are encrypted with Windows secure storage and stay on this computer. Pick a model
-              from any provider under the message box.
+              Keys are encrypted with this computer&apos;s secure storage and stay on it. Pick a
+              model from any provider under the message box.
             </p>
             <DefaultModelSection key={modelsVersion} onChanged={onChanged} />
             <ModelsFile
@@ -534,6 +581,7 @@ function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Eleme
                   </button>
                 </div>
               )}
+              <ObsidianRow connected={!!vault} />
               {vault && <EditableFolders />}
               {vault && <Automations />}
               {added && <p className="mt-2 text-xs text-ash-400">{added}</p>}

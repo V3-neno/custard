@@ -31,14 +31,31 @@ extraResources:
   - from: node_modules/typescript/lib
     to: typescript-lib
     filter: ['lib*.d.ts']
+# Release builds: each installer is built on its own OS and CPU, because
+# esbuild ships one native binary per platform and npm installs only the
+# host's. A Windows build made on Linux carries Linux's esbuild.
 win:
   executableName: custard
+  target:
+    - target: nsis
+      arch: x64
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+# macOS: dmg and zip for the host CPU (arm64 on Apple Silicon runners, x64 on
+# Intel ones). No Developer ID yet, so the app is ad-hoc signed ("-"), which
+# Apple Silicon needs to run it at all. Hardened runtime is off because with an
+# ad-hoc signature it rejects Electron's pre-signed frameworks; it is only
+# needed for notarization. Gatekeeper still blocks the first open.
 mac:
+  target:
+    - dmg
+    - zip
+  identity: '-'
+  hardenedRuntime: false
+  artifactName: ${name}-${version}-mac-${arch}.${ext}
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -47,12 +64,10 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-mac-${arch}.${ext}
 linux:
   target:
     - AppImage
-    - snap
-    - deb
   maintainer: electronjs.org
   category: Utility
 appImage:
@@ -70,6 +85,11 @@ electronFuses:
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
+# Where electron-builder uploads when it publishes (--publish, or in CI on a
+# tag): a draft GitHub Release that Neno publishes by hand. Local builds
+# without a GH_TOKEN don't upload. There is no auto-update.
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: V3-neno
+  repo: custard
+  releaseType: draft

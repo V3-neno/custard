@@ -1,12 +1,12 @@
 import { assert, test } from 'custard-plugin-sdk/testing'
 import type { WidgetCallResult } from 'custard-plugin-sdk/widget'
-import { fromMetadata } from '../src/widget-data'
+import { fromMetadata, type Snapshot } from '../src/widget-data'
 import { availabilityNotice, refreshDisabled } from '../widget/availability'
 import { PlayerController, STALE_MS } from '../widget/controller'
 import { createPlayerWidget } from '../widget/player'
 import { context, deferred, flush, rootDouble, snapshot } from './widget-support'
 
-const absent = () => fromMetadata({ observed_at: new Date(1000000).toISOString(), state: 'unavailable', device: null, track: null })
+const absent = (): Snapshot => fromMetadata({ observed_at: new Date(1000000).toISOString(), state: 'unavailable', device: null, track: null })
 
 test('no-active state is explicit; Refresh reads once, shows checking and recovers without writes', async () => {
   const t = context(), d = rootDouble(), w = createPlayerWidget(t.clock)

@@ -58,6 +58,7 @@ import {
 } from '../shared/chat'
 import { listSkills } from './vault'
 import { pinProviderEndpoints } from './endpoints'
+import { OBSIDIAN_DOWNLOAD, obsidianOpenUrl } from './obsidian'
 import {
   addMissingStarterSkills,
   createStarterVault,
@@ -267,6 +268,16 @@ app.whenReady().then(() => {
     return vaultInfo()
   })
   handle('vault:clear', () => setVaultPath(null))
+  // Whether something handles obsidian:// links, i.e. Obsidian is installed.
+  // Electron asks the OS; not checked on a real Windows or macOS install.
+  handle('obsidian:installed', () => app.getApplicationNameForProtocol('obsidian://') !== '')
+  // Both links are built here, never taken from the renderer.
+  handle('obsidian:openVault', async () => {
+    const path = getVaultPath()
+    if (!path) throw new Error('Connect a vault first.')
+    await shell.openExternal(obsidianOpenUrl(path))
+  })
+  handle('obsidian:download', () => shell.openExternal(OBSIDIAN_DOWNLOAD))
   handle('vault:getGrants', () => getVaultGrants())
   handle('vault:setGrants', (_, grants: unknown) => setVaultGrants(grants))
   handle('vault:edits', () =>
