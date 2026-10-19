@@ -511,7 +511,7 @@ function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Eleme
         ) : (
           <>
             <p className="mb-5 -mt-1 text-sm text-ash-400">
-              Keys are encrypted with Windows secure storage and stay on this computer. Pick a model
+              Keys are encrypted with this computer's secure storage and stay on it. Pick a model
               from any provider under the message box.
             </p>
             <DefaultModelSection key={modelsVersion} onChanged={onChanged} />
