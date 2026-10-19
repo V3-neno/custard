@@ -17,4 +17,4 @@ These builds are not signed with a paid certificate, so the system warns once pe
 
 ## Starter vault and Obsidian
 
-The starter vault is inside Custard: **Settings > Create starter vault** writes a "Custard Brain" folder wherever you choose. Obsidian is a separate, free download from [obsidian.md/download](https://obsidian.md/download); Custard can't include it. In Obsidian, choose **Open folder as vault** and pick "Custard Brain".
+The starter vault is inside Custard: **Settings > Create starter vault** writes a "Custard Brain" folder wherever you choose. Obsidian is a separate, free download; Custard can't include it. In Settings, **Get Obsidian** opens [obsidian.md/download](https://obsidian.md/download), and once Obsidian is installed, **Open in Obsidian** opens your vault there. If Obsidian can't find it, choose **Open folder as vault** in Obsidian and pick "Custard Brain".

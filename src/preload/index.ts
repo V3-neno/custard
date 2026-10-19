@@ -114,6 +114,13 @@ const custard = {
     undoEdit: (id: string): Promise<{ ok: boolean; message: string }> =>
       ipcRenderer.invoke('vault:undoEdit', id)
   },
+  obsidian: {
+    installed: (): Promise<boolean> => ipcRenderer.invoke('obsidian:installed'),
+    // Opens the connected vault in Obsidian.
+    openVault: (): Promise<void> => ipcRenderer.invoke('obsidian:openVault'),
+    // Opens Obsidian's download page in the browser.
+    download: (): Promise<void> => ipcRenderer.invoke('obsidian:download')
+  },
   skills: {
     // null when no vault is connected.
     list: (): Promise<SkillEntry[] | null> => ipcRenderer.invoke('skills:list'),
