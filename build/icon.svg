@@ -30,6 +30,11 @@
       <stop offset="0.93" stop-color="#b4531a" stop-opacity="0.55"/>
       <stop offset="1" stop-color="#6e2f0e" stop-opacity="0.85"/>
     </radialGradient>
+    <linearGradient id="gloss" gradientUnits="userSpaceOnUse" x1="380" y1="380" x2="600" y2="680">
+      <stop offset="0" stop-color="#fff6e0" stop-opacity="0.9"/>
+      <stop offset="0.6" stop-color="#fff6e0" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#fff6e0" stop-opacity="0.25"/>
+    </linearGradient>
     <clipPath id="tileClip"><rect x="80" y="80" width="864" height="864" rx="196"/></clipPath>
   </defs>
   <rect x="80" y="80" width="864" height="864" rx="196" fill="url(#tile)"/>
@@ -43,7 +48,6 @@
   <!-- custard surface -->
   <circle cx="512" cy="528" r="236" fill="url(#custard)"/>
   <circle cx="512" cy="528" r="236" fill="url(#burn)"/>
-  <!-- gloss -->
-  <path d="M352 470 A172 172 0 0 1 498 350" fill="none" stroke="#fff6e0" stroke-opacity="0.75" stroke-width="30" stroke-linecap="round"/>
-  <circle cx="356" cy="530" r="15" fill="#fff6e0" opacity="0.6"/>
+  <!-- gloss, shaped as a C -->
+  <path d="M608.4 413.1 A150 150 0 1 0 608.4 642.9" fill="none" stroke="url(#gloss)" stroke-width="40" stroke-linecap="round"/>
 </svg>
