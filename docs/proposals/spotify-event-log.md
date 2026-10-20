@@ -211,7 +211,7 @@ A vault-template skill, `spotify-preferences`, run by hand or as a weekly automa
 
 - Reads the day notes it is given (for example the last 7), parses `custard-event` blocks, ignores everything else in the notes.
 - Rules, each line labelled *(inferred)* with its evidence count: a `skip` with `source: "widget"` under 30 s = weak dislike; `track_change` with `cause: "likely_ended"` = weak like; repeated skips of the same artist = dislike of the artist; assistant-sourced skips are not counted; `track_change` with `cause: "unknown"` is not counted on its own.
-- Writes only a **new** note, `Custard/Plugins/Spotify/Preferences/Inferred 2026-10-20.md` (needs a "New notes" grant on that folder, or it asks with the usual card). It never edits `Music Preferences.md`; the existing `music` skill reads the inferred notes and already weighs *(inferred)* lines lower than *(explicit)* ones.
+- Writes only a **new** note, `Custard/Plugins/Spotify/Preferences/Inferred 2026-10-20.md` (needs a "New notes" grant on that folder, or it asks with the usual card). It never edits any existing note. (Built in step 4 as `vault-template/Custard/Skills/spotify-preferences`. Correction: the starter vault no longer has a `music` skill or `Music Preferences.md`, so nothing reads the inferred notes automatically; the user, or a skill of their own, decides what to do with them.)
 - Reading the log marks the chat as outside text, so any edit it might suggest shows a card.
 
 ---

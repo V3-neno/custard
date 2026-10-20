@@ -1,6 +1,6 @@
 # Spotify in Custard
 
-Custard can search Spotify, see what's playing, list your devices, add songs to your queue, open the Spotify app and move playback between devices. Custard's starter vault has no music skill or preferences note: the plugin's own instructions guide how it is used, and you can add your own skill or note in your vault if you want one.
+Custard can search Spotify, see what's playing, list your devices, add songs to your queue, open the Spotify app and move playback between devices. Custard's starter vault has no music skill or preferences note: the plugin's own instructions guide how it is used, and you can add your own skill or note in your vault if you want one. If you turn on the plugin's event log (Manage → Spotify), the starter skill `spotify-preferences` can sum it up into a new note of *inferred* likes and dislikes in `Custard/Plugins/Spotify/Preferences/`; it never edits your own notes. Existing vaults get the skill from Settings → Obsidian vault → **Add missing starter skills and notes**.
 
 Spotify is a **plugin** (`plugin/spotify`), built only on the public plugin API: Custard's core has no Spotify code. See [plugins/README.md](plugins/README.md) for how plugins are reviewed, activated, disabled and rolled back.
 

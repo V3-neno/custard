@@ -88,7 +88,7 @@ describe('inventory', () => {
     const recall = inv.find((i) => i.id === 'skill:chat-recall')!
     expect(recall.category).toBe('skill')
     expect(recall.uses).toEqual(expect.arrayContaining(['chats_search', 'vault_search']))
-    expect(inv.filter((i) => i.category === 'skill').length).toBe(17)
+    expect(inv.filter((i) => i.category === 'skill').length).toBe(18)
   })
 
   it('a skill that names web_search needs web search', () => {

@@ -36,3 +36,14 @@ Run after reviewing and activating 1.5.0 (the review lists "Keep an event log in
 15. **Failure:** with logging on, set Custard to a missing vault (or make the day note read-only). Press Pause: playback pauses as usual, the player shows "Event log not saving", and Manage shows the error.
 
 Record what you actually saw. A skipped check is not a pass.
+
+### Inferred preferences skill (`spotify-preferences`)
+
+Needs a few days of log, or one day with deliberate presses. Not run with a real model yet.
+
+16. **Chat:** ask "what does my Spotify listening say about my taste this week?". The `spotify-preferences` skill is read, then the day notes. A draft is shown before anything is saved; saving asks with a card and creates `Custard/Plugins/Spotify/Preferences/Inferred <today>.md`.
+17. **Rules:** quick player skips (under 30 s) show as dislikes, songs that ran to the end as likes, every line marked *(inferred)* with its evidence. Assistant skips, skips after 30 s and unexplained track changes appear only under "Not counted". An artist needs 3 or more over 2 or more tracks.
+18. **Never edits:** run it twice the same day. The second note is `Inferred <today> 2.md`; the first is unchanged, and so is any preferences note of your own.
+19. **Untrusted text:** a title with `[[`, `#` or a link appears without them in the note: no wikilink, tag or link.
+20. **Automation:** schedule the skill weekly with a New notes grant on `Custard/Plugins/Spotify/Preferences`. A run creates the note; without the grant it ends with the draft and says the grant is needed.
+21. **Empty log:** with the log off and no Events notes, it says so and writes nothing.
