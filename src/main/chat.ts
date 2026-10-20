@@ -921,7 +921,8 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         signal: controller.signal,
         mode: conversation.mode,
         approve,
-        preApproved
+        preApproved,
+        caller: 'assistant'
       })
       return r
     }

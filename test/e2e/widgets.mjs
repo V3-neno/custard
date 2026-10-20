@@ -324,6 +324,10 @@ try {
     ),
     'allowed: the tally is 1'
   )
+  check(
+    /from the widget/.test(await inWidget(`document.querySelector('.status').textContent`)),
+    'the plugin was told the widget asked (ctx.caller)'
+  )
   await clickInWidget('.add')
   await card.waitFor({ timeout: 10000 })
   await card.getByRole('button', { name: 'Decline', exact: true }).click()

@@ -46,12 +46,26 @@ type ToolResult = string | { content: string; isError?: boolean; data?: unknown 
 | Member                            | What it does                                                                            | Needs                                                                                                                                                  |
 | --------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ctx.signal`                      | `AbortSignal`, aborted on timeout, Stop, or disable                                     | —                                                                                                                                                      |
+| `ctx.caller`                      | Who started the call: `assistant`, `widget`, `automation` or `design` (see below)       | —                                                                                                                                                      |
 | `ctx.fetch(url, init?)`           | HTTPS request through the host. Returns `{ status, ok, headers.get(), text(), json() }` | `permissions.network` lists the host                                                                                                                   |
 | `ctx.fetch(url, { auth: true })`  | Same, and the host adds `Authorization: Bearer <token>` for the signed-in account       | `auth` in the manifest; only for `auth.apiHosts`                                                                                                       |
 | `ctx.storage.get/set/delete(key)` | Plugin-scoped JSON storage, 1 MB in total                                               | `permissions.storage: true`                                                                                                                            |
 | `ctx.config`                      | The user's non-secret configuration values, with defaults                               | —                                                                                                                                                      |
 | `ctx.openExternal(url)`           | Asks the OS to open a link                                                              | URL starts with a prefix in `permissions.openExternal` and uses only plain URL characters (no spaces, quotes, backslashes or non-ASCII; use %-escapes) |
 | `ctx.log(message)`                | A line in the plugin's log in Settings (redacted, last 50 kept)                         | —                                                                                                                                                      |
+
+### `ctx.caller`
+
+Custard sets it from where the call came in. The model, a widget's input and the plugin can't choose it.
+
+| Value        | The call came from                                                                                                                                           |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `assistant`  | A tool call in a model's reply, in any mode                                                                                                                  |
+| `widget`     | The plugin's own widget. For a write tool this also means the user pressed something in it: Custard refuses a widget write without a real click or key press |
+| `automation` | A scheduled skill run (read tools only; writes are declined there)                                                                                           |
+| `design`     | Design's media jobs                                                                                                                                          |
+
+Use it to tell the user's own presses apart from the assistant's actions, for example in a log. It says where the call came from, not that the plugin's code is honest about it afterwards. In tests, `createContext({ caller: 'widget' })`; the default is `assistant`.
 
 ### `ctx.fetch` rules (enforced by the host)
 

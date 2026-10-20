@@ -1,4 +1,4 @@
-import type { ConfigValue, FetchInit, PluginContext, PluginResponse } from './index'
+import type { Caller, ConfigValue, FetchInit, PluginContext, PluginResponse } from './index'
 
 // Test helpers for plugins: a fake context with a scripted fetch, and a tiny
 // test runner. The same test files run in Custard's sandbox (Validate & test)
@@ -31,7 +31,13 @@ export type TestContext = PluginContext & {
 }
 
 export function createContext(
-  o: { fetch?: FakeFetch; config?: Record<string, ConfigValue>; signal?: AbortSignal } = {}
+  o: {
+    fetch?: FakeFetch
+    config?: Record<string, ConfigValue>
+    signal?: AbortSignal
+    // Who started the call; 'assistant' unless a test says otherwise.
+    caller?: Caller
+  } = {}
 ): TestContext {
   const calls: FetchCall[] = []
   const opened: string[] = []
@@ -43,6 +49,7 @@ export function createContext(
     logs,
     data,
     signal: o.signal ?? new AbortController().signal,
+    caller: o.caller ?? 'assistant',
     config: o.config ?? {},
     fetch: async (url, init = {}) => {
       calls.push({ url, init })

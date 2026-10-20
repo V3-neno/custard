@@ -37,7 +37,7 @@ export function widgets(): WidgetManager {
     widgetCode: (id, buildId, widgetId) => host.widgetCode(id, buildId, widgetId),
     isWrite: (id, buildId, tool) => host.toolWrites(id, buildId, tool),
     invoke: (name, input, { conversationId, ...o }) =>
-      host.invoke(name, input, { ...o, mode: modeOf(conversationId) }),
+      host.invoke(name, input, { ...o, mode: modeOf(conversationId), caller: 'widget' }),
     log: (id, line) => host.widgetLog(id, line),
     surface: createSurface(() => win),
     records: widgetRecords,
