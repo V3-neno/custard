@@ -1,6 +1,8 @@
 # Script tools: Python and JavaScript scripts the assistant can call (Step 1, design only)
 
-Status: design only, waiting for Neno's decisions (section 12). No code yet.
+Status: approved by Neno on 2026-10-20 ("Build with all recommendations",
+D1 to D7 as recommended). Step 1 is built; see **Step 1 as built** at the end,
+which also lists where the built shape differs from this note.
 Based on `main` at ce979a0 (version 0.1.2). Asked for on 2026-10-20, before
 0.2.0: "i want to make it so that we can utilize python/js scripts. If i want
 to create a scraper based on some github called scrapling then i want to be
@@ -158,34 +160,33 @@ manifest and tool contract, so v1 doesn't block it.
 
 ```json
 {
-  "id": "scraper",
   "name": "Scraper",
   "version": "0.1.0",
   "runtime": "python",
-  "python": ">=3.10",
+  "minVersion": "3.10",
   "entry": "main.py",
-  "setup": ["python -m scrapling install"],
+  "setup": [["python", "-m", "scrapling", "install"]],
   "tools": [
     {
       "name": "fetch_page",
       "description": "Fetch a page and return the text of elements matching a CSS selector.",
-      "input": {
+      "inputSchema": {
         "type": "object",
         "properties": { "url": { "type": "string" }, "selector": { "type": "string" } },
         "required": ["url"]
       },
       "effect": "read",
-      "timeoutSeconds": 60
+      "timeoutMs": 60000
     }
   ],
-  "declares": { "network": true, "writesFiles": "work" }
+  "declares": { "network": true, "files": "work" }
 }
 ```
 
 - **Contract:** Custard starts the entry with the tool name as the only
-  argument and `{ "input": ... }` as JSON on stdin. The script prints one JSON
-  object, `{ "ok": true, "result": ... }` or `{ "ok": false, "error": "..." }`,
-  as its last stdout line. A small helper (`custard_script.py` /
+  argument and `{ "tool": ..., "input": ... }` as JSON on stdin. The script
+  prints one line `@custard-result ` followed by `{ "ok": true, "result": ... }`
+  or `{ "ok": false, "error": "..." }`; the last such line counts. A small helper (`custard_script.py` /
   `custard-script.mjs`) does this for you. stderr goes to the run record only.
 - **Tool names** `script_<id>__<tool>`, so they never collide with plugin tools
   (`<id>__<tool>`). Same schema checks and length limits as plugins.
@@ -304,3 +305,35 @@ for this chat"; scripts you copy from elsewhere.
 
 Not verified by this note: anything on Windows (the launcher, the Store alias,
 `taskkill`, DPAPI behaviour) and Scrapling itself. Those are from documentation.
+
+## Step 1 as built
+
+Branch `script-tools`. Runner and store only: nothing is wired into Electron,
+the chat, settings or the UI yet, so the app behaves exactly as before.
+
+| File                               | What it does                                                                                                                                                                                                                                                     |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/main/scripts/manifest.ts`     | `script.json` checks (same tool rules as plugins, timeout 1 s to 10 min), `script_<id>__<tool>` names, setup commands as plain argument lists that must start with the runtime.                                                                                  |
+| `src/main/scripts/store.ts`        | `<app data>/scripts/<id>/` layout, hashing (no links, secret-looking names, dependency folders, 500 files / 20 MB), approval bound to the digest the user reviewed, re-hash of `approved/` before every run, run records (last 50), uninstall that keeps `src/`. |
+| `src/main/scripts/interpreters.ts` | Python and Node discovery (`py -0p`, PATH, Store alias skipped, Program Files / Homebrew), version probe, check for a path picked with Browse, venv Python path.                                                                                                 |
+| `src/main/scripts/env.ts`          | Allowlisted environment per OS; script config values can't set `PATH`, `NODE_*`, `PYTHON*`, `LD_*`, `DYLD_*`, `ELECTRON_*`, proxies or CA variables.                                                                                                             |
+| `src/main/scripts/runner.ts`       | Spawn without a shell, JSON on stdin, timeout, 2 MB stdout cap, stderr tail, tree kill (process group on macOS/Linux, `taskkill /T /F` on Windows), result line parsing.                                                                                         |
+| `src/main/scripts/host.ts`         | All checks before a run (Scripts on, script on, approved copy unchanged, tool declared, input valid, interpreter new enough, one run at a time by default, up to 3), Stop for one or all scripts, run records.                                                   |
+| `src/main/scripts/helpers.ts`      | `custard_script.py` and `custard-script.mjs`, written into new scripts in step 3.                                                                                                                                                                                |
+
+Differences from the note above, found while building:
+
+- **Python flags are `-E -s -B -X utf8 -X pycache_prefix=<a folder that never exists>`, not `-I`.** `-I` also removes the script's own folder from the import path, so a script couldn't import its helper or its own modules. `-E` and `-s` keep the rest of what `-I` gave.
+- **No bytecode in the approved copy.** `-B` plus the never-existing cache prefix means Python neither writes nor reads `.pyc` files there, and the hash check refuses any `__pycache__` or `.pyc` found in `approved/`, since a planted one could run code nobody reviewed.
+- **Node packages go in `scripts/<id>/node_modules/`**, next to `approved/`, because Node looks for packages in the folders above the entry file. Python's venv stays in `env/`.
+- **The result line has a marker** (`@custard-result `), so a script's own printing can't be mistaken for its answer.
+
+Tests: 35 new unit tests in `src/main/scripts/` using the real Python 3.13 and
+Node 22 in the container (approval and tamper checks, a planted `.pyc`,
+environment scrubbing, shell characters in input, timeout, Stop, output cap,
+the whole process tree being killed, one run at a time, venv preference, Node
+scripts). The tree-kill test fails if only the interpreter is killed (checked
+by temporarily changing the code). Full unit suite: 1,640 passed, 2 skipped.
+
+Not verified: Windows (the launcher list, the Store alias, `taskkill`) and
+macOS. The Windows discovery paths are tested with a simulated file system only.
