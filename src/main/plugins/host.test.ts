@@ -1191,6 +1191,7 @@ describe('the Spotify reference plugin through the host', () => {
     'network:api.spotify.com',
     'network:accounts.spotify.com',
     'open:spotify:',
+    'events',
     'account:accounts.spotify.com',
     'account-token:accounts.spotify.com',
     'account-api:api.spotify.com',

@@ -1,17 +1,23 @@
 import { definePlugin, type PluginContext } from 'custard-plugin-sdk'
 import { SpotifyClient } from './client'
+import { EventMemory, logState } from './events'
 import { SeenTracks, tools, type SpotifyDeps } from './tools'
 import { describeReady, readinessTimeout, waitForDevices } from './readiness'
 import { withWidgetData } from './widget-data'
 
 const seen = new SeenTracks()
-const deps = (ctx: PluginContext): SpotifyDeps => ({
-  client: new SpotifyClient(ctx),
-  seen,
-  openExternal: (url) => ctx.openExternal(url),
-  signal: ctx.signal,
-  timeZone: typeof ctx.config.timeZone === 'string' ? ctx.config.timeZone : undefined
-})
+const memory = new EventMemory()
+const deps = (ctx: PluginContext): SpotifyDeps => {
+  const timeZone = typeof ctx.config.timeZone === 'string' ? ctx.config.timeZone : undefined
+  return {
+    client: new SpotifyClient(ctx),
+    seen,
+    openExternal: (url) => ctx.openExternal(url),
+    signal: ctx.signal,
+    timeZone,
+    events: { sink: ctx.events, caller: ctx.caller, memory, timeZone, log: (m) => ctx.log(m) }
+  }
+}
 type Input = Record<string, unknown>
 
 async function wait(input: Input, ctx: PluginContext): Promise<{ content: string; isError: boolean }> {
@@ -29,7 +35,10 @@ async function wait(input: Input, ctx: PluginContext): Promise<{ content: string
 export default definePlugin({
   tools: {
     search: (i: Input, ctx) => tools(deps(ctx)).search(i),
-    now_playing: async (i: Input, ctx) => withWidgetData(await tools(deps(ctx)).now_playing(i)),
+    now_playing: async (i: Input, ctx) => {
+      const d = deps(ctx)
+      return withWidgetData(await tools(d).now_playing(i), logState(d.events))
+    },
     devices: (i: Input, ctx) => tools(deps(ctx)).devices(i),
     recently_played: (i: Input, ctx) => tools(deps(ctx)).recently_played(i),
     top_items: (i: Input, ctx) => tools(deps(ctx)).top_items(i),

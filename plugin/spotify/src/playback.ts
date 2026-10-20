@@ -1,4 +1,5 @@
 import { SpotifyApiError, type SpotifyClient } from './client'
+import { logCommand, type EventDeps } from './events'
 import { observationClock } from './time'
 import { acceptedNote, verificationLine, verifyPlayback } from './verify'
 
@@ -41,7 +42,7 @@ export const actionKeys = {
 } as const
 export type PlaybackCommand = keyof typeof actionKeys | 'adjust_volume'
 type Result = { content: string; isError: boolean }
-type Deps = { client: SpotifyClient; signal?: AbortSignal }
+type Deps = { client: SpotifyClient; signal?: AbortSignal; events?: EventDeps }
 const commands = [...Object.keys(actionKeys), 'adjust_volume'] as PlaybackCommand[]
 const fail = (content: string): Result => ({ content, isError: true })
 const validMs = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0
@@ -154,6 +155,12 @@ const paths: Record<PlaybackCommand, string> = {
   resume_playback: 'play', seek: 'seek', adjust_volume: 'volume'
 }
 
+// What a seek or volume entry adds to the event log.
+const logged = (name: PlaybackCommand, query: Record<string, string | number | undefined>, d: PlaybackDevice): { toMs?: number; volume?: { from: number; to: number } } =>
+  name === 'seek' ? { toMs: query.position_ms as number }
+    : name === 'adjust_volume' && volume(d.volume_percent) ? { volume: { from: d.volume_percent, to: query.volume_percent as number } }
+      : {}
+
 export async function playbackCommand(deps: Deps, name: PlaybackCommand, input: Record<string, unknown>): Promise<Result> {
   const invalid = validation(name, input)
   if (invalid) return fail(`Not run: ${invalid}`)
@@ -202,6 +209,8 @@ export async function playbackCommand(deps: Deps, name: PlaybackCommand, input: 
   } catch (err) {
     if (err instanceof SpotifyApiError && err.status < 500)
       return fail(`Spotify rejected ${name}: ${err.message} No automatic retry or fallback was performed.`)
+    // Sent, answer lost: it may have happened, so it is logged as unknown.
+    await logCommand(deps.events, { name, before: p as Player, sentAt, outcome: 'unknown', ...logged(name, query, d) })
     return fail(`Outcome unknown: ${name} was sent but ${err instanceof SpotifyApiError ? 'Spotify returned a server error' : 'the response was not received reliably'}. It may have taken effect. Check spotify__now_playing or ask the user before retrying; never blindly repeat next/previous. No automatic retry was performed.`)
   }
   const detail = name === 'adjust_volume' ? ` to ${query.volume_percent}%` : name === 'seek' ? ` to ${query.position_ms} ms` : ''
@@ -212,6 +221,7 @@ export async function playbackCommand(deps: Deps, name: PlaybackCommand, input: 
     position: query.position_ms as number | undefined,
     sentAt
   })
+  await logCommand(deps.events, { name, before: p as Player, sentAt, outcome: 'accepted', verification, ...logged(name, query, d) })
   return {
     content: [
       `Spotify accepted ${name}${detail} on ${d.name ?? d.id}. ${acceptedNote(verification)}`,

@@ -17,6 +17,8 @@ export type Snapshot = {
   volumeSupported?: boolean
   actions: { next: boolean; pause: boolean; resume: boolean; seek: boolean }
   artwork: { kind: 'fallback'; reason: string }
+  // The event log, for the player's indicator: on, off, or on but failing.
+  eventLog?: 'on' | 'off' | 'failing'
 }
 const object = (v: unknown): Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {}
@@ -49,12 +51,12 @@ export function fromMetadata(raw: unknown): Snapshot {
 }
 
 // Preserve chat output byte-for-byte and reuse its existing snapshot.
-export function withWidgetData<T extends { content: string; isError: boolean }>(result: T): T & { data?: Snapshot } {
+export function withWidgetData<T extends { content: string; isError: boolean }>(result: T, eventLog?: Snapshot['eventLog']): T & { data?: Snapshot } {
   if (result.isError) return result
   const line = result.content.split('\n').at(-1) ?? ''
   if (!line.startsWith('playback_metadata: ')) return result
   try {
-    const data = fromMetadata(JSON.parse(line.slice('playback_metadata: '.length)))
+    const data = { ...fromMetadata(JSON.parse(line.slice('playback_metadata: '.length))), ...(eventLog ? { eventLog } : {}) }
     if (!Number.isFinite(data.observedAt)) return result
     if (JSON.stringify(data).length * 4 > 60000) return result
     return { ...result, data }
@@ -81,6 +83,7 @@ export function readSnapshot(value: unknown): Snapshot | null {
     position: ms(s.position), duration: ms(s.duration),
     volume: percent(s.volume), volumeSupported: s.volumeSupported === true,
     actions: { next: a.next as boolean, pause: a.pause as boolean, resume: a.resume as boolean, seek: a.seek as boolean },
-    artwork: { kind: 'fallback', reason: ARTWORK_REASON }
+    artwork: { kind: 'fallback', reason: ARTWORK_REASON },
+    ...(s.eventLog === 'on' || s.eventLog === 'off' || s.eventLog === 'failing' ? { eventLog: s.eventLog } : {})
   }
 }

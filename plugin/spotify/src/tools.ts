@@ -1,10 +1,11 @@
 import { PluginError } from 'custard-plugin-sdk'
 import { SpotifyApiError, type SpotifyClient } from './client'
+import { logQueue, observe, type EventDeps } from './events'
 import { artistGenres, recentlyPlayed, topItems } from './history'
 import { playbackCommand, playbackMetadata, type Player } from './playback'
 import {
   acceptedNote, pause, readQueue, timing, verificationLine, verifyQueue, verifyTransfer,
-  type QueueEntryStatus
+  type QueueEntryStatus, type Verification
 } from './verify'
 
 // Opening, queueing, transferring and individual playback commands are separate.
@@ -52,6 +53,8 @@ export type SpotifyDeps = {
   signal?: AbortSignal
   // IANA zone for local times in results; UTC is always included.
   timeZone?: string
+  // The playback event log (events.ts); absent in callers that don't log.
+  events?: EventDeps
 }
 export type ToolResult = { content: string; isError: boolean }
 const ok = (content: string): ToolResult => ({ content, isError: false })
@@ -80,6 +83,7 @@ async function search(deps: SpotifyDeps, input: Record<string, unknown>): Promis
 async function nowPlaying(deps: SpotifyDeps): Promise<ToolResult> {
   const p = await deps.client.request<Player>('GET', '/me/player', { idempotent: true })
   const metadata = playbackMetadata(p, undefined, deps.timeZone)
+  await observe(deps.events, p, Date.parse(metadata.observed_at) || Date.now())
   const lines: string[] = []
   // Preserve the existing human-readable lines, with an additive JSON snapshot.
   if (!p || !p.device) lines.push('Nothing is playing and no Spotify device is active.')
@@ -132,6 +136,7 @@ async function addToQueue(deps: SpotifyDeps, input: Record<string, unknown>): Pr
   // Best-effort read-only baseline so a later read can tell a new entry from one already there.
   const baseline = deps.signal?.aborted ? null : await readQueue(deps.client)
   const outcomes: QueueOutcome[] = []
+  const sentAt = Date.now()
   let stopped: string | null = null
   for (const uri of uris as string[]) {
     if (stopped) { outcomes.push({ uri, status: 'skipped' }); continue }
@@ -159,11 +164,13 @@ async function addToQueue(deps: SpotifyDeps, input: Record<string, unknown>): Pr
   const queued = outcomes.filter((o) => o.status === 'queued').length
   let check = ''
   let verification = ''
+  let verified: Verification | undefined
   if (queued > 0) {
     // One follow-up read after a short delay. Never a retry or another write.
     const waited = await pause(timing.verifyDelayMs, deps.signal)
     if (!waited) {
-      verification = verificationLine({ state: 'not_checked', detail: 'the call was cancelled before the follow-up queue read' })
+      verified = { state: 'not_checked', detail: 'the call was cancelled before the follow-up queue read' }
+      verification = verificationLine(verified)
     } else {
       try {
         const q = await deps.client.request<{ queue?: { uri: string }[] }>('GET', '/me/player/queue', { idempotent: true })
@@ -173,16 +180,24 @@ async function addToQueue(deps: SpotifyDeps, input: Record<string, unknown>): Pr
         check = `Spotify's queue now lists ${shown} of the ${queued} accepted tracks${shown < queued ? ' (it only shows the next part of the queue, so the rest may still be further down)' : ''}.`
         const accepted = outcomes.filter((o) => o.status === 'queued').map((o) => o.uri)
         const v = verifyQueue(accepted, baseline, after)
+        verified = v.verification
         verification = [
           verificationLine(v.verification),
           ...v.entries.map((e) => `  - ${deps.seen.get(e.uri) ?? e.uri}: ${e.positions.length ? `position ${e.positions.join(', ')} in the visible queue; ` : ''}${entryText[e.status]}`)
         ].join('\n')
       } catch {
         check = "Couldn't read the queue back to double-check."
-        verification = verificationLine({ state: 'inconclusive', detail: 'the follow-up queue read failed' })
+        verified = { state: 'inconclusive', detail: 'the follow-up queue read failed' }
+        verification = verificationLine(verified)
       }
     }
   }
+  await logQueue(deps.events, {
+    sentAt,
+    accepted: outcomes.filter((o) => o.status === 'queued').map((o) => o.uri),
+    unknown: outcomes.filter((o) => o.status === 'unknown').map((o) => o.uri),
+    verification: verified
+  })
   const label: Record<QueueOutcome['status'], string> = { queued: 'added to queue', failed: 'not added', unknown: 'unknown', skipped: 'not attempted' }
   const lines = outcomes.map((o, i) => `${i + 1}. ${deps.seen.get(o.uri)}: ${label[o.status]}${o.note ? ` (${o.note})` : ''}`)
   const summary = queued === outcomes.length ? `All ${queued} tracks were accepted into the queue, in this order.` : `${queued} of ${outcomes.length} tracks were accepted into the queue.`

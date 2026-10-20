@@ -2,6 +2,40 @@
 
 Uses only the public Custard plugin API. Development changes stay inside `plugin/spotify/`; no core changes.
 
+## 1.5.0 — playback event log (off by default)
+
+Keeps a local, append-only log of playback actions in the vault, as raw material for working out music preferences later. Design: [docs/proposals/spotify-event-log.md](../../docs/proposals/spotify-event-log.md). Needs a Custard build with `ctx.caller` and `ctx.events`.
+
+### What is logged
+
+| Type | When |
+| --- | --- |
+| `skip`, `previous`, `pause`, `resume`, `seek`, `restart`, `volume` | A press in the player (`source: "widget"`) or an assistant call (`source: "assistant"`) that Spotify accepted, or whose answer was lost (`outcome: "unknown"`). A seek to 0 is `restart` |
+| `queue_add` | Tracks Spotify accepted into the queue |
+| `track_change` | The player's own refresh (or its Refresh button) saw a different track than its last read. Carries `previous` (track, last known position, whether it was estimated) and `cause`: `logged_action` (with `cause_id`), `likely_ended` (within 5 s of the end) or `unknown` |
+
+Not logged: declined, refused, not-run or rejected (4xx) actions, a volume change that needed nothing, automation calls, and the assistant's own `now_playing` reads (which also never move the player's baseline). Each entry has UTC and local time, track title, artists, artist IDs and URI, position and duration, device name and type, outcome and the verification state from the existing single follow-up read.
+
+### Where and how
+
+- One note per day: `Custard/Plugins/Spotify/Events/YYYY-MM/YYYY-MM-DD.md`, day picked in the **Time zone** setting (default `Europe/Stockholm`).
+- Custard writes the note, not the plugin: the plugin hands over a JSON record and Custard checks it, puts it on one line in a `custard-event` code block, and adds it to the end. Spotify text is therefore never a link, tag or markup. Records holding a secret or anything token-shaped are refused.
+- The plugin can't read, change or delete the log, and the assistant can never be given access to an Events folder.
+
+### Turning it on
+
+**Settings → Plugins → Spotify → Manage → Event log in your vault.** Off by default. While on, Manage shows today's count and the last entry, the hub card says "Logging to vault", and the player shows "Logging to vault" (or "Event log not saving" if a write failed). Turning it off stops new entries at once; existing notes stay.
+
+### Guarantees
+
+- No new requests: logging uses the reads each tool already makes. No polling, no background job.
+- No change to playback, to tool results or to what the assistant may do. A failing log never fails the tool.
+- New permission: `events` (shown in the review as "Keep an event log in your vault"). No new scopes, hosts or actions.
+
+### Testing status
+
+Mocked tests only, plus the Electron e2e with a mocked Spotify (a player Pause lands in today's note as `source: "widget"`). **Nothing was run live**: real Spotify timing for track changes, Windows paths and a vault open in Obsidian while writing are unverified. Manual checks: [MANUAL-TESTS.md](MANUAL-TESTS.md#event-log--spotify-150).
+
 ## 1.4.0 — read-only history, top items, genre lookup, accepted vs verified
 
 Phase 2 of the Spotify listening design. Read-only additions plus clearer reporting; nothing new can change playback.
