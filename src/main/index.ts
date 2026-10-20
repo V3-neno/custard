@@ -69,6 +69,7 @@ import {
 } from './vaultTemplate'
 import { createSkill, readSkill, skillEntries } from './skillsHub'
 import { deleteChat, deleteOldChats, type ChatCleanup } from './chatDelete'
+import { registerScriptHandlers } from './scripts'
 import {
   registerBackgroundHandlers,
   showWindow,
@@ -350,6 +351,7 @@ app.whenReady().then(() => {
   registerWidgetHandlers()
   registerDesignHandlers()
   registerAutomationHandlers()
+  registerScriptHandlers()
   registerBackgroundHandlers()
 
   // The tray icon first, so a window started hidden has it.

@@ -1,14 +1,15 @@
 import type { Conversation } from './chat'
 
 // Text in a chat that doesn't come from the user or from Custard: web search
-// results and pages, and what plugin tools return. Anything in it can be
+// results and pages, and what plugin and script tools return. Anything in it can be
 // written to look like an instruction, so once it is in a chat, changes to
 // notes ask first (see main/chat.ts), and the chat says so.
 const WEB_TOOLS = new Set(['web_search', 'web_read'])
 const PLUGIN_TOOL = /^[a-z][a-z0-9-]{1,30}__[a-z][a-z0-9_]{0,40}$/
+const SCRIPT_TOOL = /^script_[a-z][a-z0-9-]{1,30}__[a-z][a-z0-9_]{0,40}$/
 
 export const isOutsideTool = (name: string): boolean =>
-  WEB_TOOLS.has(name) || PLUGIN_TOOL.test(name)
+  WEB_TOOLS.has(name) || PLUGIN_TOOL.test(name) || SCRIPT_TOOL.test(name)
 
 // True when a web or plugin tool has run in this chat (or is running, or its
 // outcome is unknown: a result may have come back), or the chat continues one
