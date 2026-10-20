@@ -95,7 +95,9 @@ function createWindow(): void {
     title: 'Custard',
     show: false,
     autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon } : {}),
+    // Windows and Linux take the window and taskbar icon from here; macOS
+    // uses the app bundle's icon (build/icon.icns).
+    ...(process.platform !== 'darwin' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       // Chromium's sandbox, like previews and plugins. The preload uses only
@@ -152,6 +154,8 @@ app.whenReady().then(() => {
   pinProviderEndpoints(app.isPackaged)
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.custard.app')
+  // In development the dock shows Electron's icon; packaged builds use the bundle's.
+  if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(icon)
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
