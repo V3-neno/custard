@@ -19,7 +19,14 @@ function run(): Handlers {
     register: (x: Handlers) => (h = x),
     cap: async () => ({ ok: true, value: null })
   }
-  start(definePlugin({ tools: { who: (_i, ctx) => ctx.caller } }))
+  start(
+    definePlugin({
+      tools: {
+        who: (_i, ctx) => ctx.caller,
+        logging: (_i, ctx) => String(ctx.events.enabled)
+      }
+    })
+  )
   return h!
 }
 
@@ -39,5 +46,14 @@ describe('ctx.caller', () => {
     expect((await h.call('1', 'who', {}, {})).content).toBe('assistant')
     expect((await h.call('2', 'who', {}, {}, { caller: 'user' })).content).toBe('assistant')
     expect((await h.call('3', 'who', {}, {}, 'widget')).content).toBe('assistant')
+  })
+})
+
+describe('ctx.events.enabled', () => {
+  it('is true only when the host says so', async () => {
+    const h = run()
+    expect((await h.call('1', 'logging', {}, {}, { events: true })).content).toBe('true')
+    expect((await h.call('2', 'logging', {}, {}, { events: 'yes' })).content).toBe('false')
+    expect((await h.call('3', 'logging', {}, {})).content).toBe('false')
   })
 })

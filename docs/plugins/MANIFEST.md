@@ -55,6 +55,7 @@ Unknown fields are errors, so a typo can't silently drop a restriction.
 | `instructions`             | Optional relative `.md` file of up to 8,000 characters, added to the system prompt while the plugin is enabled. Say when to use the tools and any rules.                                                                                                                                                                                                         |
 | `permissions.network`      | Exact host names, `*.example.com`, or `"*"` for any public host. No IPs or local names.                                                                                                                                                                                                                                                                          |
 | `permissions.openExternal` | Link prefixes the plugin may open: an https prefix ending in `/`, or a custom scheme Custard has vetted (today only `"spotify:"`). Any other scheme is a manifest error. Only write tools (actions) can open links.                                                                                                                                              |
+| `permissions.events`       | `true` to keep an event log in the user's vault with `ctx.events` (see [API.md](API.md#ctxevents)). The user still turns the log on in Manage; it is off by default                                                                                                                                                                                              |
 | `permissions.storage`      | `true` to use `ctx.storage`                                                                                                                                                                                                                                                                                                                                      |
 | `config`                   | Settings fields for the form in Plugins mode (**Manage** on the plugin's card). `type` is `string`, `number` or `boolean`, and `title` is required. Optional: `description`, `enum` (strings), `pattern`, `minimum`, `maximum`, `default`, `required`. `secret: true` (strings only) stores the value in OS secure storage; plugins never receive secret values. |
 | `auth`                     | Optional account sign-in (see below)                                                                                                                                                                                                                                                                                                                             |
@@ -243,14 +244,15 @@ All capabilities are listed in `src/shared/adapter.ts` (`capabilities`, with the
 
 Activation shows each requested permission in plain words, and the user ticks every new one:
 
-| String                                       | Meaning                                           |
-| -------------------------------------------- | ------------------------------------------------- |
-| `network:<host>`                             | Connect to a host                                 |
-| `open:<prefix>`                              | Open links with that prefix                       |
-| `storage`                                    | Store its own data                                |
-| `account:<host>` and `account-scope:<scope>` | Sign in to an account, and each scope it asks for |
-| `action:<tool>`                              | Run a write tool                                  |
-| `widget:<id>`                                | Show that widget in chats                         |
-| `media:<id>`                                 | Offer that image or video provider to Design      |
+| String                                       | Meaning                                                               |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| `network:<host>`                             | Connect to a host                                                     |
+| `open:<prefix>`                              | Open links with that prefix                                           |
+| `storage`                                    | Store its own data                                                    |
+| `events`                                     | Keep an event log in the vault (still off until the user turns it on) |
+| `account:<host>` and `account-scope:<scope>` | Sign in to an account, and each scope it asks for                     |
+| `action:<tool>`                              | Run a write tool                                                      |
+| `widget:<id>`                                | Show that widget in chats                                             |
+| `media:<id>`                                 | Offer that image or video provider to Design                          |
 
 Grants are stored per plugin and shrink to what the active version asks for. An update that asks for anything new must be approved again. Rolling back to a version that needs a permission since dropped also asks again.

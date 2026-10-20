@@ -10,7 +10,7 @@ import TypecheckWorker from './typecheck.worker?nodeWorker'
 import { createRuntime, pluginPreloadPath, runTestsInSandbox } from './runtime'
 import { scaffoldPlugin } from './scaffold'
 import { PluginStore, type Crypto } from './store'
-import { pluginNotesChanged } from '../memory'
+import { pluginEventVault, pluginNotesChanged } from '../memory'
 import type { Transport } from './net'
 
 // Where things live. In development the app path is the repository, so
@@ -88,6 +88,7 @@ export function pluginHost(): PluginHost {
     openExternal: (url) => shell.openExternal(url),
     openBrowser: (url) => shell.openExternal(url),
     askByDefault: () => getSecurityDefaults().askBeforeWriteTools,
+    eventVault: pluginEventVault,
     // Test hook for the end-to-end run against a local mock. Only code already
     // running in the main process can set it.
     transport: () =>
@@ -180,6 +181,7 @@ export function registerPluginHandlers(): void {
   handle('plugins:setAskEveryTime', (_, id: string, tool: string, ask: boolean) =>
     h().setAskEveryTime(id, tool, ask === true)
   )
+  handle('plugins:setEvents', (_, id: string, on: boolean) => h().setEvents(id, on === true))
   handle('plugins:setChatDesign', (_, id: string, on: boolean) =>
     h().setChatDesign(id, on === true)
   )

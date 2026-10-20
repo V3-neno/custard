@@ -19,7 +19,7 @@ type Bridge = {
       tool: string,
       input: unknown,
       config: Record<string, ConfigValue>,
-      meta?: { caller?: Caller }
+      meta?: { caller?: Caller; events?: boolean }
     ): Promise<{ content: string; isError: boolean; data?: unknown }>
     cancel(callId: string): void
     tools(): string[]
@@ -74,7 +74,7 @@ export function start(def: PluginDefinition): void {
     callId: string,
     signal: AbortSignal,
     config: Record<string, ConfigValue>,
-    caller: Caller
+    meta: { caller?: unknown; events?: unknown } | undefined
   ): PluginContext => {
     const cap = async (name: string, args: unknown): Promise<unknown> => {
       if (signal.aborted) throw new HostError('The call was cancelled.')
@@ -84,7 +84,12 @@ export function start(def: PluginDefinition): void {
     }
     return {
       signal,
-      caller,
+      caller: callerOf(meta?.caller),
+      events: Object.freeze({
+        enabled: meta?.events === true,
+        append: async (entry: { at: string; record: Record<string, unknown> }) =>
+          void (await cap('events.append', entry))
+      }),
       config: Object.freeze({ ...config }),
       fetch: async (url: string, init?: FetchInit) =>
         toResponse((await cap('fetch', { url, init })) as WireResponse),
@@ -107,12 +112,7 @@ export function start(def: PluginDefinition): void {
       const controller = new AbortController()
       running.set(callId, controller)
       try {
-        return normalize(
-          await handler(
-            input,
-            contextFor(callId, controller.signal, config, callerOf(meta?.caller))
-          )
-        )
+        return normalize(await handler(input, contextFor(callId, controller.signal, config, meta)))
       } catch (err) {
         const e = err as { message?: string; pluginError?: boolean }
         return {

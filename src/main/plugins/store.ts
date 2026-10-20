@@ -38,6 +38,8 @@ export type StateFile = {
   // link, account and action permissions). null means off. A version that
   // asks for anything outside it needs the choice again.
   chatDesign: string[] | null
+  // The event log in the vault: the user's switch, off until they turn it on.
+  events: boolean
   errors: { at: number; message: string }[]
 }
 
@@ -48,6 +50,7 @@ const emptyState = (): StateFile => ({
   granted: [],
   askEveryTime: {},
   chatDesign: null,
+  events: false,
   errors: []
 })
 

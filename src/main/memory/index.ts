@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog } from 'electron'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { getApiKey } from '../apiKey'
 import { pluginHost } from '../plugins'
@@ -23,7 +24,7 @@ import { OLD_CHAT_REFUSAL } from '../../shared/neutralChat'
 import type { MemorySettings } from '../../shared/memory'
 import { Capture } from './capture'
 import { continuationsOf } from '../continue'
-import { ensurePluginFolder, type PluginInfo } from './plugins'
+import { ensurePluginFolder, findPluginFolder, type PluginInfo } from './plugins'
 import { summarizer } from './summarize'
 import { CHAT_NOTE_DELAY_MS, CHAT_NOTE_SYSTEM, ChatNotes } from '../chatNotes'
 import { CHAT_NOTE_SCHEMA, handoffSummarizer } from '../handoff'
@@ -45,6 +46,23 @@ export function pluginInfo(id: string, state?: PluginInfo['state']): PluginInfo 
   } catch {
     return null
   }
+}
+
+// Where a plugin's event log goes (plugins/eventLog.ts): the vault and the
+// plugin's folder, found by its id. With `create`, the folder (and its
+// Overview) is made the first time, like for captures. null without a vault.
+export function pluginEventVault(
+  id: string,
+  create: boolean
+): { vault: string; pluginFolder: string } | null {
+  const vault = getVaultPath()
+  if (!vault || !existsSync(vault)) return null
+  if (!create) {
+    const found = findPluginFolder(vault, id)
+    return found ? { vault, pluginFolder: found } : null
+  }
+  const info = pluginInfo(id)
+  return info ? { vault, pluginFolder: ensurePluginFolder(vault, info) } : null
 }
 
 // Every plugin, for deciding which notes a message needs. Reading every

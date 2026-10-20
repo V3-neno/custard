@@ -74,6 +74,8 @@ export type PluginManifest = {
     network: string[]
     openExternal: string[]
     storage: boolean
+    // May keep an event log in the vault (docs/plugins/API.md, ctx.events).
+    events?: boolean
   }
   tools: ToolSpec[]
   config: Record<string, ConfigField>
@@ -124,6 +126,18 @@ export type PluginStatus = {
   // "Use in Chat and Design": off until the user turns it on. 'changed' means
   // it was on, but this version asks for more than it covered.
   chatDesign: 'on' | 'off' | 'changed'
+  // The event log in the vault, for a version that may keep one. `on` is the
+  // user's switch (off by default); `granted` whether the permission is.
+  // `today` counts entries in today's note; `error` is the last failure since
+  // the last entry that worked.
+  events?: {
+    on: boolean
+    granted: boolean
+    folder: string | null
+    today: number
+    last: number | null
+    error: string | null
+  }
   widgets?: { id: string; title: string }[]
   fills?: PluginFill[]
   errors: { at: number; message: string }[]
@@ -173,6 +187,9 @@ export function describePermission(p: string): string {
       return `Open ${v} links on this computer`
     case 'storage':
       return 'Store its own data in Custard'
+    case 'events':
+      return "Keep an event log in your vault (Events, in its folder under Custard/Plugins) once you turn it on in Manage. It can only add entries; it can't read, change or delete notes"
+
     case 'account':
       return `Sign in to your account at ${v}`
     case 'account-token':

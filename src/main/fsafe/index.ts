@@ -237,6 +237,61 @@ export async function writeReplace(
   return writeReplaceSync(path, data, opts)
 }
 
+const APPEND = constants.O_WRONLY | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0)
+
+// Adds to the end of an existing file, never creating or truncating one. The
+// same identity check as writeNew runs before anything is written, and the
+// bytes go through the open handle. Refuses a link at the final name
+// (O_NOFOLLOW), anything but a plain file, a file with other hard links, and
+// a file that would grow past `maxBytes`. Throws an ENOENT error when the
+// file isn't there, so the caller can create it with writeNewSync. Returns
+// the file's size after the write.
+export function appendSync(
+  path: string,
+  data: string,
+  opts: WriteOptions & { maxBytes?: number } = {}
+): number {
+  if (!realOrNull(dirname(path)))
+    throw Object.assign(new FsafeError('The folder to write into does not exist.'), {
+      code: 'ENOENT'
+    })
+  const dir = realParent(path)
+  const name = basename(path)
+  checkName(name)
+  const target = join(dir, name)
+  const refusal = opts.guard?.(target)
+  if (refusal) throw new FsafeError(refusal)
+  let fd: number
+  try {
+    fd = io.open(target, APPEND, 0)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ELOOP') throw new FsafeError('That name is a link, so nothing was written.')
+    throw err
+  }
+  try {
+    const opened = fstatSync(fd)
+    const here = lstatOrNull(target)
+    if (!here || !sameFile(here, opened) || realOrNull(dir) !== dir)
+      throw new FsafeError('The folder changed while writing, so nothing was written.')
+    if (!opened.isFile()) throw new FsafeError('That name is not a file, so nothing was written.')
+    if (opened.nlink > 1)
+      throw new FsafeError('That file has other names (hard links), so nothing was written.')
+    const bytes = Buffer.from(data)
+    if (opts.maxBytes !== undefined && opened.size + bytes.byteLength > opts.maxBytes)
+      throw new FsafeError('The file is full, so nothing was written.')
+    writeAll(fd, bytes)
+    try {
+      fsyncSync(fd)
+    } catch {
+      // Best effort.
+    }
+    return opened.size + bytes.byteLength
+  } finally {
+    closeSync(fd)
+  }
+}
+
 // Like mkdir's own error, so callers treat it as a failure to make a folder.
 const notAFolder = (part: string): Error =>
   Object.assign(new Error(`${part} is not a folder, so nothing was written.`), { code: 'ENOTDIR' })

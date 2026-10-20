@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import vm from 'vm'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   cutResult,
   widgetData,
@@ -69,7 +69,7 @@ const vmRuntime: RuntimeFactory = async ({ code, onCap, onExit }) => {
       dispose: () => void (dead = true),
       // Like the real runtime: a call cut short by a timeout or a cancel
       // after it was sent is marked interrupted.
-      call: async (callId, tool, input, config, timeoutMs, signal, caller) => {
+      call: async (callId, tool, input, config, timeoutMs, signal, meta) => {
         if (dead) return { content: 'not running', isError: true, notSent: true }
         signal.addEventListener('abort', () => bridge.cancel(callId))
         let timer: ReturnType<typeof setTimeout> | undefined
@@ -85,7 +85,7 @@ const vmRuntime: RuntimeFactory = async ({ code, onCap, onExit }) => {
           )
         })
         const r = await Promise.race([
-          bridge.call(callId, tool, JSON.parse(JSON.stringify(input)), config, { caller }),
+          bridge.call(callId, tool, JSON.parse(JSON.stringify(input)), config, meta),
           timedOut
         ])
         clearTimeout(timer)
@@ -1640,5 +1640,121 @@ describe('read tools only GET or HEAD', () => {
       'status 200'
     )
     expect(net.map((r) => r.method)).toEqual(['POST'])
+  })
+})
+
+describe('event log (ctx.events)', () => {
+  let vault: string
+  const DAY = (): string => {
+    const d = new Date()
+    const p = (n: number): string => String(n).padStart(2, '0')
+    // The demo plugin has no timeZone setting, so the log uses the system's.
+    const day = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    return `Custard/Plugins/Demo/Events/${day.slice(0, 7)}/${day}.md`
+  }
+  const LOGGER = INDEX.replace(
+    'echo: ({ text }) => greet(text),',
+    `echo: async ({ text }, ctx) => {
+      if (text === 'state') return String(ctx.events.enabled)
+      const n = text === 'many' ? 21 : 1
+      try {
+        for (let i = 0; i < n; i++)
+          await ctx.events.append({ at: new Date().toISOString(), record: { type: text, caller: ctx.caller, i } })
+      } catch (e) { return 'refused: ' + (e as Error).message }
+      return 'logged'
+    },`
+  )
+  const withEvents = (): ReturnType<typeof manifest> => {
+    const m = manifest()
+    return { ...m, permissions: { ...(m.permissions as object), events: true } }
+  }
+
+  beforeEach(() => {
+    vault = mkdtempSync(join(tmpdir(), 'custard-host-vault-'))
+    mkdirSync(join(vault, 'Custard/Plugins/Demo'), { recursive: true })
+    host = new PluginHost({
+      ...(host as unknown as { d: ConstructorParameters<typeof PluginHost>[0] }).d,
+      eventVault: () => ({ vault, pluginFolder: 'Custard/Plugins/Demo' })
+    })
+  })
+  afterEach(() => rmSync(vault, { recursive: true, force: true }))
+
+  it('is a permission of its own, and approving it leaves the log off', async () => {
+    writePlugin({ 'src/index.ts': LOGGER }, withEvents())
+    expect((await host.review('demo')).newPermissions).toContain('events')
+    await activate([...ALL, 'events'])
+    expect(host.status('demo').events).toMatchObject({ on: false, granted: true, today: 0 })
+    expect((await invoke('demo__echo', { text: 'state' })).content).toBe('false')
+    expect((await invoke('demo__echo', { text: 'skip' })).content).toMatch(/refused: .*off/)
+    expect(existsSync(join(vault, 'Custard/Plugins/Demo/Events'))).toBe(false)
+  })
+
+  it('writes entries when the user turns it on, from read tools too, with the caller', async () => {
+    writePlugin({ 'src/index.ts': LOGGER }, withEvents())
+    await activate([...ALL, 'events'])
+    host.setEvents('demo', true)
+    expect((await invoke('demo__echo', { text: 'state' })).content).toBe('true')
+    expect((await invoke('demo__echo', { text: 'skip' })).content).toBe('logged')
+    await host.invoke(
+      'demo__echo',
+      { text: 'pause' },
+      {
+        snapshot: host.toolSet('code').snapshot,
+        signal: new AbortController().signal,
+        approve: yes,
+        mode: 'code',
+        caller: 'widget'
+      }
+    )
+    const text = readFileSync(join(vault, DAY()), 'utf8')
+    expect(text).toContain('{"type":"skip","caller":"assistant","i":0}')
+    expect(text).toContain('{"type":"pause","caller":"widget","i":0}')
+    const s = host.status('demo').events!
+    expect(s).toMatchObject({
+      on: true,
+      today: 2,
+      error: null,
+      folder: 'Custard/Plugins/Demo/Events'
+    })
+    expect(s.last).toBeTypeOf('number')
+    // Off again: nothing more is written.
+    host.setEvents('demo', false)
+    expect((await invoke('demo__echo', { text: 'resume' })).content).toMatch(/refused/)
+    expect(readFileSync(join(vault, DAY()), 'utf8')).toBe(text)
+  })
+
+  it('a plugin that does not ask for it has no log', async () => {
+    writePlugin({ 'src/index.ts': LOGGER })
+    await activate()
+    expect(host.status('demo').events).toBeUndefined()
+    expect(() => host.setEvents('demo', true)).toThrow(/no event log/)
+    expect((await invoke('demo__echo', { text: 'skip' })).content).toMatch(
+      /refused: .*no event log permission/
+    )
+  })
+
+  it('caps entries per call and remembers the last failure', async () => {
+    writePlugin({ 'src/index.ts': LOGGER }, withEvents())
+    await activate([...ALL, 'events'])
+    host.setEvents('demo', true)
+    expect((await invoke('demo__echo', { text: 'many' })).content).toMatch(/At most 20/)
+    expect(host.status('demo').events!.today).toBe(20)
+    expect((await invoke('demo__echo', { text: 'Bearer abcdefghijklmnop' })).content).toMatch(
+      /looks like a password or token/
+    )
+    expect(host.status('demo').events!.error).toMatch(/looks like a password/)
+    expect((await invoke('demo__echo', { text: 'ok' })).content).toBe('logged')
+    expect(host.status('demo').events!.error).toBeNull()
+  })
+
+  it('reports a missing vault without writing anywhere', async () => {
+    host = new PluginHost({
+      ...(host as unknown as { d: ConstructorParameters<typeof PluginHost>[0] }).d,
+      eventVault: () => null
+    })
+    writePlugin({ 'src/index.ts': LOGGER }, withEvents())
+    await activate([...ALL, 'events'])
+    host.setEvents('demo', true)
+    expect((await invoke('demo__echo', { text: 'skip' })).content).toMatch(/No Obsidian vault/)
   })
 })

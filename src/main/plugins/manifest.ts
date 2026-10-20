@@ -624,7 +624,7 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
   const p = (m.permissions ?? {}) as Record<string, unknown>
   if (typeof p !== 'object') errors.push('permissions must be an object')
   for (const k of Object.keys(p))
-    if (!['network', 'openExternal', 'storage'].includes(k))
+    if (!['network', 'openExternal', 'storage', 'events'].includes(k))
       errors.push(`permissions.${k} is not a known permission`)
   const network = Array.isArray(p.network) ? (p.network as unknown[]) : []
   if (p.network !== undefined && !Array.isArray(p.network))
@@ -644,6 +644,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
       )
   if (p.storage !== undefined && typeof p.storage !== 'boolean')
     errors.push('permissions.storage must be true or false')
+  if (p.events !== undefined && typeof p.events !== 'boolean')
+    errors.push('permissions.events must be true or false')
 
   const config = checkConfig(m.config, errors)
   const tools = checkTools(typeof id === 'string' ? id : 'x', m.tools, errors)
@@ -667,7 +669,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
       permissions: {
         network: network as string[],
         openExternal: open as string[],
-        storage: p.storage === true
+        storage: p.storage === true,
+        ...(p.events === true ? { events: true } : {})
       },
       tools,
       config,
@@ -702,6 +705,9 @@ export function permissionsOf(m: PluginManifest): string[] {
     ...m.permissions.network.map((h) => `network:${h}`),
     ...m.permissions.openExternal.map((o) => `open:${o}`),
     ...(m.permissions.storage ? ['storage'] : []),
+    // An event log in the vault (ctx.events). Approving it doesn't turn the
+    // log on: that is the user's switch in Manage, off by default.
+    ...(m.permissions.events ? ['events'] : []),
     ...(m.auth
       ? [
           `account:${new URL(m.auth.authorizeUrl).hostname}`,

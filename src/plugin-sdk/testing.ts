@@ -24,6 +24,8 @@ export function response(
 }
 
 export type TestContext = PluginContext & {
+  // Entries the plugin added to its event log.
+  events: PluginContext['events'] & { entries: { at: string; record: Record<string, unknown> }[] }
   calls: FetchCall[]
   opened: string[]
   logs: string[]
@@ -37,6 +39,8 @@ export function createContext(
     signal?: AbortSignal
     // Who started the call; 'assistant' unless a test says otherwise.
     caller?: Caller
+    // Whether the event log is on; off unless a test says otherwise.
+    events?: boolean
   } = {}
 ): TestContext {
   const calls: FetchCall[] = []
@@ -50,6 +54,17 @@ export function createContext(
     data,
     signal: o.signal ?? new AbortController().signal,
     caller: o.caller ?? 'assistant',
+    events: (() => {
+      const entries: { at: string; record: Record<string, unknown> }[] = []
+      return {
+        enabled: o.events === true,
+        entries,
+        append: async (entry: { at: string; record: Record<string, unknown> }) => {
+          if (o.events !== true) throw new Error('The event log is off, so nothing was saved.')
+          entries.push(JSON.parse(JSON.stringify(entry)))
+        }
+      }
+    })(),
     config: o.config ?? {},
     fetch: async (url, init = {}) => {
       calls.push({ url, init })

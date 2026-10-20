@@ -157,6 +157,23 @@ try {
     'the refused folder stays in the box to correct'
   )
 
+  step("A plugin's event log can never be allowed")
+  await allow('Custard/Plugins/Spotify/Events', 'edit')
+  await w.waitForSelector("text=A plugin's event log can't be allowed")
+  check(true, "a plugin's Events folder is refused with its own reason")
+  check(
+    await waitStored([
+      { folder: 'Notes', mode: 'edit' },
+      { folder: 'Journal', mode: 'create' }
+    ]),
+    'and nothing was saved'
+  )
+  check(
+    /Events folder can.t be allowed/.test(await w.locator('[data-protected-help]').textContent()),
+    'the help text says so'
+  )
+  await w.fill('input[aria-label="Folder to allow"]', '')
+
   step('Trailing dots: "Notes." is the Notes folder')
   await allow('Notes.', 'edit')
   await w

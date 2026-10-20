@@ -146,6 +146,8 @@ const custard = {
       ipcRenderer.invoke('plugins:setAskEveryTime', id, tool, ask),
     setChatDesign: (id: string, on: boolean): Promise<PluginStatus> =>
       ipcRenderer.invoke('plugins:setChatDesign', id, on),
+    setEvents: (id: string, on: boolean): Promise<PluginStatus> =>
+      ipcRenderer.invoke('plugins:setEvents', id, on),
     connect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:connect', id),
     disconnect: (id: string): Promise<PluginStatus> => ipcRenderer.invoke('plugins:disconnect', id),
     resetSecrets: (id: string): Promise<PluginStatus> =>

@@ -4,6 +4,7 @@ import {
   cleanFolderInput,
   folderKey,
   GRANT_MODES,
+  isEventLogPlace,
   type GrantMode,
   type VaultGrant
 } from '../../../../shared/vaultGrants'
@@ -61,10 +62,25 @@ export default function EditableFolders(): React.JSX.Element {
   const [mode, setMode] = useState<GrantMode>(DEFAULT_MODE)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  // Plugins writing an event log, which these grants don't cover (shown so
+  // every place written without asking is listed here).
+  const [logs, setLogs] = useState<{ name: string; folder: string }[]>([])
 
   const refresh = useCallback(() => {
     window.custard.vault.getGrants().then(setGrants)
     window.custard.vault.edits().then(setEdits)
+    window.custard.plugins
+      .list()
+      .then((list) =>
+        setLogs(
+          list.flatMap((p) =>
+            p.events?.on
+              ? [{ name: p.name, folder: p.events.folder ?? `Custard/Plugins/${p.name}/Events` }]
+              : []
+          )
+        )
+      )
+      .catch(() => setLogs([]))
   }, [])
   useEffect(refresh, [refresh])
   // An automation's run adds to the list.
@@ -85,6 +101,13 @@ export default function EditableFolders(): React.JSX.Element {
   const add = async (): Promise<void> => {
     const f = cleanFolderInput(folder)
     if (!f) return
+    if (isEventLogPlace(f)) {
+      setError(
+        "A plugin's event log can't be allowed: only Custard adds to it, so it stays a record of what really happened. Turn a log on or off in the plugin's Manage panel."
+      )
+      setMode(DEFAULT_MODE)
+      return
+    }
     // Compared the way the saved list keeps one entry per folder.
     const key = folderKey(f)
     setError(null)
@@ -126,6 +149,7 @@ export default function EditableFolders(): React.JSX.Element {
         Custard/Captures, Custard/Chats, and each plugin&apos;s Activity folder and Overview.md
         under Custard/Plugins. Skills, Captures, Chats or an Activity folder can be allowed only by
         adding that exact folder. Memory.md and Overview.md are notes, so no folder can allow them.
+        A plugin&apos;s Events folder can&apos;t be allowed at all.
       </p>
       {grants.length > 0 && (
         <ul className="mb-3 space-y-1.5" aria-label="Editable folders">
@@ -173,6 +197,23 @@ export default function EditableFolders(): React.JSX.Element {
         <LevelPicker label="What Claude may do there" value={mode} onPick={setMode} />
       </div>
       {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
+
+      {logs.length > 0 && (
+        <ul className="mt-3 space-y-1 text-xs text-ash-400" aria-label="Plugin event logs">
+          {logs.map((l) => (
+            <li key={l.folder} className="flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-molten-400"
+              />
+              <span>
+                {l.name} adds to its event log in {l.folder}/ (add only; Claude can&apos;t change
+                it). Turn it off in the plugin&apos;s Manage panel.
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {edits.length > 0 && (
         <>
