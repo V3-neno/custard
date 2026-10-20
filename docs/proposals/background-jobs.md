@@ -1,6 +1,8 @@
 # Background jobs: what they would add (Step 1, design only)
 
-Status: proposal for review. No code. Based on `main` at 8b2bbce and the
+Status: approved by Neno on 2026-10-20 ("i follow all your recommendations
+just make sure that there are clear limits and notify when a failure
+happens"). Step 1 is built; see **Step 1 as built** at the end. Based on `main` at 8b2bbce and the
 Spotify event log design (`docs/proposals/spotify-event-log.md` on the
 `spotify-event-log` branch, PRs #74 to #77).
 
@@ -31,28 +33,28 @@ nothing runs in between.
 
 ## 2. What automations already do (checked against the code and `docs/automations.md`)
 
-| Area | Today |
-| --- | --- |
-| When | Daily local times, optional days of the month, per time zone, DST handled. Main-process tick every 20 s (`scheduler.ts`). |
-| App state | Runs while Custard is open, **including minimised** (the timer is in the main process, not the window). Not while closed. |
-| Missed slots | Catch-up on start or wake from sleep: newest N (default 3) run oldest first; older ones are listed in `missed_slots`, never dropped silently. |
-| Triggers | Time only, plus **Run now**. No event triggers. |
-| Tools | Vault read/search/list; create/append/edit only in folders ticked for it (from Editable folders); plugin **read** tools of chosen plugins. No plugin write tools, no web, no widgets, no Design. |
-| Hostile text | Fixed `<tool_result trust="data">` envelope, escaping, size caps; writes refused if they carry a link seen in results or key-shaped text; 20 changes / 100k chars per run; tool list fixed at start. |
-| Limits | Runs per day (24), tool calls per run (30), minutes per run (5), auto-pause after 3 failures. |
-| Output | Run records in app data, undoable edits, questions left for the next chat. No notification when a run fails. |
+| Area         | Today                                                                                                                                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| When         | Daily local times, optional days of the month, per time zone, DST handled. Main-process tick every 20 s (`scheduler.ts`).                                                                                                            |
+| App state    | Runs while Custard is open, **including minimised** (the timer is in the main process, not the window). Not while closed.                                                                                                            |
+| Missed slots | Catch-up on start or wake from sleep: newest N (default 3) run oldest first; older ones are listed in `missed_slots`, never dropped silently.                                                                                        |
+| Triggers     | Time only, plus **Run now**. No event triggers.                                                                                                                                                                                      |
+| Tools        | Vault read/search/list; create/append/edit only in folders ticked for it (from Editable folders); plugin **read** tools of chosen plugins. No plugin write tools, no web, no widgets, no Design.                                     |
+| Hostile text | Fixed `<tool_result trust="data">` envelope, escaping, size caps; writes refused if they carry a link seen in results or key-shaped text; 20 changes / 100k chars per run; tool list fixed at start.                                 |
+| Limits       | Runs per day (24, up to 96), tool calls per run (30, up to 100), minutes per run (5, up to 30), auto-pause after 3 failures. The form showed only runs per day and catch-up; the other three could be changed only in settings.json. |
+| Output       | Run records in app data, undoable edits, questions left for the next chat. No notification when a run fails.                                                                                                                         |
 
 ## 3. The real gaps
 
-| # | Gap | Who would notice |
-| --- | --- | --- |
-| G1 | Runs stop when the window is closed. | Anyone with a daily 07:30 skill who closes Custard at night. Catch-up softens it, but runs happen late. |
-| G2 | Runs never start at login. | Same, after a reboot until you open Custard. |
-| G3 | No way for a plugin to collect data while nobody is looking (e.g. Spotify listening while the player is hidden). | Spotify event log: outside skips are missed when the player isn't showing. |
-| G4 | No event triggers ("when a note in folder X changes", "when the event log grows"). | Skills that should react, not run on a clock. |
-| G5 | Runs can't use plugin write tools (e.g. queue a song, make a playlist). | A weekly "make me a playlist" automation. |
-| G6 | Runs are short (5 min, 30 calls). | Bigger vault sweeps or long summaries. |
-| G7 | No notification when a run fails or leaves a question. | You find out only in Settings. |
+| #   | Gap                                                                                                                                                | Who would notice                                                                                        |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| G1  | Runs stop when the window is closed.                                                                                                               | Anyone with a daily 07:30 skill who closes Custard at night. Catch-up softens it, but runs happen late. |
+| G2  | Runs never start at login.                                                                                                                         | Same, after a reboot until you open Custard.                                                            |
+| G3  | No way for a plugin to collect data while nobody is looking (e.g. Spotify listening while the player is hidden).                                   | Spotify event log: outside skips are missed when the player isn't showing.                              |
+| G4  | No event triggers ("when a note in folder X changes", "when the event log grows").                                                                 | Skills that should react, not run on a clock.                                                           |
+| G5  | Runs can't use plugin write tools (e.g. queue a song, make a playlist).                                                                            | A weekly "make me a playlist" automation.                                                               |
+| G6  | Three of the five limits weren't in the form (correction: the ceilings were already 30 min and 100 calls; this note first said they were missing). | Anyone who wants a longer run, or to see what an automation may do.                                     |
+| G7  | No notification when a run fails or leaves a question.                                                                                             | You find out only in Settings.                                                                          |
 
 Out of reach for any option here: running while the **computer** is off or
 asleep, and running in Claude's cloud (no subscription login for third-party
@@ -160,11 +162,11 @@ Per automation, you tick specific write tools (e.g. `spotify__playlist_add`).
   cap of calls, arguments refused if they contain text taken from tool
   results (as links are today), and each call recorded.
 
-### G. Longer runs and a failure notification (G6, G7)
+### G. All limits in the form, and a failure notification (G6, G7)
 
-Raise the per-automation ceilings (minutes up to 30, calls up to 100, still
-set per automation with today's defaults), and an OS notification when a run
-fails, pauses itself or leaves a question.
+Show all five per-automation limits in the form with their ranges (the
+ceilings of 30 minutes and 100 calls already exist), and an OS notification
+when a run fails, pauses itself or leaves a question.
 
 - **Security:** limits are a damage cap, so larger ones mean larger possible
   damage per run; defaults stay as they are. A notification shows only the
@@ -187,9 +189,10 @@ fails, pauses itself or leaves a question.
 
 One draft PR per step from `main`, review stop after each.
 
-## 6. Decisions for you
+## 6. Decisions
 
-These are open; nothing will be built until you answer.
+Answered 2026-10-20: all as recommended, with clear limits and a
+notification on failure.
 
 1. **Close to tray:** OK to add, off by default? (Recommended: yes.)
 2. **Start at login, hidden:** add it as a second setting, off by default?
@@ -200,8 +203,22 @@ These are open; nothing will be built until you answer.
    strictly model/click-triggered? This is the safety decision: it changes
    who can start a plugin call. (Recommended: yes, read tools only, 15 min
    minimum, off by default. Your call.)
-5. **Longer run limits:** raise the ceilings, keeping today's defaults?
+5. **Run limits:** all five in the form, today's defaults and ranges kept.
    (Recommended: yes, small.)
 6. Confirm **no** for B, D, E, F for now.
 
 Nothing here is tested; it is a reading of the code and docs at 8b2bbce.
+
+## Step 1 as built
+
+- Close to tray, start at login (hidden), notifications, as in option A and
+  G. Details in `docs/automations.md`, "Running in the background".
+- "Clear limits": all five per-automation limits in the form with their
+  ranges (out-of-range values are refused, not clamped), and a limits line on
+  each automation's card. Two new limits on all automations together, both
+  checked after the automation's own runs-a-day limit and never for Run now:
+  at most 48 scheduled runs a day (1-200), and scheduled runs skipped once the
+  month's estimated spend reaches the budget (on by default; nothing without
+  a budget).
+- Single-instance lock, so a second Custard can't run every automation twice.
+- Step 2 (host-scheduled plugin sync, option C) waits for review of step 1.

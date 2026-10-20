@@ -338,7 +338,8 @@ function SpendingSection(): React.JSX.Element {
       {error && <p className="mt-2 text-sm text-ember-600">{error}</p>}
       <p className="mt-2 text-xs text-ash-400">
         From 80% of the budget, and when it is passed, a line under the message box says so. Custard
-        never stops a chat because of it.
+        never stops a chat because of it. Scheduled automation runs are skipped once it is reached,
+        unless you turn that off under Automations.
       </p>
     </section>
   )

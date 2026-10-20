@@ -1,22 +1,23 @@
-# Automations (Steps 2 to 5: scheduled runs, catch-up, questions, hostile text)
+# Automations (Steps 2 to 5: scheduled runs, catch-up, questions, hostile text; running in the background)
 
-A skill the user has Custard run on a schedule, while Custard is open. Created
+A skill the user has Custard run on a schedule, while Custard is running (its
+window open, minimised, or hidden in the tray). Created
 in Settings → **Automations**. Nothing here has been tested live, on Windows,
 or with Obsidian running; it is covered by unit tests and an end-to-end test
 against a mock provider.
 
 ## What the user sets
 
-| Setting     | Meaning                                                                                                                                     |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Name, skill | The skill is a folder under `Custard/Skills`; its `SKILL.md` is the run's instructions.                                                     |
-| Model       | Any model Custard offers (Claude, OpenAI or DeepSeek). Its API key must be saved.                                                           |
-| Effort      | Buttons under the model with its levels, as in the model picker (see **The effort control** below). Stored as `effort`.                     |
-| Times, days | Daily local times (`07:30, 19:00`); optionally days of the month (`1, 15`). Empty days means every day.                                     |
-| Time zone   | Empty = the computer's. DST keeps local times (see below).                                                                                  |
-| Folders     | Chosen from the folders already allowed under Editable folders.                                                                             |
-| Plugins     | Plugins whose **read** tools the run may use.                                                                                               |
-| Limits      | Runs per day (default 24, set per automation, 1-96), tool calls per run (30), minutes per run (5), failed runs before it pauses itself (3). |
+| Setting     | Meaning                                                                                                                                                                                                                                                                                 |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name, skill | The skill is a folder under `Custard/Skills`; its `SKILL.md` is the run's instructions.                                                                                                                                                                                                 |
+| Model       | Any model Custard offers (Claude, OpenAI or DeepSeek). Its API key must be saved.                                                                                                                                                                                                       |
+| Effort      | Buttons under the model with its levels, as in the model picker (see **The effort control** below). Stored as `effort`.                                                                                                                                                                 |
+| Times, days | Daily local times (`07:30, 19:00`); optionally days of the month (`1, 15`). Empty days means every day.                                                                                                                                                                                 |
+| Time zone   | Empty = the computer's. DST keeps local times (see below).                                                                                                                                                                                                                              |
+| Folders     | Chosen from the folders already allowed under Editable folders.                                                                                                                                                                                                                         |
+| Plugins     | Plugins whose **read** tools the run may use.                                                                                                                                                                                                                                           |
+| Limits      | Each set in the form, with its range: runs per day (default 24, 1-96), tool calls per run (30, 1-100), minutes per run (5, 1-30), failed runs in a row before it pauses itself (3, 1-10), catch-up runs (3, 0-10). The form refuses a value outside its range; the card shows all five. |
 
 A new automation starts turned off.
 
@@ -45,8 +46,9 @@ model with no profile is listed in the model select as itself, marked
 
 ## When it runs
 
-- Only while Custard is open. A tick every 20 seconds looks for slots that fell
-  due since the last look. Each slot is picked up once, even if Custard closes
+- Only while Custard is running: its window open, minimised, or hidden in the
+  tray (see **Running in the background**). A tick every 20 seconds looks for
+  slots that fell due since the last look. Each slot is picked up once, even if Custard closes
   during its run (the window is closed before the run starts).
 - A slot more than 10 minutes late (Custard was closed, or busy) is a
   **catch-up**; see below.
@@ -61,13 +63,45 @@ model with no profile is listed in the model select as itself, marked
   counted against the runs-per-day limit. Only one Run now can be waiting per
   automation.
 - The runs-per-day limit counts scheduled runs started on the local day. Past
-  it, a slot is recorded as skipped.
+  it, a slot is recorded as skipped. Then the limits on all automations
+  together are checked (see below); past one, the slot is skipped with its
+  reason.
 - A run is stopped at its minute limit or tool-call limit and recorded as
   stopped, with the reason.
 - After the set number of failed scheduled runs in a row the automation pauses
   itself, with the last reason. Turning it on or **Resume** clears this. A
   429, a rejected key, a missing key or an unavailable plugin ends the run with
   that reason; there is no retry loop (the provider SDKs' own retries are off).
+
+## Running in the background
+
+Settings → Automations → **Running in the background**. Stored in
+`settings.json` under `background`.
+
+| Setting                              | Default    | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Keep running in the tray             | Off        | Closing the window hides it; Custard, its automations and its plugins keep running. A tray icon shows the logo, with an amber dot while a run is going. Its menu lists what is running (or how many automations are on), the last run that ended and its status, up to three paused automations, **Open Custard** and **Quit Custard**. Clicking the icon opens the window. The first time the window hides, a notification says Custard is still running. If the system has no tray, closing the window quits as before. Hidden in the tray, the window counts as not visible, so plugin widgets (the Spotify player) stop refreshing as when it is minimised: nothing polls in the background. |
+| Start at login                       | Off        | Only with the tray on, and only in the installed app on Windows or macOS (Electron has no login item on Linux, and a development build would register bare Electron). Custard starts with its window hidden in the tray (Windows: the `--hidden` argument; macOS: `wasOpenedAtLogin`). Turning the tray off turns this off.                                                                                                                                                                                                                                                                                                                                                                      |
+| Notify me about runs                 | On         | An OS notification when a run fails, stops at one of its limits, pauses itself, is skipped at a limit, or leaves a question. It names the automation and says what happened in Custard's own words, never the run's reason, summary or question (those can carry text a run read from notes or plugins). Clicking it opens Settings. A skip is told once a day per automation and limit; failures every time. A slot missed while Custard was closed is not notified (catch-up and the record cover it).                                                                                                                                                                                         |
+| All automations together: runs a day | 48 (1-200) | Scheduled runs started on the computer's day, all automations together. Past it, slots are skipped with that reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Skip runs past the budget            | On         | Once this month's estimated spend (Settings → Spending) reaches the budget, scheduled runs are skipped with that reason. Without a budget it does nothing. Chats are never stopped by the budget.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+
+**Run now** isn't counted against either runs-a-day limit or stopped by the
+budget, because the user is there. Its tool-call and minute limits still
+apply.
+
+Only one Custard runs at a time (Electron's single-instance lock): a second
+one would run every automation twice. Opening Custard again shows the window
+of the one already running.
+
+Quitting from the tray menu, logging off or shutting down really quits. A run
+cut off that way is recorded as failed on the next start, as before.
+
+Not in this step: running while Custard is fully closed (an OS scheduler or a
+service), plugin work on its own schedule (see
+`docs/proposals/background-jobs.md`), event triggers, and plugin write tools
+in runs. Tray, login item and notifications are not tested on Windows or
+macOS; the tray and notifications were checked under Linux (xvfb) only.
 
 ## Catch-up (Step 3)
 
@@ -237,7 +271,7 @@ it.
 
 ## Not in this step
 
-Plugin write tools, web access, notifications when a run fails.
+Plugin write tools, web access.
 
 ## Open for review
 
