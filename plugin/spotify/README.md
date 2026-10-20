@@ -26,6 +26,10 @@ Not logged: declined, refused, not-run or rejected (4xx) actions, a volume chang
 
 **Settings → Plugins → Spotify → Manage → Event log in your vault.** Off by default. While on, Manage shows today's count and the last entry, the hub card says "Logging to vault", and the player shows "Logging to vault" (or "Event log not saving" if a write failed). Turning it off stops new entries at once; existing notes stay.
 
+### Summing it up
+
+The starter skill `spotify-preferences` (in `Custard/Skills/`) reads the log for a period and writes a new note, `Custard/Plugins/Spotify/Preferences/Inferred YYYY-MM-DD.md`, of likely likes and dislikes, every line marked *(inferred)*. It counts only quick widget skips (under 30 s) and songs played to the end, never assistant skips or unexplained track changes, and never edits an existing note.
+
 ### Guarantees
 
 - No new requests: logging uses the reads each tool already makes. No polling, no background job.

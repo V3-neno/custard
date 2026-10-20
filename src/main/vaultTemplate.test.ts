@@ -40,6 +40,7 @@ describe('the starter vault', () => {
       expect(modesOf(global)).toEqual([])
     expect(modesOf('plugin-blueprint')).toEqual(['code'])
     expect(modesOf('custard-tuneup')).toEqual(['skills'])
+    expect(modesOf('spotify-preferences')).toEqual(['chat'])
     for (const k of skills)
       expect(readFileSync(join(root, k.path), 'utf8').length).toBeLessThan(4_500)
   })
