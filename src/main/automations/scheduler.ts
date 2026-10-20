@@ -38,7 +38,32 @@ export type SchedulerDeps = {
   ) => Promise<RunResult>
   // Called when a record changes, so the window can refresh.
   changed?: () => void
+  // Limits on all automations together (runs a day, the monthly budget): the
+  // reason to skip a scheduled run, or null to run it. Asked after the
+  // automation's own runs-a-day limit. Run now is never gated.
+  gate?: (a: Automation) => string | null
+  // How a run ended or why a slot was skipped, for notifications and the tray.
+  report?: (e: SchedulerReport) => void
 }
+
+export type SchedulerReport =
+  | {
+      type: 'ended'
+      automation: Automation
+      kind: RunRecord['kind']
+      status: RunResult['status']
+      // It paused itself after this run.
+      paused: boolean
+      questions: number
+    }
+  | {
+      type: 'skipped'
+      automation: Automation
+      // missed: Custard was closed or busy; limit: the automation's runs a
+      // day; gate: a limit on all automations together.
+      cause: 'missed' | 'limit' | 'gate'
+      reason: string
+    }
 
 // Fires automations at their slots while Custard is open. Runs go one at a
 // time, in the order their slots fell due.
@@ -96,12 +121,14 @@ export class Scheduler {
         if (!keep && late.length)
           this.skip(
             a,
+            'missed',
             late[late.length - 1].label,
             `${late.length === 1 ? 'A scheduled run was' : `${late.length} scheduled runs were`} missed because Custard was closed or busy, and catch-up is off for this automation.`
           )
         else if (folded.length)
           this.skip(
             a,
+            'missed',
             folded[folded.length - 1].label,
             `${folded.length === 1 ? 'An older scheduled run was' : `${folded.length} older scheduled runs were`} missed and not run. ${folded.length === 1 ? 'It is' : 'They are'} listed in the context of the catch-up run for ${catching[0].label}.`
           )
@@ -121,7 +148,12 @@ export class Scheduler {
     return true
   }
 
-  private skip(a: Automation, slot: string | undefined, reason: string): void {
+  private skip(
+    a: Automation,
+    cause: 'missed' | 'limit' | 'gate',
+    slot: string | undefined,
+    reason: string
+  ): void {
     const t = this.d.now()
     addRun(this.d.dir, a.id, {
       id: randomUUID(),
@@ -136,6 +168,7 @@ export class Scheduler {
       changes: []
     })
     this.d.changed?.()
+    this.d.report?.({ type: 'skipped', automation: a, cause, reason })
   }
 
   private enqueue(
@@ -176,9 +209,12 @@ export class Scheduler {
       if (this.countToday(f, a) >= a.limits.runsPerDay)
         return this.skip(
           a,
+          'limit',
           slot?.label,
           `The limit of ${a.limits.runsPerDay} runs a day was reached.`
         )
+      const gated = this.d.gate?.(a)
+      if (gated) return this.skip(a, 'gate', slot?.label, gated)
     }
     const run: RunRecord = {
       id: randomUUID(),
@@ -220,9 +256,11 @@ export class Scheduler {
     this.active.delete(id)
     updateRun(this.d.dir, id, run.id, { ...result, endedAt: this.d.now() })
     const state = loadRuns(this.d.dir, id).state
+    let paused = false
     if (result.status === 'completed') updateState(this.d.dir, id, { failures: 0 })
     else if (result.status === 'failed' && kind === 'scheduled') {
       const failures = state.failures + 1
+      paused = failures >= a.limits.failuresBeforePause
       updateState(this.d.dir, id, {
         failures,
         ...(failures >= a.limits.failuresBeforePause
@@ -236,6 +274,14 @@ export class Scheduler {
       })
     }
     this.d.changed?.()
+    this.d.report?.({
+      type: 'ended',
+      automation: a,
+      kind,
+      status: result.status,
+      paused,
+      questions: result.questions?.length ?? 0
+    })
   }
 
   // Resumes a paused automation; the failures start over.

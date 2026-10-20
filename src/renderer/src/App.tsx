@@ -37,6 +37,8 @@ function App(): React.JSX.Element {
   useEffect(() => {
     window.custard.settings.get().then(setSettings)
   }, [])
+  // A notification about an automation run was clicked.
+  useEffect(() => window.custard.background.onOpenSettings(() => setSettingsOpen(true)), [])
 
   // The whole palette follows the provider (see main.css).
   useEffect(() => {

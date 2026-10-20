@@ -13,11 +13,17 @@ import {
   automationQuestionsFile,
   automationRunsDir,
   getAutomations,
+  getBackground,
   getVaultGrants,
   getVaultPath,
   setAutomations,
+  usageThisMonth,
   vaultEditsDir
 } from '../store'
+import { refreshTray, reportRun, setTrayState } from '../background'
+import type { TrayState } from '../trayMenu'
+import { gateReason } from './gate'
+import { localDay } from './schedule'
 import { extensionRefusal, extensionTarget } from '../modes/extensions'
 import { pluginHost, protectedRoots } from '../plugins'
 import { stepFor } from './model'
@@ -96,6 +102,40 @@ async function runOne(
 const notify = (): void => {
   for (const w of BrowserWindow.getAllWindows())
     if (!w.isDestroyed()) w.webContents.send('automations:changed')
+  refreshTray()
+}
+
+// Scheduled runs started today (the computer's day) by all automations.
+function runsToday(now: number): number {
+  const today = localDay(now)
+  return getAutomations().reduce(
+    (n, a) =>
+      n +
+      loadRuns(automationRunsDir(), a.id).runs.filter(
+        (r) => r.kind === 'scheduled' && r.status !== 'skipped' && localDay(r.startedAt) === today
+      ).length,
+    0
+  )
+}
+
+// What the tray icon's menu says.
+function trayState(): TrayState {
+  const all = getAutomations()
+  let last: TrayState['last'] = null
+  const paused: string[] = []
+  for (const a of all) {
+    const f = loadRuns(automationRunsDir(), a.id)
+    if (f.state.paused) paused.push(a.name)
+    const r = f.runs.find((x) => x.status !== 'running' && x.endedAt)
+    if (r?.endedAt && (!last || r.endedAt > last.at))
+      last = { name: a.name, status: r.status, at: r.endedAt }
+  }
+  return {
+    running: all.find((a) => scheduler?.running(a.id))?.name ?? null,
+    on: all.filter((a) => a.enabled).length,
+    paused,
+    last
+  }
 }
 
 export function startAutomations(): void {
@@ -105,8 +145,11 @@ export function startAutomations(): void {
     now: () => Date.now(),
     list: getAutomations,
     run: runOne,
-    changed: notify
+    changed: notify,
+    gate: () => gateReason(getBackground(), runsToday(Date.now()), usageThisMonth()),
+    report: reportRun
   })
+  setTrayState(trayState)
   scheduler.start()
 }
 
