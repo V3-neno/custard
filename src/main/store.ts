@@ -30,6 +30,7 @@ import { defaultMemorySettings, type MemorySettings } from '../shared/memory'
 import { normalizeGrants, type VaultGrant } from '../shared/vaultGrants'
 import { normalizeAutomations, type Automation } from '../shared/automations'
 import { normalizeBackground, type BackgroundSettings } from '../shared/background'
+import { normalizeScripts, type ScriptsSettings } from '../shared/scripts'
 
 // Conversations are plain JSON files in the app's data folder, one per chat.
 const dir = (): string => {
@@ -265,6 +266,7 @@ type Config = {
   vaultGrants: VaultGrant[]
   automations: Automation[]
   background: BackgroundSettings
+  scripts: ScriptsSettings
   // Monthly spending budget in dollars, or null for none.
   budget: number | null
 }
@@ -286,6 +288,7 @@ function readConfig(): Config {
     vaultGrants: normalizeGrants(raw.vaultGrants).grants,
     automations: normalizeAutomations(raw.automations),
     background: normalizeBackground(raw.background),
+    scripts: normalizeScripts(raw.scripts),
     budget: normalizeBudget(raw.budget)
   }
 }
@@ -344,6 +347,13 @@ export const setBackground = (background: unknown): BackgroundSettings => {
   const b = normalizeBackground(background)
   writeConfig({ background: b })
   return b
+}
+// Scripts: the switch and the chosen interpreters (scripts/index.ts).
+export const getScripts = (): ScriptsSettings => readConfig().scripts
+export const setScripts = (scripts: ScriptsSettings): ScriptsSettings => {
+  const s = normalizeScripts(scripts)
+  writeConfig({ scripts: s })
+  return s
 }
 export const automationRunsDir = (): string => join(app.getPath('userData'), 'automation-runs')
 export const automationQuestionsFile = (): string =>

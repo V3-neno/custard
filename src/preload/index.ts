@@ -20,6 +20,7 @@ import type { SkillEntry, SkillText, VaultEditEntry, VaultInfo } from '../shared
 import type { VaultGrant } from '../shared/vaultGrants'
 import type { AutomationView, PendingQuestion } from '../shared/automations'
 import type { BackgroundView } from '../shared/background'
+import type { InterpreterChoice, ScriptRuntime, ScriptsView } from '../shared/scripts'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision, ModelAvailability } from '../shared/chat'
@@ -111,6 +112,20 @@ const custard = {
       ipcRenderer.on('app:openSettings', h)
       return () => ipcRenderer.removeListener('app:openSettings', h)
     }
+  },
+  // Scripts: the switch, the interpreters, Stop (docs/scripts.md).
+  scripts: {
+    get: (): Promise<ScriptsView> => ipcRenderer.invoke('scripts:get'),
+    setEnabled: (on: boolean): Promise<ScriptsView> => ipcRenderer.invoke('scripts:setEnabled', on),
+    find: (runtime: ScriptRuntime): Promise<InterpreterChoice[]> =>
+      ipcRenderer.invoke('scripts:find', runtime),
+    use: (runtime: ScriptRuntime, path: string): Promise<ScriptsView> =>
+      ipcRenderer.invoke('scripts:use', runtime, path),
+    browse: (runtime: ScriptRuntime): Promise<ScriptsView> =>
+      ipcRenderer.invoke('scripts:browse', runtime),
+    clear: (runtime: ScriptRuntime): Promise<ScriptsView> =>
+      ipcRenderer.invoke('scripts:clear', runtime),
+    stop: (): Promise<ScriptsView> => ipcRenderer.invoke('scripts:stop')
   },
   vault: {
     get: (): Promise<VaultInfo> => ipcRenderer.invoke('vault:get'),

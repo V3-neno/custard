@@ -1,3 +1,4 @@
+import type { ScriptRuntime } from '../../shared/scripts'
 import type { JsonSchema } from '../../shared/plugins'
 import { checkSchema } from '../plugins/schema'
 
@@ -25,7 +26,7 @@ export function splitScriptToolName(name: string): { scriptId: string; tool: str
 
 export const TIMEOUT = { default: 60_000, min: 1_000, max: 600_000 }
 
-export type ScriptRuntime = 'python' | 'node'
+export type { ScriptRuntime }
 
 export type ScriptTool = {
   name: string

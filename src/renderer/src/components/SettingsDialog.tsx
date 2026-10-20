@@ -25,6 +25,7 @@ import EditableFolders from './settings/EditableFolders'
 import Automations from './settings/Automations'
 import ModelsFile from './settings/ModelsFile'
 import { cleanError, primary, secondary } from './settings/ui'
+import Scripts from './settings/Scripts'
 import Select from './ui/Select'
 import PillGroup from './ui/PillGroup'
 
@@ -590,6 +591,9 @@ function SettingsDialog({ onClose, onChanged, onBuild }: Props): React.JSX.Eleme
             </section>
             <div className="mt-6">
               <MemorySection />
+            </div>
+            <div className="mt-6">
+              <Scripts />
             </div>
           </>
         )}

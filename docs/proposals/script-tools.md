@@ -337,3 +337,44 @@ by temporarily changing the code). Full unit suite: 1,640 passed, 2 skipped.
 
 Not verified: Windows (the launcher list, the Store alias, `taskkill`) and
 macOS. The Windows discovery paths are tested with a simulated file system only.
+
+## Step 2 as built
+
+Script tools in Chat, Settings → Scripts. User doc: `docs/scripts.md`.
+
+- **Settings → Scripts** (General tab, under Memory): the switch (off), the
+  risk statement, Python and Node.js with Find (lists what is installed,
+  with versions) / Use / Browse / Clear, Stop all while a script runs, and a
+  list of scripts with their approval and any problem. Stored in
+  settings.json under `scripts`. Turning it off stops running scripts.
+- **Chat only.** A new tool kind `script` in `modes/policy.ts`, allowed in
+  Chat mode only, so Design, Skills, Plugins and automations never offer or
+  run one.
+- **Offered** (`scripts/tools.ts`) only while the switch is on, for scripts
+  that are approved, on and in Chat, tied to the approval's digest.
+- **Every call asks** with the script's own card: that it runs as you,
+  name, version, runtime, tool, the declarations marked "not enforced", and
+  the whole input. Read tools offer Allow for this chat (keyed to the
+  approval); write tools never do. A repeat of a write whose outcome is
+  unknown carries the warning on the same card.
+- **Stale calls** are refused before the card and again at the run (the
+  digest is checked against the approved copy's hash in one step).
+- **Results** are fenced with `fenceResult` (source `script:<id>`, 12,000
+  characters) and count as outside text. A write cut short or ended without
+  answering is "outcome unknown"; one that answered with an error is
+  "failed".
+- **Stop** in the chat aborts the run, which kills the process tree.
+- `docs/plugins/SECURITY.md` now says plugins still can't start a process
+  and scripts are the separate, user-approved exception.
+
+Not in step 2: creating, editing, testing and approving scripts, the "Use in
+Chat" switch, and installing packages. Those are step 3 (Plugins mode).
+Until then a script can only be set up by hand on disk.
+
+Tests: unit 1,647 passed, 2 skipped (7 new for the chat tools and mode policy). New e2e `test/e2e/scripts.mjs` with
+`test/e2e/mocks/s-scripts.mjs`: 25 checks, 0 failed (off by default, risk
+shown, Find/Use the real Python, nothing offered or run while off, the card
+and its options, the fenced result, a declined write runs nothing, Stop kills
+the process, Design offers nothing, off again). Re-run to check nothing else
+changed: interrupt 29/0, hardening 32/0, modes 34/0 (34 before too),
+provider-requests 51/0.

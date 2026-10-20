@@ -15,6 +15,7 @@ export type ToolKind =
   | 'vault-write' // vault_create_note, vault_append, vault_edit
   | 'web' // web_search, web_read
   | 'plugin' // an enabled plugin's tool, <plugin>__<tool>
+  | 'script' // an approved script's tool, script_<script>__<tool> (Chat only)
   | 'widget' // widget_show, widget_hide
   | 'questions' // automation_question: closes an automation's open question
   | 'workspace' // Plugins mode's file tools
@@ -45,10 +46,11 @@ const HUB: ToolKind[] = ['vault-read', 'web', 'navigate']
 export function modePolicy(mode: Mode, workspace?: Workspace, skill?: string): ModePolicy {
   switch (mode) {
     // Chat and Design use extensions; they never make or change them.
+    // Scripts run in Chat only (docs/scripts.md).
     case 'chat':
       return {
         mode,
-        tools: new Set<ToolKind>([...USE, 'questions']),
+        tools: new Set<ToolKind>([...USE, 'questions', 'script']),
         authorSkills: false,
         authorPlugins: false
       }
@@ -107,6 +109,7 @@ export function toolKind(name: string, sources: ToolSources): ToolKind {
   if (name === 'automation_question') return 'questions'
   if (name === 'workspace_propose') return 'navigate'
   if ((DESIGN_TOOLS as readonly string[]).includes(name)) return 'design'
+  if (/^script_[a-z][a-z0-9-]{1,30}__[a-z][a-z0-9_]{0,40}$/.test(name)) return 'script'
   if (/^[a-z][a-z0-9-]{1,30}__[a-z][a-z0-9_]{0,40}$/.test(name)) return 'plugin'
   return 'unknown'
 }

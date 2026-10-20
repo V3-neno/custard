@@ -53,6 +53,9 @@ const NOT_IN_SOURCE = /^(env|\.venv|venv|node_modules)$/i
 
 export class SnapshotError extends Error {}
 
+export const STALE =
+  'The script was changed or approved again after this reply started, so this call was not run. Ask again to use the current version.'
+
 function writeAtomic(path: string, data: string): void {
   const tmp = `${path}.${process.pid}.tmp`
   writeFileSync(tmp, data)
@@ -116,6 +119,8 @@ export type RunRecord = {
   input: unknown
   caller: string
   ok: boolean
+  // The script printed a result line (its own answer, success or error).
+  answered: boolean
   error?: string
   exitCode: number | null
   ended: 'exit' | 'timeout' | 'stopped' | 'output-limit' | 'spawn-failed'
@@ -239,9 +244,11 @@ export class ScriptStore {
   }
 
   // Throws unless approved/ is exactly what was approved.
-  verifyApproved(id: string): ScriptManifest {
+  // With `expectDigest`, also throws unless that is still the approval.
+  verifyApproved(id: string, expectDigest?: string): ScriptManifest {
     const a = this.state(id).approval
     if (!a) throw new SnapshotError('This script has not been approved.')
+    if (expectDigest !== undefined && a.digest !== expectDigest) throw new SnapshotError(STALE)
     if (!existsSync(this.approvedDir(id)))
       throw new SnapshotError('The approved copy is missing. Approve the script again.')
     let digest: string

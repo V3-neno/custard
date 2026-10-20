@@ -75,6 +75,14 @@ import { acceptsAttachments, type Attachment } from '../shared/attachments'
 import { handle, on } from './ipc'
 import { createPluginNamed, pluginHost, protectedRoots, verifyWorkspace } from './plugins'
 import type { ApprovalRequest } from './plugins/host'
+import { scriptHost, scriptsOn } from './scripts'
+import {
+  describeScriptCall,
+  invokeScriptTool,
+  isScriptTool,
+  SCRIPTS_PROMPT,
+  scriptToolSet
+} from './scripts/tools'
 import { workspaceTools, type WorkspaceTools } from './workspace'
 import {
   answerProposal,
@@ -362,6 +370,11 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   const plugins = pluginsAllowed
     ? pluginHost().toolSet(conversation.mode)
     : { tools: [], snapshot: new Map(), instructions: [] }
+  // Approved scripts' tools (Chat only, while Scripts is on), and which
+  // approval each came from. Every call asks and is checked again.
+  const scripts = policy.tools.has('script')
+    ? scriptToolSet(scriptHost().store, scriptsOn())
+    : { tools: [], snapshot: new Map() }
 
   const system: BetaTextBlockParam[] = [
     { type: 'text', text: `${systemPrompt(model)}\n\n${MODE_PROMPTS[conversation.mode]}` }
@@ -449,6 +462,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
         ...plugins.instructions
       ].join('\n\n')
     })
+  if (scripts.tools.length) system.push({ type: 'text', text: SCRIPTS_PROMPT })
   // What besides the user's own words the model can see, for the search gate.
   const injected = [
     ...(vaultReady ? ['your vault notes (memory, recent activity and the skills list)'] : []),
@@ -522,6 +536,7 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
     ...(shownQuestions.length ? [questionTool] : []),
     ...web.tools,
     ...plugins.tools,
+    ...scripts.tools,
     ...(widgetCatalog.length ? widgetTools(widgets().keys(conversation.id)) : []),
     ...(policy.tools.has('design') ? designTools() : []),
     ...(policy.tools.has('navigate') ? [proposeTool(hubTarget)] : [])
@@ -629,7 +644,9 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
   }
 
   const toCall = (id: string, name: string, input: unknown): Call => {
-    const described = pluginHost().describeCall(name, input)
+    const described = isScriptTool(name)
+      ? describeScriptCall(scriptHost().store, name)
+      : pluginHost().describeCall(name, input)
     return {
       id,
       name,
@@ -685,13 +702,23 @@ async function send(sender: WebContents, req: SendChatRequest): Promise<void> {
       }
     const refusal = modeRefusal(c)
     if (refusal) return { content: refusal, isError: true, outcome: 'not-run' }
-    const isPlugin = c.name.includes('__') && !workspace?.has(c.name)
+    const isScript = isScriptTool(c.name)
+    const isPlugin = c.name.includes('__') && !workspace?.has(c.name) && !isScript
     let preApproved = false
     const repeatWarning =
       'This repeats an earlier action whose outcome is unknown. It may already have happened.'
     // A Design repeat carries the warning on Design's own card, which names
     // the provider, the files sent and the price; it is never pre-approved.
     const designRepeat = kindOf(c.name) === 'design' && c.write && log.unknownRepeat(c)
+    // A script's own card carries the warning, with what it runs and where.
+    if (isScript)
+      return invokeScriptTool(scriptHost(), c.name, c.input, {
+        on: scriptsOn(),
+        snapshot: scripts.snapshot,
+        signal: controller.signal,
+        approve,
+        ...(c.write && log.unknownRepeat(c) ? { repeatWarning } : {})
+      })
     if (c.write && !designRepeat && log.unknownRepeat(c)) {
       const allowed = await approve(
         {

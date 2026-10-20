@@ -83,14 +83,21 @@ export class ScriptHost {
     id: string,
     tool: string,
     input: unknown,
-    o: { caller: ScriptCaller; signal?: AbortSignal; extraEnv?: Record<string, string> }
+    o: {
+      caller: ScriptCaller
+      signal?: AbortSignal
+      extraEnv?: Record<string, string>
+      // The approval the caller offered or showed: a different one (the
+      // script was approved again meanwhile) doesn't run.
+      expectDigest?: string
+    }
   ): Promise<RunResult> {
     const refuse = (error: string): RunResult => ({ ok: false, error, record: null })
     if (!this.o.enabled()) return refuse('Scripts are turned off in Settings → Scripts.')
     let manifest: ScriptManifest
     try {
       if (!this.store.state(id).enabled) return refuse('This script is turned off.')
-      manifest = this.store.verifyApproved(id)
+      manifest = this.store.verifyApproved(id, o.expectDigest)
     } catch (err) {
       return refuse(
         err instanceof SnapshotError ? err.message : `Script error: ${(err as Error).message}`
@@ -146,6 +153,7 @@ export class ScriptHost {
         input: input ?? {},
         caller: o.caller,
         ok: !!parsed?.ok,
+        answered: parsed !== null,
         ...(error ? { error } : {}),
         exitCode: outcome.exitCode,
         ended: outcome.ended,
