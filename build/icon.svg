@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a1f15"/>
+      <stop offset="0.55" stop-color="#140e09"/>
+      <stop offset="1" stop-color="#0a0705"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.54" r="0.5">
+      <stop offset="0" stop-color="#e08a1e" stop-opacity="0.38"/>
+      <stop offset="0.6" stop-color="#b4531a" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#b4531a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a6853"/>
+      <stop offset="0.5" stop-color="#3a2b1d"/>
+      <stop offset="1" stop-color="#1e160f"/>
+    </linearGradient>
+    <linearGradient id="lip" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#95826a"/>
+      <stop offset="1" stop-color="#17110b"/>
+    </linearGradient>
+    <radialGradient id="custard" cx="0.42" cy="0.36" r="0.72">
+      <stop offset="0" stop-color="#ffe2a3"/>
+      <stop offset="0.35" stop-color="#ffcd6e"/>
+      <stop offset="0.7" stop-color="#f5ae3f"/>
+      <stop offset="1" stop-color="#e08a1e"/>
+    </radialGradient>
+    <radialGradient id="burn" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.72" stop-color="#b4531a" stop-opacity="0"/>
+      <stop offset="0.93" stop-color="#b4531a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#6e2f0e" stop-opacity="0.85"/>
+    </radialGradient>
+    <clipPath id="tileClip"><rect x="80" y="80" width="864" height="864" rx="196"/></clipPath>
+  </defs>
+  <rect x="80" y="80" width="864" height="864" rx="196" fill="url(#tile)"/>
+  <g clip-path="url(#tileClip)">
+    <circle cx="512" cy="540" r="440" fill="url(#glow)"/>
+  </g>
+  <rect x="81.5" y="81.5" width="861" height="861" rx="194.5" fill="none" stroke="#ffcd6e" stroke-opacity="0.10" stroke-width="3"/>
+  <!-- ramekin -->
+  <circle cx="512" cy="528" r="292" fill="url(#rim)"/>
+  <circle cx="512" cy="528" r="252" fill="url(#lip)"/>
+  <!-- custard surface -->
+  <circle cx="512" cy="528" r="236" fill="url(#custard)"/>
+  <circle cx="512" cy="528" r="236" fill="url(#burn)"/>
+  <!-- gloss -->
+  <path d="M352 470 A172 172 0 0 1 498 350" fill="none" stroke="#fff6e0" stroke-opacity="0.75" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="356" cy="530" r="15" fill="#fff6e0" opacity="0.6"/>
+</svg>

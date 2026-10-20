@@ -2,6 +2,9 @@ appId: com.custard.app
 productName: Custard
 directories:
   buildResources: build
+# App icon: build/icon.svg is the source; icon.png (1024), icon.ico (16-256)
+# and icon.icns are rendered from it. The NSIS installer and uninstaller use
+# the Windows icon.
 files:
   - '!**/.vscode/*'
   - '!src/*'
@@ -35,6 +38,7 @@ extraResources:
 # esbuild ships one native binary per platform and npm installs only the
 # host's. A Windows build made on Linux carries Linux's esbuild.
 win:
+  icon: build/icon.ico
   executableName: custard
   target:
     - target: nsis
@@ -50,6 +54,7 @@ nsis:
 # ad-hoc signature it rejects Electron's pre-signed frameworks; it is only
 # needed for notarization. Gatekeeper still blocks the first open.
 mac:
+  icon: build/icon.icns
   target:
     - dmg
     - zip
@@ -66,6 +71,7 @@ mac:
 dmg:
   artifactName: ${name}-${version}-mac-${arch}.${ext}
 linux:
+  icon: build/icon.png
   target:
     - AppImage
   maintainer: electronjs.org
