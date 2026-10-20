@@ -29,7 +29,9 @@ import {
   pluginHost,
   protectedRoots,
   registerPluginHandlers,
-  startPlugins
+  startBackgroundSync,
+  startPlugins,
+  stopBackgroundSync
 } from './plugins'
 import { extensionRefusal, extensionTarget } from './modes/extensions'
 import { listEdits, undoEdit } from './vault/edit'
@@ -354,7 +356,7 @@ app.whenReady().then(() => {
   startBackground()
   createWindow()
   // Plugins start after the window so a slow plugin can't delay the app.
-  void startPlugins()
+  void startPlugins().finally(startBackgroundSync)
   // Scheduled runs happen only while Custard is running (also when its
   // window is hidden in the tray).
   startAutomations()
@@ -379,6 +381,7 @@ app.on('browser-window-created', (_, win) => {
 
 app.on('before-quit', () => {
   stopAutomations()
+  stopBackgroundSync()
   pluginHost().shutdown()
 })
 

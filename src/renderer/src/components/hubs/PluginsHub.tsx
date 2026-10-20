@@ -41,6 +41,7 @@ function chips(p: PluginStatus): string[] {
           : 'Plugins mode only'
     )
   if (p.events?.on) out.push('Logging to vault')
+  if (p.background?.on) out.push('Syncing in background')
   if (p.sourceChanged && !p.sourceErrors.length)
     out.push(p.active ? 'Update ready to review' : 'Ready to review')
   return out

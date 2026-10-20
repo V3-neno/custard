@@ -40,6 +40,8 @@ export type StateFile = {
   chatDesign: string[] | null
   // The event log in the vault: the user's switch, off until they turn it on.
   events: boolean
+  // Background sync (plugins/sync.ts): the user's switch, off by default.
+  background: boolean
   errors: { at: number; message: string }[]
 }
 
@@ -51,6 +53,7 @@ const emptyState = (): StateFile => ({
   askEveryTime: {},
   chatDesign: null,
   events: false,
+  background: false,
   errors: []
 })
 

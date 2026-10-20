@@ -372,3 +372,49 @@ describe('fills, as documented for plugin authors', () => {
     expect(parseManifest({ ...goodManifest(), fills }).errors[0]).toMatch(/1 to 6 entries/)
   })
 })
+
+describe('background', () => {
+  const withTools = (background: unknown): Record<string, unknown> => {
+    const m = goodManifest()
+    ;(m.tools as Record<string, unknown>[]).push({
+      name: 'sync',
+      description: 'Sync',
+      effect: 'read',
+      inputSchema: { type: 'object', properties: {} }
+    })
+    return { ...m, background }
+  }
+
+  it('accepts a read tool with no required input, every 15 minutes or more', () => {
+    const r = parseManifest(withTools({ tool: 'sync', everyMinutes: 30 }))
+    expect(r.errors).toEqual([])
+    expect(r.manifest?.background).toEqual({ tool: 'sync', everyMinutes: 30 })
+    expect(permissionsOf(r.manifest!)).toContain('background:sync@30')
+  })
+
+  it('refuses a write tool, required input, a short interval and unknown fields', () => {
+    const errors = (b: unknown): string[] => parseManifest(withTools(b)).errors
+    expect(errors({ tool: 'act', everyMinutes: 30 })).toContain(
+      'background.tool must be a read tool: nobody is there to approve a write'
+    )
+    expect(errors({ tool: 'search', everyMinutes: 30 })).toContain(
+      'background.tool must take no required input: Custard calls it with {}'
+    )
+    expect(errors({ tool: 'sync', everyMinutes: 5 })).toContain(
+      'background.everyMinutes must be a whole number from 15 to 1440'
+    )
+    expect(errors({ tool: 'nope', everyMinutes: 30 })).toContain(
+      "background.tool must name one of the plugin's tools"
+    )
+    expect(errors({ tool: 'sync', everyMinutes: 30, poll: true })).toContain(
+      'background.poll is not a known field'
+    )
+    expect(errors('sync')).toContain('background must be an object with tool and everyMinutes')
+  })
+
+  it('asks again when the interval changes', () => {
+    const a = permissionsOf(parseManifest(withTools({ tool: 'sync', everyMinutes: 30 })).manifest!)
+    const b = permissionsOf(parseManifest(withTools({ tool: 'sync', everyMinutes: 15 })).manifest!)
+    expect(a).not.toEqual(b)
+  })
+})

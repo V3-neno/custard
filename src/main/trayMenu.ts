@@ -7,6 +7,8 @@ export type TrayState = {
   // Automations turned on, and those paused (by themselves or the user).
   on: number
   paused: string[]
+  // Plugins whose background sync is on, with their interval.
+  syncing?: { name: string; everyMinutes: number }[]
   // The newest run that ended.
   last: { name: string; status: string; at: number } | null
 }

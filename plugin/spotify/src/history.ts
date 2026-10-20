@@ -21,7 +21,7 @@ const withTag = (summary: string, tag: string, payload: unknown): string => `${s
 const artistsOf = (v: unknown): { name: string | null; id: string | null }[] =>
   Array.isArray(v) ? v.slice(0, 16).map((a) => ({ name: clip(rec(a).name, 160), id: idOf(rec(a).id) })) : []
 
-const trackOf = (t: Rec): Rec => ({
+export const trackOf = (t: Rec): Rec => ({
   title: clip(t.name),
   artists: artistsOf(t.artists),
   album: clip(rec(t.album).name),

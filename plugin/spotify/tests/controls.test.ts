@@ -50,7 +50,8 @@ test('manifest registers every handler and every new playback mutation is approv
     'user-read-playback-state', 'user-read-currently-playing', 'user-modify-playback-state',
     'user-read-recently-played', 'user-top-read'
   ])
-  assert.equal(manifest.permissions.storage, false)
+  // 1.6.0: storage holds only where background sync got to (src/sync.ts).
+  assert.equal(manifest.permissions.storage, true)
   assert.deepEqual(manifest.permissions.network, ['api.spotify.com', 'accounts.spotify.com'])
 })
 
@@ -61,7 +62,8 @@ test('the new history tools are read-only and nothing was added to the widget al
     assert.equal(tool?.effect, 'read')
     assert.equal(tool?.inputSchema.additionalProperties, false)
   }
-  assert.equal(manifest.tools.length, 16)
+  // 1.6.0 adds sync_recent, Custard's background tool (read only).
+  assert.equal(manifest.tools.length, 17)
   assert.deepEqual(manifest.widgets[0].tools, ['now_playing', 'pause_playback', 'resume_playback', 'next_track', 'seek', 'adjust_volume'])
   assert.equal(manifest.tools.filter((tool) => tool.effect === 'write').length, 9)
 })

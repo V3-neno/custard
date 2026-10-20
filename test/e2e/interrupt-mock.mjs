@@ -115,6 +115,22 @@ http
               }
             ]
           })
+        // Background sync (background-sync.mjs): two plays in the last hour,
+        // only those after the `after` cursor.
+        if (url.pathname === '/v1/me/player/recently-played') {
+          const after = Number(url.searchParams.get('after') ?? 0)
+          const now = Date.now()
+          const plays = [10, 4].map((m, i) => ({
+            played_at: new Date(Math.floor((now - m * 60_000) / 60_000) * 60_000).toISOString(),
+            track: {
+              ...track,
+              name: `Synced ${i + 1}`,
+              uri: `spotify:track:${String(i + 7).padStart(22, 'b')}`
+            },
+            context: null
+          }))
+          return j(200, { items: plays.filter((p) => Date.parse(p.played_at) > after).reverse() })
+        }
         if (url.pathname === '/v1/me/player/queue' && req.method === 'POST') return // never answers
         // Playback for the Spotify player widget: playing until paused.
         if (url.pathname === '/v1/me/player' && req.method === 'GET')

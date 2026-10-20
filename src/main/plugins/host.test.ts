@@ -1191,6 +1191,7 @@ describe('the Spotify reference plugin through the host', () => {
     'network:api.spotify.com',
     'network:accounts.spotify.com',
     'open:spotify:',
+    'storage',
     'events',
     'account:accounts.spotify.com',
     'account-token:accounts.spotify.com',
@@ -1209,7 +1210,8 @@ describe('the Spotify reference plugin through the host', () => {
     'action:resume_playback',
     'action:seek',
     'action:adjust_volume',
-    'widget:player'
+    'widget:player',
+    'background:sync_recent@30'
   ]
   const track = {
     uri: `spotify:track:${'a'.repeat(22)}`,
@@ -1757,5 +1759,57 @@ describe('event log (ctx.events)', () => {
     await activate([...ALL, 'events'])
     host.setEvents('demo', true)
     expect((await invoke('demo__echo', { text: 'skip' })).content).toMatch(/No Obsidian vault/)
+  })
+})
+
+describe('background sync', () => {
+  const withSync = (): Record<string, unknown> =>
+    manifest({ background: { tool: 'config', everyMinutes: 30 } })
+  const SYNC = [...ALL, 'background:config@30']
+
+  it('asks for its own permission, and is off until the user turns it on', async () => {
+    writePlugin(
+      {
+        'src/index.ts': INDEX.replace(
+          'config: (_i, ctx) => JSON.stringify(ctx.config),',
+          'config: (_i, ctx) => ctx.caller,'
+        )
+      },
+      withSync()
+    )
+    const review = await host.review('demo')
+    expect(review.newPermissions).toContain('background:config@30')
+    await activate(SYNC)
+    expect(host.status('demo').background).toMatchObject({ on: false, granted: true })
+    expect(host.backgroundPlugins()).toEqual([])
+    expect((await host.invokeBackground('demo', new AbortController().signal)).outcome).toBe(
+      'not-run'
+    )
+    host.setBackground('demo', true)
+    expect(host.backgroundPlugins()).toEqual([{ id: 'demo', name: 'Demo', everyMinutes: 30 }])
+    const r = await host.invokeBackground('demo', new AbortController().signal)
+    expect(r.content).toBe('background')
+    host.setBackground('demo', false)
+    expect(host.backgroundPlugins()).toEqual([])
+  })
+
+  it('never offers the background tool to a model', async () => {
+    writePlugin({}, withSync())
+    await activate(SYNC)
+    host.setChatDesign('demo', true)
+    for (const mode of ['code', 'chat'] as const)
+      expect(host.toolSet(mode).tools.map((t) => t.name)).not.toContain('demo__config')
+    expect(host.readToolSet(['demo']).tools.map((t) => t.name)).not.toContain('demo__config')
+  })
+
+  it('can’t be turned on without the permission, and stops when the plugin is disabled', async () => {
+    writePlugin({}, withSync())
+    await activate(SYNC)
+    host.setBackground('demo', true)
+    host.disable('demo')
+    expect(host.backgroundPlugins()).toEqual([])
+    writePlugin({}, manifest())
+    await activate(ALL)
+    expect(() => host.setBackground('demo', true)).toThrow(/no background sync/)
   })
 })

@@ -22,7 +22,8 @@ test('no Back handler exists; history scopes are read-only and storage stays off
   assert.equal(Object.keys(plugin.tools).some((name) => /^(history_back|back|back_track|replay|play_track)$/.test(name)), false)
   assert(manifest.auth.scopes.includes('user-read-recently-played'))
   assert(manifest.auth.scopes.includes('user-top-read'))
-  assert.equal(manifest.permissions.storage, false)
+  // 1.6.0: storage holds only where background sync got to (src/sync.ts).
+  assert.equal(manifest.permissions.storage, true)
   assert.deepEqual(Object.keys(plugin.tools).sort(), manifest.tools.map((tool) => tool.name).sort())
 })
 

@@ -37,6 +37,17 @@ Run after reviewing and activating 1.5.0 (the review lists "Keep an event log in
 
 Record what you actually saw. A skipped check is not a pass.
 
+### Background sync — Spotify 1.6.0
+
+Run after reviewing and activating 1.6.0 (the review lists "Store its own data in Custard" and "Run its sync_recent tool by itself every 30 minutes"). Not yet run live.
+
+1. **Off by default:** Manage shows "Background sync" with the box unticked; nothing is requested.
+2. **Needs the log:** event log off, sync on. Within about a minute Manage reads "the last call … failed: The event log is off …"; one "Background sync failed" notification.
+3. **Works:** event log on. Play two tracks to the end on any device. Within 30 minutes (the first call is about a minute after turning on) today's note gets two `played` entries with `source: "recently_played"`, oldest first; Manage reads "Sync on · last HH:MM · N calls today"; the hub card says "Syncing in background"; the tray menu (if kept in the tray) lists "Background sync: Spotify, every 30 min".
+4. **No duplicates:** quit and reopen Custard; after the next call no `played` entry repeats.
+5. **Not the assistant's:** in a chat, ask Claude to run sync_recent. It isn't offered; recently_played still works.
+6. **Turn off:** untick; no further calls (Spotify's developer dashboard or the mock log shows none).
+
 ### Inferred preferences skill (`spotify-preferences`)
 
 Needs a few days of log, or one day with deliberate presses. Not run with a real model yet.

@@ -48,7 +48,7 @@ const records = (ctx: TestContext): Record<string, any>[] => ctx.events.entries.
 
 test('manifest asks for the event log permission', () => {
   assert.equal((manifest.permissions as { events?: boolean }).events, true)
-  assert.equal(manifest.version, '1.5.0')
+  assert.equal(manifest.version, '1.6.0')
 })
 
 test('a widget press logs one entry from the preflight read, with no extra request', async () => {

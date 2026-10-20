@@ -61,7 +61,7 @@ export type ConfigValues = Record<string, string | number | boolean>
 // Who started a tool call, given to the plugin as ctx.caller (the same type as
 // Caller in custard-plugin-sdk). Set here, from where the call came in, never
 // from anything the model, a widget or the plugin sends.
-export type PluginCaller = 'assistant' | 'widget' | 'automation' | 'design'
+export type PluginCaller = 'assistant' | 'widget' | 'automation' | 'design' | 'background'
 
 // What the host tells plugin code about a call, next to its input: who
 // started it, and whether the plugin's event log is on (ctx.events.enabled).
@@ -162,6 +162,17 @@ export function cutResult(text: string): string {
 
 const fail = (content: string): ToolOutcome => ({ content, isError: true })
 // Refused before the plugin was called: nothing was done.
+export const backgroundPermission = (b: { tool: string; everyMinutes: number }): string =>
+  `background:${b.tool}@${b.everyMinutes}`
+
+// How a plugin's background sync last went, for Manage.
+export type BackgroundSyncStat = {
+  last: number | null
+  ok: boolean | null
+  error: string | null
+  today: number
+}
+
 const notRun = (content: string): ToolOutcome => ({ content, isError: true, outcome: 'not-run' })
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
@@ -312,6 +323,8 @@ export class PluginHost {
     string,
     { times: number[]; last: number | null; error: string | null }
   >()
+  // Per plugin: how its background sync went (plugins/sync.ts reports it).
+  private syncStats = new Map<string, BackgroundSyncStat>()
   private logs = new Map<string, string[]>()
   private refreshing = new Map<string, Promise<string>>()
   // Bumped whenever the account's sign-in is ended or invalidated (disconnect,
@@ -503,6 +516,17 @@ export class PluginHost {
       ...(m?.fills?.length ? { fills: m.fills } : {}),
       chatDesign: active ? chatDesignState(active, st.chatDesign) : 'off',
       ...(active?.permissions.events ? { events: this.eventStatus(id, active, st.granted) } : {}),
+      ...(active?.background
+        ? {
+            background: {
+              on: this.backgroundOn(id),
+              granted: st.granted.includes(backgroundPermission(active.background)),
+              tool: active.background.tool,
+              everyMinutes: active.background.everyMinutes,
+              ...(this.syncStats.get(id) ?? { last: null, ok: null, error: null, today: 0 })
+            }
+          }
+        : {}),
       ...(m?.widgets?.length
         ? { widgets: m.widgets.map((w) => ({ id: w.id, title: w.title })) }
         : {}),
@@ -1022,6 +1046,68 @@ export class PluginHost {
     return this.status(id)
   }
 
+  // Background sync (plugins/sync.ts): Custard calls the manifest's
+  // `background` tool by itself. Only for an enabled version whose every
+  // permission is granted, and only once the user turns it on (off by
+  // default).
+
+  backgroundOn(id: string): boolean {
+    const st = this.d.store.state(id)
+    if (!st.enabled || !st.active || st.background !== true) return false
+    const m = this.build(id, st.active.buildId).manifest
+    return !!m.background && permissionsOf(m).every((p) => st.granted.includes(p))
+  }
+
+  // The plugins whose sync is on now, with their schedule.
+  backgroundPlugins(): { id: string; name: string; everyMinutes: number }[] {
+    const out: { id: string; name: string; everyMinutes: number }[] = []
+    for (const id of this.d.store.ids())
+      try {
+        if (!this.backgroundOn(id)) continue
+        const m = this.build(id, this.d.store.state(id).active!.buildId).manifest
+        out.push({ id, name: m.name, everyMinutes: m.background!.everyMinutes })
+      } catch {
+        // A build that can't be read doesn't sync.
+      }
+    return out
+  }
+
+  setBackground(id: string, on: boolean): PluginStatus {
+    const st = this.d.store.state(id)
+    if (on) {
+      if (!st.active) throw new Error('Review and activate the plugin first.')
+      const m = this.build(id, st.active.buildId).manifest
+      if (!m.background) throw new Error('This plugin has no background sync.')
+      if (!st.granted.includes(backgroundPermission(m.background)))
+        throw new Error('Approve the background sync permission first.')
+    }
+    this.d.store.setState(id, { background: on })
+    if (!on) this.syncStats.delete(id)
+    return this.status(id)
+  }
+
+  setSyncStat(id: string, stat: BackgroundSyncStat): void {
+    this.syncStats.set(id, stat)
+  }
+
+  // One background call: the manifest's tool with {}, caller 'background',
+  // no model and nobody to approve anything. The same call-time checks,
+  // timeout, Stop and permission checks as any call. It isn't chat use, so
+  // "Use in Chat and Design" doesn't apply (mode 'code').
+  async invokeBackground(id: string, signal: AbortSignal): Promise<ToolOutcome> {
+    if (!this.backgroundOn(id)) return notRun('Background sync is off for this plugin.')
+    const st = this.d.store.state(id)
+    const m = this.build(id, st.active!.buildId).manifest
+    const name = fullToolName(id, m.background!.tool)
+    const snapshot: ToolSnapshot = new Map([[name, { pluginId: id, buildId: st.active!.buildId }]])
+    return this.run(
+      name,
+      {},
+      { snapshot, signal, mode: 'code', approve: async () => false, caller: 'background' },
+      false
+    )
+  }
+
   // The user's "Use in Chat and Design" choice for the active version.
   setChatDesign(id: string, on: boolean): PluginStatus {
     const st = this.d.store.state(id)
@@ -1100,7 +1186,8 @@ export class PluginHost {
       if (needsChatDesign(mode) && chatDesignState(manifest, st.chatDesign) !== 'on') continue
       const media = mediaTools(manifest)
       for (const t of manifest.tools) {
-        if (media.has(t.name)) continue
+        // The background tool is Custard's to call, never a model's.
+        if (media.has(t.name) || t.name === manifest.background?.tool) continue
         const name = fullToolName(id, t.name)
         tools.push({
           name,
@@ -1141,7 +1228,8 @@ export class PluginHost {
         if (chatDesignState(manifest, st.chatDesign) !== 'on') throw new Error('chat')
         const media = mediaTools(manifest)
         for (const t of manifest.tools) {
-          if (t.effect !== 'read' || media.has(t.name)) continue
+          if (t.effect !== 'read' || media.has(t.name) || t.name === manifest.background?.tool)
+            continue
           const name = fullToolName(id, t.name)
           tools.push({
             name,

@@ -4,6 +4,7 @@ import { EventMemory, logState } from './events'
 import { SeenTracks, tools, type SpotifyDeps } from './tools'
 import { describeReady, readinessTimeout, waitForDevices } from './readiness'
 import { withWidgetData } from './widget-data'
+import { syncRecent } from './sync'
 
 const seen = new SeenTracks()
 const memory = new EventMemory()
@@ -41,6 +42,13 @@ export default definePlugin({
     },
     devices: (i: Input, ctx) => tools(deps(ctx)).devices(i),
     recently_played: (i: Input, ctx) => tools(deps(ctx)).recently_played(i),
+    sync_recent: (_i: Input, ctx) => syncRecent({
+      client: new SpotifyClient(ctx),
+      caller: ctx.caller,
+      sink: ctx.events,
+      storage: ctx.storage,
+      timeZone: typeof ctx.config.timeZone === 'string' ? ctx.config.timeZone : undefined
+    }),
     top_items: (i: Input, ctx) => tools(deps(ctx)).top_items(i),
     artist_genres: (i: Input, ctx) => tools(deps(ctx)).artist_genres(i),
     add_to_queue: (i: Input, ctx) => tools(deps(ctx)).add_to_queue(i),

@@ -97,10 +97,11 @@ of the one already running.
 Quitting from the tray menu, logging off or shutting down really quits. A run
 cut off that way is recorded as failed on the next start, as before.
 
+Plugins can also sync on their own schedule while Custard runs (background
+sync, `docs/plugins/API.md`); the tray menu lists those that are on.
+
 Not in this step: running while Custard is fully closed (an OS scheduler or a
-service), plugin work on its own schedule (see
-`docs/proposals/background-jobs.md`), event triggers, and plugin write tools
-in runs. Tray, login item and notifications are not tested on Windows or
+service), event triggers, and plugin write tools in runs. Tray, login item and notifications are not tested on Windows or
 macOS; the tray and notifications were checked under Linux (xvfb) only.
 
 ## Catch-up (Step 3)
