@@ -14,6 +14,7 @@ const CSS = `
 .meta{min-width:0;flex:1}.title{font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.artists,.device{color:var(--custard-text-muted,#bbb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .controls,.volume{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}button{border:1px solid var(--custard-border,#667);border-radius:6px;padding:5px 10px;background:var(--custard-surface-raised,#333);color:inherit;cursor:pointer;min-height:32px}button:disabled{opacity:.5;cursor:not-allowed}button:focus-visible,input:focus-visible,.player:focus-visible{outline:3px solid var(--custard-accent,#7dd4a3);outline-offset:2px}
 .seek-row{display:flex;gap:8px;align-items:center}.seek-row input{min-width:40px;flex:1;accent-color:var(--custard-accent,#7dd4a3)}.clock{font-variant-numeric:tabular-nums;white-space:nowrap}.notice{margin-top:6px;color:var(--custard-text-muted,#bbb);overflow-wrap:anywhere}.expanded .art{width:64px;height:64px}.expanded .title,.expanded .artists{white-space:normal}.expanded .summary{align-items:flex-start}[hidden]{display:none!important}
+.logging{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--custard-text-faint,#999)}.logging::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--custard-accent,#7dd4a3)}.logging.failing{color:var(--custard-danger,#e07a5f)}.logging.failing::before{background:var(--custard-danger,#e07a5f)}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 `
 
@@ -45,7 +46,10 @@ export function createPlayerWidget(clock = () => Date.now()): WidgetDefinition {
       const title = element('div', 'title', 'Spotify playback')
       const artists = element('div', 'artists')
       const device = element('div', 'device', 'Playback not loaded')
-      meta.append(title, artists, device); summary.append(art, meta)
+      // Custard's own Manage panel owns the switch; this only shows its state.
+      const logging = element('div', 'logging')
+      logging.hidden = true
+      meta.append(title, artists, device, logging); summary.append(art, meta)
       const controls = element('div', 'controls')
       const back = element('button', '', 'Back')
       back.type = 'button'; back.disabled = true; back.title = BACK_REASON
@@ -107,6 +111,10 @@ export function createPlayerWidget(clock = () => Date.now()): WidgetDefinition {
         setText(title, noActive ? 'No active Spotify device' : s?.title ?? 'Spotify playback')
         setText(artists, noActive ? '' : s?.artists.join(', ') ?? '')
         setText(device, !s ? 'Playback not loaded' : noActive ? 'Start playback in Spotify to connect.' : s.deviceName)
+        logging.hidden = !s?.eventLog || s.eventLog === 'off'
+        logging.className = s?.eventLog === 'failing' ? 'logging failing' : 'logging'
+        setText(logging, s?.eventLog === 'failing' ? 'Event log not saving' : 'Logging to vault')
+        logging.title = s?.eventLog === 'failing' ? 'The last event log entry could not be saved. See Plugins → Spotify → Manage.' : 'Your presses here are added to the event log in your vault. Turn it off in Plugins → Spotify → Manage.'
         const playing = s?.state === 'playing'
         const toggleAction = playing ? 'pause_playback' : 'resume_playback'
         setText(toggle, playing ? 'Pause' : 'Resume')

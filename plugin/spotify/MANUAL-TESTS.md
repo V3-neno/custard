@@ -14,3 +14,25 @@ Run only after reviewing/activating the plugin in Settings → Plugins and expli
 10. **Regression:** search, queue with approval, launch-only open, explicit transfer, and existing bounded startup-readiness flow still work. No new monitoring or background tasks should appear.
 
 Record actual observations separately from API acceptance when these checks are performed. Do not claim this checklist passed without executing it.
+
+## Event log — Spotify 1.5.0
+
+Run after reviewing and activating 1.5.0 (the review lists "Keep an event log in your vault"). Open the vault in Obsidian alongside. Today's note is `Custard/Plugins/Spotify/Events/YYYY-MM/YYYY-MM-DD.md`. Not yet run live.
+
+1. **Off by default:** before turning anything on, press Pause and Resume in the player. No Events folder appears; Manage shows the log off; the player shows no logging line.
+2. **Turn on:** Manage → Spotify → tick "Keep an event log for Spotify". Status reads "Logging on · 0 entries today"; the hub card says "Logging to vault"; the player shows "Logging to vault" within one refresh. Toggling never closes or reloads the player.
+3. **Skip:** press Next about 20 s into a song. One `skip` entry, `source: "widget"`, `position_ms` near 20000, the skipped song as `track`. After the next refresh, one `track_change` with `cause: "logged_action"` and `cause_id` equal to the skip's `id`.
+4. **Seek and restart:** drag the bar to about 1:00, then press Restart. A `seek` with `to_ms` near 60000, then a `restart` with no `to_ms`.
+5. **Pause, resume, volume:** one entry each; volume has `from_percent` and `to_percent`. At 100 %, pressing + writes nothing (no change was needed). Keep the volume at a safe level.
+6. **Assistant vs you:** ask the assistant to skip and approve it. The entry says `source: "assistant"`. Decline a second request: no entry. Ask "what's playing?": no entry, and the next player refresh does not log a change because of that read.
+7. **Queue:** ask the assistant to queue two found tracks and approve. One `queue_add` with both URIs.
+8. **Song ends on its own:** let a song finish with the player open. The `track_change` has `cause: "likely_ended"`; `previous.last_position_ms` is near the duration.
+9. **Change outside Custard:** skip on the phone or in the Spotify app. The next player refresh logs a `track_change` with `cause: "unknown"`, and nothing else.
+10. **Hidden player:** collapse or hide the player and change tracks elsewhere. Nothing is logged while it is hidden (no polling). When shown again, at most one `track_change`.
+11. **Untrusted text:** play a track whose title has `[[`, `#` or backticks if you can find one. In Obsidian the entry shows as plain text in a code block: no link, tag or broken fence.
+12. **No secrets:** search today's note for your Client ID, "token" and "Bearer". Nothing found.
+13. **Turn off:** untick in Manage. Press Pause: no new entry; the player's logging line disappears; earlier notes stay.
+14. **Grants:** in Settings → Obsidian vault, under the folders you allow, try to allow `Custard/Plugins/Spotify/Events` to the assistant at any level. It is refused with a message and the choice resets.
+15. **Failure:** with logging on, set Custard to a missing vault (or make the day note read-only). Press Pause: playback pauses as usual, the player shows "Event log not saving", and Manage shows the error.
+
+Record what you actually saw. A skipped check is not a pass.

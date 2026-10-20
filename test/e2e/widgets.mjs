@@ -570,6 +570,16 @@ try {
   // Chat, Design and Skills use a plugin only once it's turned on for them.
   await w.click('label:has-text("in Chat, Design and Skills") input[type=checkbox]')
   await w.waitForSelector('label:has-text("in Chat, Design and Skills") input:checked')
+  check(
+    await w.locator('text=Keep an event log in your vault').isVisible(),
+    "Spotify 1.5.0's review listed the event log permission"
+  )
+  check(
+    !(await w.locator('[data-event-log] input[type=checkbox]').isChecked()),
+    'and approving it left the log off'
+  )
+  await w.locator('[data-event-log] input[type=checkbox]').click()
+  await w.waitForSelector('[data-event-log-status]:has-text("Logging on")')
   await closePlugins()
   await newChat()
   await send('widget spotify test')
@@ -596,6 +606,23 @@ try {
   check(
     await until(async () => /Resume/.test(await inWidget('document.body.innerText'))),
     'and the player shows Resume'
+  )
+  check(
+    await until(async () => /Logging to vault/.test(await inWidget('document.body.innerText'))),
+    'the player shows that logging is on'
+  )
+  const spotifyLog = () =>
+    logNotes()
+      .filter((f) => f.includes('/Custard/Plugins/Spotify/Events/'))
+      .map((f) => fs.readFileSync(f, 'utf8'))
+      .join('')
+  check(
+    await until(async () => /"type":"pause"[^\n]*"source":"widget"/.test(spotifyLog())),
+    "the press is in today's Spotify event note, as the user's own"
+  )
+  check(
+    !/Bearer|access_token|refresh_token|0123456789abcdef0123456789abcdef/.test(spotifyLog()),
+    'with no tokens or client id in it'
   )
   await shot('06-spotify')
   const spotifyBody = async () => (await w.locator('[data-widget-body]').boundingBox()).height
