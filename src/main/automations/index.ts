@@ -48,6 +48,7 @@ function deps(a: Automation): RunDeps {
         snapshot: snapshot as ReturnType<typeof pluginHost.prototype.toolSet>['snapshot'],
         signal,
         mode: 'chat',
+        caller: 'automation',
         // Nobody is there to ask: a read tool that wants approval is declined.
         approve: async () => false
       })

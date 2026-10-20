@@ -162,7 +162,7 @@ Rules the host enforces regardless of the prompt:
 - An approval card between the header and the widget when the widget asks to run a write tool that asks first. It shows the plugin, the action's label and its whole input, with **Allow** and **Decline**. There is no "Allow for this chat" for widget actions.
 - An error line with the same close button when the widget failed to load, threw while mounting, crashed or stopped responding. The chat is unaffected.
 
-Clicks in a widget don't go through the assistant. What a widget does isn't added to the chat, and the assistant doesn't see it.
+Clicks in a widget don't go through the assistant. What a widget does isn't added to the chat, and the assistant doesn't see it. A tool the widget calls gets `ctx.caller === 'widget'` (see [API.md](API.md#ctxcaller)), so the plugin can tell the user's presses from the assistant's calls.
 
 ## Security model
 

@@ -28,7 +28,8 @@ type Bridge = {
     callId: string,
     tool: string,
     input: unknown,
-    config: unknown
+    config: unknown,
+    meta?: unknown
   ): Promise<{ content: string; isError: boolean }>
   cancel(callId: string): void
   tools(): string[]
@@ -68,7 +69,7 @@ const vmRuntime: RuntimeFactory = async ({ code, onCap, onExit }) => {
       dispose: () => void (dead = true),
       // Like the real runtime: a call cut short by a timeout or a cancel
       // after it was sent is marked interrupted.
-      call: async (callId, tool, input, config, timeoutMs, signal) => {
+      call: async (callId, tool, input, config, timeoutMs, signal, caller) => {
         if (dead) return { content: 'not running', isError: true, notSent: true }
         signal.addEventListener('abort', () => bridge.cancel(callId))
         let timer: ReturnType<typeof setTimeout> | undefined
@@ -84,7 +85,7 @@ const vmRuntime: RuntimeFactory = async ({ code, onCap, onExit }) => {
           )
         })
         const r = await Promise.race([
-          bridge.call(callId, tool, JSON.parse(JSON.stringify(input)), config),
+          bridge.call(callId, tool, JSON.parse(JSON.stringify(input)), config, { caller }),
           timedOut
         ])
         clearTimeout(timer)
@@ -590,6 +591,33 @@ describe('invocation-time checks', () => {
     await activate()
     expect((await invoke('demo__echo', { text: 'x' }, new Map())).content).toMatch(/not available/)
     expect((await invoke('other__echo', { text: 'x' })).content).toMatch(/not available/)
+  })
+
+  it('tells the plugin who started the call, never from the input', async () => {
+    writePlugin({
+      'src/index.ts': INDEX.replace(
+        'echo: ({ text }) => greet(text),',
+        'echo: (_i, ctx) => ctx.caller,'
+      )
+    })
+    await activate()
+    const as = (caller?: 'assistant' | 'widget' | 'automation'): Promise<ToolOutcome> =>
+      host.invoke(
+        'demo__echo',
+        { text: 'widget' },
+        {
+          snapshot: host.toolSet('code').snapshot,
+          signal: new AbortController().signal,
+          approve: yes,
+          mode: 'code',
+          ...(caller ? { caller } : {})
+        }
+      )
+    expect((await as('widget')).content).toBe('widget')
+    expect((await as('automation')).content).toBe('automation')
+    expect((await as('assistant')).content).toBe('assistant')
+    // Left out, it claims the least.
+    expect((await as()).content).toBe('assistant')
   })
 
   it('validates input against the schema before the plugin runs', async () => {

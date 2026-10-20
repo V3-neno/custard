@@ -47,7 +47,8 @@ export default definePlugin({ tools: {
     navigate: await attempt(async () => { location.href = 'http://127.0.0.1:' + PORT + '/nav'; await new Promise(r => setTimeout(r, 500)); return location.href }),
     open: String(window.open('http://127.0.0.1:' + PORT + '/popup')),
   }),
-  viaHost: async (_i, ctx) => (await ctx.fetch('https://api.example.com/x')).text(),
+  viaHost: async (_i, ctx) =>
+    (await (await ctx.fetch('https://api.example.com/x')).text()) + ' ' + ctx.caller,
   wait: (_i, ctx) => new Promise((resolve) => ctx.signal.addEventListener('abort', () => { resolve('saw abort') })),
   never: () => new Promise(() => {}),
   spin: () => { for (;;) {} },
@@ -90,7 +91,9 @@ app.whenReady().then(async () => {
       tools
     )
 
-    const probe = JSON.parse((await handle.call('c1', 'probe', {}, {}, 20_000, signal())).content)
+    const probe = JSON.parse(
+      (await handle.call('c1', 'probe', {}, {}, 20_000, signal(), 'assistant')).content
+    )
     await new Promise((r) => setTimeout(r, 1000))
     check(
       'no Node.js, Electron or IPC in plugin code',
@@ -107,15 +110,15 @@ app.whenReady().then(async () => {
     check('popups denied', probe.open === 'null', probe.open)
     check('no request reached the local server', hits.length === 0, hits)
 
-    const via = await handle.call('c2', 'viaHost', {}, {}, 20_000, signal())
+    const via = await handle.call('c2', 'viaHost', {}, {}, 20_000, signal(), 'widget')
     check(
-      'host capability works and carries the call id',
-      via.content === 'from host' && caps.at(-1)?.callId === 'c2',
+      'host capability works, carries the call id, and the caller reaches ctx',
+      via.content === 'from host widget' && caps.at(-1)?.callId === 'c2',
       { via, caps }
     )
 
     const ac = new AbortController()
-    const p = handle.call('c3', 'wait', {}, {}, 20_000, ac.signal)
+    const p = handle.call('c3', 'wait', {}, {}, 20_000, ac.signal, 'assistant')
     setTimeout(() => ac.abort(), 100)
     const cancelled = await p
     check(
@@ -125,7 +128,7 @@ app.whenReady().then(async () => {
     )
 
     const t0 = Date.now()
-    const timedOut = await handle.call('c4', 'never', {}, {}, 1500, signal())
+    const timedOut = await handle.call('c4', 'never', {}, {}, 1500, signal(), 'assistant')
     check(
       'a call that never answers times out',
       /did not answer within 2 seconds/.test(timedOut.content) && Date.now() - t0 < 2500,
@@ -134,7 +137,7 @@ app.whenReady().then(async () => {
     check('a slow but responsive plugin keeps running', exits.length === 0, exits)
 
     if (process.env.CUSTARD_TEST_VERBOSE) console.log('spin start')
-    const spun = await handle.call('c5', 'spin', {}, {}, 1000, signal())
+    const spun = await handle.call('c5', 'spin', {}, {}, 1000, signal(), 'assistant')
     if (process.env.CUSTARD_TEST_VERBOSE) console.log('spin settled', spun)
     await new Promise((r) => setTimeout(r, 2500))
     check(
@@ -149,7 +152,7 @@ app.whenReady().then(async () => {
     )
 
     const second = await start()
-    const pending = second.handle.call('c6', 'never', {}, {}, 20_000, signal())
+    const pending = second.handle.call('c6', 'never', {}, {}, 20_000, signal(), 'assistant')
     const wins = BrowserWindow.getAllWindows()
     wins[0].webContents.forcefullyCrashRenderer()
     const crashed = await pending
@@ -161,7 +164,7 @@ app.whenReady().then(async () => {
     )
 
     const third = await start()
-    const inflight = third.handle.call('c7', 'never', {}, {}, 20_000, signal())
+    const inflight = third.handle.call('c7', 'never', {}, {}, 20_000, signal(), 'assistant')
     third.handle.dispose('disabled')
     const disabled = await inflight
     check(
@@ -169,7 +172,7 @@ app.whenReady().then(async () => {
       /stopped \(disabled\)/.test(disabled.content),
       disabled
     )
-    const after = await third.handle.call('c8', 'viaHost', {}, {}, 20_000, signal())
+    const after = await third.handle.call('c8', 'viaHost', {}, {}, 20_000, signal(), 'assistant')
     check('no calls after disposal', after.content === 'The plugin is not running.', after)
 
     const testCode = await (async () => {

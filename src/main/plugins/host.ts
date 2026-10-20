@@ -49,6 +49,11 @@ import { SecretsLockedError, type PluginStore } from './store'
 // the moment of use; manifests and the sandbox runtime only describe intent.
 
 export type ConfigValues = Record<string, string | number | boolean>
+
+// Who started a tool call, given to the plugin as ctx.caller (the same type as
+// Caller in custard-plugin-sdk). Set here, from where the call came in, never
+// from anything the model, a widget or the plugin sends.
+export type PluginCaller = 'assistant' | 'widget' | 'automation' | 'design'
 // From the runtime: `interrupted` when the call was cut short after it reached
 // the plugin (timeout, cancel, crash), `notSent` when it never reached it.
 // From invoke: `outcome`, what became of the call (see ActionStatus).
@@ -71,7 +76,8 @@ export type RuntimeHandle = {
     input: unknown,
     config: ConfigValues,
     timeoutMs: number,
-    signal: AbortSignal
+    signal: AbortSignal,
+    caller: PluginCaller
   ): Promise<ToolOutcome>
   dispose(reason: string): void
 }
@@ -1170,6 +1176,7 @@ export class PluginHost {
         preApproved,
         snapshot,
         mode: 'design',
+        caller: 'design',
         dataLimit: MEDIA_DATA_BYTES
       },
       true
@@ -1328,9 +1335,12 @@ export class PluginHost {
       // The user already approved this exact call (a repeat of an action
       // whose outcome was unknown), so don't ask again.
       preApproved?: boolean
+      // Where the call came from. Left out, it is 'assistant', the value
+      // that claims the least.
+      caller?: Exclude<PluginCaller, 'design'>
     }
   ): Promise<ToolOutcome> {
-    return this.run(name, input, o, false)
+    return this.run(name, input, { ...o, caller: o.caller ?? 'assistant' }, false)
   }
 
   private async run(
@@ -1342,6 +1352,7 @@ export class PluginHost {
       mode: Mode
       approve: (r: ApprovalRequest) => Promise<boolean>
       preApproved?: boolean
+      caller: PluginCaller
       // Media calls only (invokeMedia): a larger bound on `data`.
       dataLimit?: number
     },
@@ -1426,7 +1437,8 @@ export class PluginHost {
         input ?? {},
         config,
         tool.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        controller.signal
+        controller.signal,
+        o.caller
       )
       const content = cutResult(redact(String(r.content), secrets))
       const { data, dropped } = widgetData(r.data, secrets, o.dataLimit)

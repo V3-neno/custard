@@ -4,7 +4,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 // code and nothing else from Electron. The host checks every capability call.
 
 type Handlers = {
-  call(callId: string, tool: string, input: unknown, config: unknown): Promise<unknown>
+  call(
+    callId: string,
+    tool: string,
+    input: unknown,
+    config: unknown,
+    meta: unknown
+  ): Promise<unknown>
   cancel(callId: string): void
   tools(): string[]
 }
@@ -24,11 +30,11 @@ contextBridge.exposeInMainWorld('custardPluginHost', {
 
 ipcRenderer.on(
   'plugin-host:call',
-  async (_e, callId: string, tool: string, input: unknown, config: unknown) => {
+  async (_e, callId: string, tool: string, input: unknown, config: unknown, meta: unknown) => {
     let result: unknown
     try {
       if (!handlers) throw new Error('The plugin did not register.')
-      result = await handlers.call(callId, tool, input, config)
+      result = await handlers.call(callId, tool, input, config, meta)
     } catch (err) {
       result = {
         content: `The plugin failed: ${(err as Error)?.message ?? String(err)}`,

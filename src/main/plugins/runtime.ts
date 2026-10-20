@@ -3,6 +3,7 @@ import { join } from 'path'
 import type {
   CapResult,
   ConfigValues,
+  PluginCaller,
   RuntimeFactory,
   RuntimeHandle,
   TestRunner,
@@ -212,7 +213,8 @@ export const createRuntime =
         input: unknown,
         config: ConfigValues,
         timeoutMs: number,
-        signal: AbortSignal
+        signal: AbortSignal,
+        caller: PluginCaller
       ) =>
         new Promise<ToolOutcome>((resolve) => {
           if (disposed)
@@ -254,7 +256,7 @@ export const createRuntime =
             return settle({ content: 'The call was cancelled.', isError: true, notSent: true })
           signal.addEventListener('abort', onAbort)
           pending.set(callId, settle)
-          wc.send('plugin-host:call', callId, tool, input, config)
+          wc.send('plugin-host:call', callId, tool, input, config, { caller })
         })
     }
     return { handle, tools }

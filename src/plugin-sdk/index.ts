@@ -9,6 +9,15 @@ export const API_VERSION = 1
 
 export type ConfigValue = string | number | boolean
 
+// Who started a tool call, set by the host: the model can't choose it.
+//   assistant  - a tool call in a model's reply, in any mode
+//   widget     - the plugin's own widget. A write from a widget also means the
+//                user pressed something in it: the host refuses one without a
+//                real click or key press
+//   automation - a scheduled skill run (read tools only)
+//   design     - Design's media jobs
+export type Caller = 'assistant' | 'widget' | 'automation' | 'design'
+
 export interface PluginResponse {
   status: number
   ok: boolean
@@ -29,6 +38,8 @@ export interface FetchInit {
 export interface PluginContext {
   // Aborted when the call times out, is cancelled or the plugin is disabled.
   signal: AbortSignal
+  // Who started this call, set by the host (see Caller).
+  caller: Caller
   // https requests to hosts in permissions.network.
   fetch(url: string, init?: FetchInit): Promise<PluginResponse>
   // Plugin-scoped key-value storage (needs permissions.storage). Values are JSON.

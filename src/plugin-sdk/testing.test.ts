@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { registeredTests, runRegisteredTests, test } from './testing'
+import { createContext, registeredTests, runRegisteredTests, test } from './testing'
 
 const registry = registeredTests() as unknown[]
 afterEach(() => {
@@ -65,5 +65,9 @@ describe('the sandbox test runner', () => {
       { start: 'second' },
       { done: { name: 'second', ok: false, error: 'x', ms: expect.any(Number) } }
     ])
+  })
+  it('gives a fake context the assistant as caller unless a test names one', () => {
+    expect(createContext().caller).toBe('assistant')
+    expect(createContext({ caller: 'widget' }).caller).toBe('widget')
   })
 })

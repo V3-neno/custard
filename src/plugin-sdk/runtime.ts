@@ -1,4 +1,5 @@
 import type {
+  Caller,
   ConfigValue,
   FetchInit,
   PluginContext,
@@ -17,7 +18,8 @@ type Bridge = {
       callId: string,
       tool: string,
       input: unknown,
-      config: Record<string, ConfigValue>
+      config: Record<string, ConfigValue>,
+      meta?: { caller?: Caller }
     ): Promise<{ content: string; isError: boolean; data?: unknown }>
     cancel(callId: string): void
     tools(): string[]
@@ -57,6 +59,13 @@ function normalize(r: ToolResult): { content: string; isError: boolean; data?: u
   return { content: 'The tool returned no result.', isError: true }
 }
 
+const CALLERS: readonly Caller[] = ['assistant', 'widget', 'automation', 'design']
+
+// Anything the host didn't name is read as the assistant: the value that
+// claims the least.
+const callerOf = (c: unknown): Caller =>
+  CALLERS.includes(c as Caller) ? (c as Caller) : 'assistant'
+
 export function start(def: PluginDefinition): void {
   const host = (globalThis as unknown as { custardPluginHost: Bridge }).custardPluginHost
   const running = new Map<string, AbortController>()
@@ -64,7 +73,8 @@ export function start(def: PluginDefinition): void {
   const contextFor = (
     callId: string,
     signal: AbortSignal,
-    config: Record<string, ConfigValue>
+    config: Record<string, ConfigValue>,
+    caller: Caller
   ): PluginContext => {
     const cap = async (name: string, args: unknown): Promise<unknown> => {
       if (signal.aborted) throw new HostError('The call was cancelled.')
@@ -74,6 +84,7 @@ export function start(def: PluginDefinition): void {
     }
     return {
       signal,
+      caller,
       config: Object.freeze({ ...config }),
       fetch: async (url: string, init?: FetchInit) =>
         toResponse((await cap('fetch', { url, init })) as WireResponse),
@@ -90,13 +101,18 @@ export function start(def: PluginDefinition): void {
   host.register({
     tools: () => Object.keys(def.tools),
     cancel: (callId) => running.get(callId)?.abort(),
-    call: async (callId, tool, input, config) => {
+    call: async (callId, tool, input, config, meta) => {
       const handler = def.tools[tool]
       if (!handler) return { content: `This plugin has no handler for ${tool}.`, isError: true }
       const controller = new AbortController()
       running.set(callId, controller)
       try {
-        return normalize(await handler(input, contextFor(callId, controller.signal, config)))
+        return normalize(
+          await handler(
+            input,
+            contextFor(callId, controller.signal, config, callerOf(meta?.caller))
+          )
+        )
       } catch (err) {
         const e = err as { message?: string; pluginError?: boolean }
         return {
