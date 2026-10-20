@@ -1,6 +1,6 @@
 {
   "name": "custard",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Custard: a custom desktop Claude client with Chat, Code and Design modes",
   "main": "./out/main/index.js",
   "author": "Neno",
