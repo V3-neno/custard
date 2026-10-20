@@ -1,7 +1,9 @@
 import {
+  BACKGROUND_LIMITS,
   SUPPORTED_API_VERSIONS,
   type ConfigField,
   type OAuthSpec,
+  type PluginBackgroundSpec,
   type PluginFill,
   type PluginManifest,
   type ToolSpec
@@ -513,6 +515,56 @@ function checkMedia(
 
 // `fills`: which gaps a plugin's tools can fill, each naming a tool of its
 // own that isn't a media tool. Only a recommendation in Settings.
+// The tool Custard may call by itself (docs/plugins/MANIFEST.md, background):
+// a read tool, not a media tool, that takes no input, every 15 minutes or more.
+function checkBackground(
+  b: unknown,
+  tools: ToolSpec[],
+  media: PluginMediaSpec[],
+  errors: string[]
+): PluginBackgroundSpec | null {
+  if (b === undefined) return null
+  if (!b || typeof b !== 'object' || Array.isArray(b)) {
+    errors.push('background must be an object with tool and everyMinutes')
+    return null
+  }
+  const e = b as Record<string, unknown>
+  const before = errors.length
+  for (const k of Object.keys(e))
+    if (k !== 'tool' && k !== 'everyMinutes') errors.push(`background.${k} is not a known field`)
+  const { minMinutes, maxMinutes } = BACKGROUND_LIMITS
+  if (
+    !Number.isInteger(e.everyMinutes) ||
+    (e.everyMinutes as number) < minMinutes ||
+    (e.everyMinutes as number) > maxMinutes
+  )
+    errors.push(
+      `background.everyMinutes must be a whole number from ${minMinutes} to ${maxMinutes}`
+    )
+  const tool = tools.find((t) => t && typeof t === 'object' && t.name === e.tool)
+  const mediaNames = new Set(
+    media.flatMap((p) =>
+      p.capabilities.flatMap(({ tools: t }) => [
+        t.submit,
+        t.status,
+        t.result,
+        ...(t.cancel ? [t.cancel] : [])
+      ])
+    )
+  )
+  if (!tool) errors.push("background.tool must name one of the plugin's tools")
+  else if (tool.effect !== 'read')
+    errors.push('background.tool must be a read tool: nobody is there to approve a write')
+  else if (mediaNames.has(tool.name)) errors.push("background.tool can't be a media tool")
+  else if (
+    Array.isArray((tool.inputSchema as { required?: unknown }).required) &&
+    (tool.inputSchema as { required: unknown[] }).required.length > 0
+  )
+    errors.push('background.tool must take no required input: Custard calls it with {}')
+  if (errors.length > before) return null
+  return { tool: e.tool as string, everyMinutes: e.everyMinutes as number }
+}
+
 function checkFills(
   fills: unknown,
   tools: ToolSpec[],
@@ -593,7 +645,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
     'instructions',
     'widgets',
     'media',
-    'fills'
+    'fills',
+    'background'
   ])
   for (const k of Object.keys(m)) if (!allowed.has(k)) errors.push(`"${k}" is not a manifest field`)
   if (m.manifestVersion !== 1) errors.push('manifestVersion must be 1')
@@ -653,6 +706,7 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
   const widgets = checkWidgets(m.widgets, tools, errors)
   const media = checkMedia(m.media, tools, widgets, errors)
   const fills = checkFills(m.fills, tools, media, errors)
+  const background = checkBackground(m.background, tools, media, errors)
 
   if (errors.length) return { ok: false, manifest: null, errors }
   return {
@@ -678,7 +732,8 @@ export function parseManifest(raw: unknown, folderName?: string): ManifestResult
       ...(m.instructions ? { instructions: m.instructions as string } : {}),
       ...(widgets.length ? { widgets } : {}),
       ...(media.length ? { media } : {}),
-      ...(fills.length ? { fills } : {})
+      ...(fills.length ? { fills } : {}),
+      ...(background ? { background } : {})
     }
   }
 }
@@ -724,6 +779,10 @@ export function permissionsOf(m: PluginManifest): string[] {
     ...(m.widgets ?? []).map((w) => `widget:${w.id}`),
     // Offering media to Design is approved per provider, like widgets. Each
     // submission still asks (see docs/design/MEDIA-PLUGINS.md).
-    ...(m.media ?? []).map((p) => `media:${p.id}`)
+    ...(m.media ?? []).map((p) => `media:${p.id}`),
+    // Custard calling a tool by itself. Approving it doesn't start anything:
+    // that is the user's switch in Manage, off by default. A different tool
+    // or interval needs approval again.
+    ...(m.background ? [`background:${m.background.tool}@${m.background.everyMinutes}`] : [])
   ]
 }

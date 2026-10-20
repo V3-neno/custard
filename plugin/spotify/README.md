@@ -2,6 +2,19 @@
 
 Uses only the public Custard plugin API. Development changes stay inside `plugin/spotify/`; no core changes.
 
+## 1.6.0 — background sync of recently played (off by default)
+
+When you turn it on (Plugins → Spotify → Manage → "Sync Spotify in the background"), Custard calls `sync_recent` by itself every 30 minutes while Custard runs, including hidden in the tray. It makes one request, `GET /me/player/recently-played` (the last 50 plays Spotify keeps), and adds the new plays to the event log as `played` entries (`source: "recently_played"`), oldest first. So listening history is kept while the player is closed.
+
+- Needs the event log on too; with it off, the call fails with that reason and nothing is requested.
+- Never polls playback: it reads only the history Spotify already keeps, at most every 30 minutes (Custard enforces 15 minutes as the floor, 96 calls a day, and backs off up to 6 hours after a failure).
+- Only Custard's schedule runs it (`ctx.caller` is `background`); the assistant is never offered it and gets an error if it tries. The assistant still has `recently_played` for questions.
+- Plays older than 23 hours aren't logged (the event log takes the last 24 hours only), at most 20 per call; a longer backlog goes in the next calls.
+- New permissions to approve: `storage` (only where the sync got to, so a restart doesn't log a play twice) and "Run its sync_recent tool by itself every 30 minutes".
+- `played` entries are Spotify's history: lagging, possibly incomplete, no skip or listened-duration data. They are not the same as the `track_change` entries the player logs.
+
+Testing status: unit tests with a fake Spotify and a fake event log; Custard's side has an end-to-end test against a mock. Not run against the live Spotify API.
+
 ## 1.5.0 — playback event log (off by default)
 
 Keeps a local, append-only log of playback actions in the vault, as raw material for working out music preferences later. Design: [docs/proposals/spotify-event-log.md](../../docs/proposals/spotify-event-log.md). Needs a Custard build with `ctx.caller` and `ctx.events`.

@@ -12,7 +12,7 @@ import type { Verification } from './verify'
 // after the command and its one verification read, adds no request, and its
 // errors are kept here (and in the plugin log), never thrown.
 
-export type Caller = 'assistant' | 'widget' | 'automation' | 'design'
+export type Caller = 'assistant' | 'widget' | 'automation' | 'design' | 'background'
 export type EventSink = {
   enabled: boolean
   append(entry: { at: string; record: Record<string, unknown> }): Promise<void>

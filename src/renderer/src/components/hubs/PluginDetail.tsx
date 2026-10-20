@@ -406,6 +406,62 @@ function EventLog({
   )
 }
 
+// Background sync: Custard calls one of the plugin's read tools by itself on
+// a schedule, while Custard runs. The user's switch, off by default, and how
+// it last went. Custard draws this, not the plugin.
+function BackgroundSync({
+  p,
+  run
+}: {
+  p: PluginStatus
+  run: (busy: string, f: () => Promise<PluginStatus>) => Promise<void>
+}): React.JSX.Element {
+  const b = p.background!
+  return (
+    <section className="mb-5" data-background-sync>
+      <h4 className="mb-1 text-sm font-medium">Background sync</h4>
+      <p className="mb-2 text-xs text-ash-500">
+        Custard calls {p.name}&apos;s {b.tool} tool by itself every {b.everyMinutes} minutes while
+        Custard runs (also hidden in the tray), with no model and nothing for you to approve. It is
+        a read tool, so it can&apos;t change anything outside Custard; what it keeps goes to its own
+        data or event log. At most 96 calls a day; after a failure it waits longer, up to 6 hours,
+        and you get one notification a day.
+      </p>
+      <label className="flex items-center gap-2 text-sm text-ash-300">
+        <input
+          type="checkbox"
+          aria-label={`Background sync for ${p.name}`}
+          checked={b.on}
+          disabled={!b.granted || p.state !== 'enabled'}
+          onChange={(x) =>
+            run('Saving…', () => window.custard.plugins.setBackground(p.id, x.target.checked))
+          }
+        />
+        Sync {p.name} in the background
+      </label>
+      {!b.granted && (
+        <p className="mt-1 text-xs text-ash-500">Approve the background sync permission first.</p>
+      )}
+      {b.on && (
+        <p
+          className={`mt-1 flex items-center gap-1.5 text-xs ${b.ok === false ? 'text-ember-600' : 'text-ash-300'}`}
+          data-background-sync-status
+        >
+          <span
+            aria-hidden
+            className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${b.ok === false ? 'bg-ember-600' : 'bg-molten-400'}`}
+          />
+          {b.last === null
+            ? 'Sync on · the first call is within a minute or two'
+            : b.ok
+              ? `Sync on · last ${clock(b.last)} · ${b.today} ${b.today === 1 ? 'call' : 'calls'} today`
+              : `Sync on · the last call at ${clock(b.last)} failed: ${b.error ?? 'unknown'}. It tries again later.`}
+        </p>
+      )}
+    </section>
+  )
+}
+
 export function Detail({
   p,
   onChange
@@ -596,6 +652,7 @@ export function Detail({
       )}
 
       {p.active && p.events && <EventLog p={p} run={run} />}
+      {p.active && p.background && <BackgroundSync p={p} run={run} />}
 
       {writeTools.length > 0 && (
         <section className="mb-5">

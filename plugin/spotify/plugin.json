@@ -3,14 +3,14 @@
   "id": "spotify",
   "name": "Spotify",
   "description": "Search and queue music, inspect playback and devices, read recently played and top items, look up artist genres, open Spotify, transfer playback, and control tracks, pause, resume, seek and volume.",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "apiVersion": 1,
   "entry": "src/index.ts",
   "instructions": "instructions.md",
   "permissions": {
     "network": ["api.spotify.com", "accounts.spotify.com"],
     "openExternal": ["spotify:"],
-    "storage": false,
+    "storage": true,
     "events": true
   },
   "config": {
@@ -36,6 +36,7 @@
       "default": "Europe/Stockholm"
     }
   },
+  "background": { "tool": "sync_recent", "everyMinutes": 30 },
   "auth": {
     "type": "oauth-pkce",
     "authorizeUrl": "https://accounts.spotify.com/authorize",
@@ -103,6 +104,13 @@
         },
         "additionalProperties": false
       }
+    },
+    {
+      "name": "sync_recent",
+      "description": "Run only by Custard's background sync (every 30 minutes, when the user turns it on in Manage): adds plays from Spotify's recently played list to the event log. Never call it yourself; use recently_played to read listening history.",
+      "effect": "read",
+      "label": "Synced recently played tracks to the event log",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
     },
     {
       "name": "top_items",

@@ -147,6 +147,19 @@ export function reportRun(e: SchedulerReport): void {
   refreshTray()
 }
 
+// A plugin's background sync failed after working (plugins/sync.ts). Once a
+// day per plugin; the error itself is plugin text and stays in Manage.
+const syncTold = new Set<string>()
+export function reportSync(plugin: string): void {
+  const key = `${localDay(Date.now())}|${plugin}`
+  if (syncTold.has(key)) return
+  syncTold.add(key)
+  show({
+    title: 'Background sync failed',
+    body: `${plugin}'s background sync failed. Details in Plugins → ${plugin} → Manage.`
+  })
+}
+
 const view = (): BackgroundView => ({
   settings: getBackground(),
   loginSupported: loginSupported()

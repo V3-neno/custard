@@ -134,6 +134,9 @@ function trayState(): TrayState {
     running: all.find((a) => scheduler?.running(a.id))?.name ?? null,
     on: all.filter((a) => a.enabled).length,
     paused,
+    syncing: pluginHost()
+      .backgroundPlugins()
+      .map((p) => ({ name: p.name, everyMinutes: p.everyMinutes })),
     last
   }
 }

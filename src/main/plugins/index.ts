@@ -12,6 +12,9 @@ import { scaffoldPlugin } from './scaffold'
 import { PluginStore, type Crypto } from './store'
 import { pluginEventVault, pluginNotesChanged } from '../memory'
 import type { Transport } from './net'
+import { BackgroundSync } from './sync'
+import { localDay } from '../automations/schedule'
+import { refreshTray, reportSync } from '../background'
 
 // Where things live. In development the app path is the repository, so
 // plugin sources are edited in place in plugin/. Packaged builds read them
@@ -109,6 +112,35 @@ export async function startPlugins(): Promise<void> {
   await h.startAll()
 }
 
+// Background sync (plugins/sync.ts): runs while Custard runs, also hidden in
+// the tray.
+let sync: BackgroundSync | null = null
+export function startBackgroundSync(): void {
+  if (sync) return
+  const h = pluginHost()
+  sync = new BackgroundSync({
+    now: () => Date.now(),
+    plugins: () => h.backgroundPlugins(),
+    call: async (id, signal) => {
+      const r = await h.invokeBackground(id, signal)
+      return r.isError ? { ok: false, error: r.content } : { ok: true }
+    },
+    stat: (id, s) => h.setSyncStat(id, s),
+    failed: (p) => reportSync(p.name),
+    day: (t) => localDay(t)
+  })
+  sync.start()
+}
+export function stopBackgroundSync(): void {
+  sync?.stop()
+  sync = null
+}
+// Which plugins sync now (the tray menu).
+export const syncingPlugins = (): string[] =>
+  pluginHost()
+    .backgroundPlugins()
+    .map((p) => p.name)
+
 // Checks a workspace a renderer asks for before a conversation stores it.
 export function verifyWorkspace(w: Workspace | undefined): Workspace | undefined {
   if (!w) return undefined
@@ -181,6 +213,11 @@ export function registerPluginHandlers(): void {
   handle('plugins:setAskEveryTime', (_, id: string, tool: string, ask: boolean) =>
     h().setAskEveryTime(id, tool, ask === true)
   )
+  handle('plugins:setBackground', (_, id: string, on: boolean) => {
+    const s = h().setBackground(id, on === true)
+    refreshTray()
+    return s
+  })
   handle('plugins:setEvents', (_, id: string, on: boolean) => h().setEvents(id, on === true))
   handle('plugins:setChatDesign', (_, id: string, on: boolean) =>
     h().setChatDesign(id, on === true)

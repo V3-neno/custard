@@ -221,4 +221,21 @@ Nothing here is tested; it is a reading of the code and docs at 8b2bbce.
   month's estimated spend reaches the budget (on by default; nothing without
   a budget).
 - Single-instance lock, so a second Custard can't run every automation twice.
-- Step 2 (host-scheduled plugin sync, option C) waits for review of step 1.
+- Step 2 (host-scheduled plugin sync, option C) followed on 2026-10-20 ("go
+  ahead with step 2").
+
+## Step 2 as built
+
+- Manifest `background: { tool, everyMinutes }` (read tool, no required
+  input, 15-1440 minutes), permission `background:<tool>@<minutes>`, a
+  per-plugin switch in Manage (off by default), `ctx.caller` `background`.
+- Host scheduler (`src/main/plugins/sync.ts`): one call at a time, first call
+  a minute after turning on or starting, at most 96 a day per plugin (kept
+  across off and on), doubling wait after a failure up to 6 hours, one
+  notification a day on failure. The background tool is never offered to a
+  model.
+- Status in Manage, a "Syncing in background" chip, a tray menu line.
+- Spotify 1.6.0: `sync_recent` reads recently played (one request) and adds
+  new plays to the event log, oldest first, at most 20 per call, within the
+  last 23 hours; `storage` keeps where it got to. It refuses any caller but
+  `background` and does nothing with the event log off. Not run live.

@@ -16,7 +16,9 @@ export type ConfigValue = string | number | boolean
 //                real click or key press
 //   automation - a scheduled skill run (read tools only)
 //   design     - Design's media jobs
-export type Caller = 'assistant' | 'widget' | 'automation' | 'design'
+//   background - Custard by itself, on the manifest's `background` schedule
+//                (read tool only, no model, nobody there)
+export type Caller = 'assistant' | 'widget' | 'automation' | 'design' | 'background'
 
 export interface PluginResponse {
   status: number

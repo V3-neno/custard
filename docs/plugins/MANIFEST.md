@@ -240,6 +240,18 @@ If your tool does only part of this, don't declare it. Users see the claim in Se
 
 All capabilities are listed in `src/shared/adapter.ts` (`capabilities`, with their names in `capabilityLabels`). Only the three above can go in `fills`.
 
+## Background
+
+`background` (optional) names one read tool Custard may call by itself on a schedule, with no model. See [API.md](API.md#background-sync).
+
+```json
+"background": { "tool": "sync_recent", "everyMinutes": 30 }
+```
+
+- `tool` must be one of the plugin's `read` tools, not a media tool, and take no required input (it is called with `{}`).
+- `everyMinutes` is a whole number from 15 to 1440.
+- It asks for `background:<tool>@<minutes>`. The user still turns sync on in Manage; it is off by default.
+
 ## Permissions as the user sees them
 
 Activation shows each requested permission in plain words, and the user ticks every new one:
@@ -254,5 +266,6 @@ Activation shows each requested permission in plain words, and the user ticks ev
 | `action:<tool>`                              | Run a write tool                                                      |
 | `widget:<id>`                                | Show that widget in chats                                             |
 | `media:<id>`                                 | Offer that image or video provider to Design                          |
+| `background:<tool>@<minutes>`                | Let Custard run that read tool by itself (still off until turned on)  |
 
 Grants are stored per plugin and shrink to what the active version asks for. An update that asks for anything new must be approved again. Rolling back to a version that needs a permission since dropped also asks again.

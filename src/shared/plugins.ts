@@ -90,7 +90,16 @@ export type PluginManifest = {
   // search, reading PDFs, describing images). Settings → Capabilities
   // recommends the plugin for those gaps; it never turns it on. Optional.
   fills?: PluginFill[]
+  // One read tool Custard may call on its own on a slow schedule, with no
+  // model, once the user turns it on in Manage (docs/plugins/API.md,
+  // "Background sync").
+  background?: PluginBackgroundSpec
 }
+
+export type PluginBackgroundSpec = { tool: string; everyMinutes: number }
+
+// The schedule's bounds, and the most calls a day whatever the interval.
+export const BACKGROUND_LIMITS = { minMinutes: 15, maxMinutes: 1440, perDay: 96 }
 
 export type PluginFill = { capability: FillableCapability; tool: string }
 
@@ -137,6 +146,18 @@ export type PluginStatus = {
     today: number
     last: number | null
     error: string | null
+  }
+  // Background sync, for a version whose manifest has one. `on` is the
+  // user's switch (off by default); the rest is how it last went.
+  background?: {
+    on: boolean
+    granted: boolean
+    tool: string
+    everyMinutes: number
+    last: number | null
+    ok: boolean | null
+    error: string | null
+    today: number
   }
   widgets?: { id: string; title: string }[]
   fills?: PluginFill[]
@@ -198,6 +219,10 @@ export function describePermission(p: string): string {
       return `Send your account's access token to ${v}`
     case 'account-scope':
       return `Account access: ${v}`
+    case 'background': {
+      const [tool, minutes] = v.split('@')
+      return `Run its "${tool}" tool by itself every ${minutes} minutes while Custard runs, once you turn it on in Manage (a read tool, no model, nothing you approve each time)`
+    }
     case 'media':
       return `Offer its "${v}" image or video generation to Design (each job asks first)`
     case 'widget':

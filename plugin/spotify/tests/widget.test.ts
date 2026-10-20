@@ -17,7 +17,8 @@ test('widget registration uses v1, contextual discovery, bounded heights and lea
   assert.deepEqual(spec.presentations, ['compact', 'expanded'])
   assert.deepEqual(spec.inputSchema.properties, {})
   assert.equal(spec.inputSchema.additionalProperties, false)
-  assert.equal(manifest.permissions.storage, false)
+  // 1.6.0: storage holds only where background sync got to (src/sync.ts).
+  assert.equal(manifest.permissions.storage, true)
   assert.deepEqual(manifest.permissions.network, ['api.spotify.com', 'accounts.spotify.com'])
   for (const name of spec.tools.filter((n) => n !== 'now_playing'))
     assert.equal(manifest.tools.find((t) => t.name === name)!.effect, 'write')

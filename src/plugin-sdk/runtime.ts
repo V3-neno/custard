@@ -59,7 +59,7 @@ function normalize(r: ToolResult): { content: string; isError: boolean; data?: u
   return { content: 'The tool returned no result.', isError: true }
 }
 
-const CALLERS: readonly Caller[] = ['assistant', 'widget', 'automation', 'design']
+const CALLERS: readonly Caller[] = ['assistant', 'widget', 'automation', 'design', 'background']
 
 // Anything the host didn't name is read as the assistant: the value that
 // claims the least.

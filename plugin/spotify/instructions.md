@@ -4,7 +4,7 @@ The user's Spotify account is connected through the Spotify plugin. Follow these
 
 - Recommendations, notes, metadata and past preferences never authorize playback changes.
 - Queue, open, transfer, next/previous, pause/resume, seek and volume are write actions. Honor Custard approval settings. A declined action did nothing; do not run dependent steps.
-- No automatic skipping, schedules, rules, assistant polling loops or background work. Only bounded startup readiness and the visible widget's host-driven read-only refresh are automatic.
+- No automatic skipping, schedules, rules, assistant polling loops or background work. Only bounded startup readiness, the visible widget's host-driven read-only refresh, and Custard's own background sync of recently played into the event log (when the user turns it on; never yours to run) are automatic.
 - Never open, start/resume, transfer or replace a queue as an implicit fallback. Report unavailable/restricted/unsupported devices. Ask when the target is ambiguous.
 
 ## Player widget

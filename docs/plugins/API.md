@@ -25,7 +25,7 @@ Each enabled plugin runs in its own hidden, sandboxed Chromium window:
 - There is no Node.js (`require`, `process`, `fs` don't exist) and no Electron.
 - It has no direct network. `fetch`, XHR, WebSocket, images, iframes, beacons and navigation are blocked in three independent ways.
 - Everything else goes through `ctx`. The host checks every call against the permissions the user approved.
-- A plugin only runs inside a tool call. There are no background tasks. Capability calls made outside an active call are refused.
+- A plugin only runs inside a tool call. There are no background tasks or timers of its own. Capability calls made outside an active call are refused. The one call that starts without a person or a model is **background sync** (below): Custard calling one declared read tool on a slow schedule.
 - Inputs are validated against the tool's `inputSchema` before your handler runs.
 
 ## Handlers
@@ -43,17 +43,17 @@ type ToolResult = string | { content: string; isError?: boolean; data?: unknown 
 
 ## `ctx`
 
-| Member                                           | What it does                                                                            | Needs                                                                                                                                                  |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ctx.signal`                                     | `AbortSignal`, aborted on timeout, Stop, or disable                                     | —                                                                                                                                                      |
-| `ctx.caller`                                     | Who started the call: `assistant`, `widget`, `automation` or `design` (see below)       | —                                                                                                                                                      |
-| `ctx.fetch(url, init?)`                          | HTTPS request through the host. Returns `{ status, ok, headers.get(), text(), json() }` | `permissions.network` lists the host                                                                                                                   |
-| `ctx.fetch(url, { auth: true })`                 | Same, and the host adds `Authorization: Bearer <token>` for the signed-in account       | `auth` in the manifest; only for `auth.apiHosts`                                                                                                       |
-| `ctx.events.enabled`, `ctx.events.append(entry)` | Adds an entry to the plugin's event log in the user's vault (see below)                 | `permissions.events: true`, and the user turned the log on                                                                                             |
-| `ctx.storage.get/set/delete(key)`                | Plugin-scoped JSON storage, 1 MB in total                                               | `permissions.storage: true`                                                                                                                            |
-| `ctx.config`                                     | The user's non-secret configuration values, with defaults                               | —                                                                                                                                                      |
-| `ctx.openExternal(url)`                          | Asks the OS to open a link                                                              | URL starts with a prefix in `permissions.openExternal` and uses only plain URL characters (no spaces, quotes, backslashes or non-ASCII; use %-escapes) |
-| `ctx.log(message)`                               | A line in the plugin's log in Settings (redacted, last 50 kept)                         | —                                                                                                                                                      |
+| Member                                           | What it does                                                                                    | Needs                                                                                                                                                  |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ctx.signal`                                     | `AbortSignal`, aborted on timeout, Stop, or disable                                             | —                                                                                                                                                      |
+| `ctx.caller`                                     | Who started the call: `assistant`, `widget`, `automation`, `design` or `background` (see below) | —                                                                                                                                                      |
+| `ctx.fetch(url, init?)`                          | HTTPS request through the host. Returns `{ status, ok, headers.get(), text(), json() }`         | `permissions.network` lists the host                                                                                                                   |
+| `ctx.fetch(url, { auth: true })`                 | Same, and the host adds `Authorization: Bearer <token>` for the signed-in account               | `auth` in the manifest; only for `auth.apiHosts`                                                                                                       |
+| `ctx.events.enabled`, `ctx.events.append(entry)` | Adds an entry to the plugin's event log in the user's vault (see below)                         | `permissions.events: true`, and the user turned the log on                                                                                             |
+| `ctx.storage.get/set/delete(key)`                | Plugin-scoped JSON storage, 1 MB in total                                                       | `permissions.storage: true`                                                                                                                            |
+| `ctx.config`                                     | The user's non-secret configuration values, with defaults                                       | —                                                                                                                                                      |
+| `ctx.openExternal(url)`                          | Asks the OS to open a link                                                                      | URL starts with a prefix in `permissions.openExternal` and uses only plain URL characters (no spaces, quotes, backslashes or non-ASCII; use %-escapes) |
+| `ctx.log(message)`                               | A line in the plugin's log in Settings (redacted, last 50 kept)                                 | —                                                                                                                                                      |
 
 ### `ctx.caller`
 
@@ -65,6 +65,7 @@ Custard sets it from where the call came in. The model, a widget's input and the
 | `widget`     | The plugin's own widget. For a write tool this also means the user pressed something in it: Custard refuses a widget write without a real click or key press |
 | `automation` | A scheduled skill run (read tools only; writes are declined there)                                                                                           |
 | `design`     | Design's media jobs                                                                                                                                          |
+| `background` | Custard by itself, on the manifest's `background` schedule (see **Background sync**)                                                                         |
 
 Use it to tell the user's own presses apart from the assistant's actions, for example in a log. It says where the call came from, not that the plugin's code is honest about it afterwards. In tests, `createContext({ caller: 'widget' })`; the default is `assistant`.
 
@@ -117,11 +118,27 @@ If the manifest has an `auth` block, Plugins mode (**Manage** on the plugin's ca
 
 Tokens never enter plugin code, the model's context, the vault or logs. **Disconnect** deletes them on this computer. Changing the Client ID setting also signs out.
 
+## Background sync
+
+A plugin can declare **one read tool** that Custard calls by itself on a slow schedule, with `{}` as input and no model, so it can keep something up to date while nobody is using it (Spotify 1.6.0 adds recently played tracks to its event log every 30 minutes):
+
+```json
+"background": { "tool": "sync_recent", "everyMinutes": 30 }
+```
+
+- The tool must be a `read` tool, not a media tool, with no required input. `everyMinutes` is 15 to 1440.
+- It asks for the permission `background:<tool>@<minutes>`; a different tool or interval asks again. Approving it starts nothing: the user turns sync on per plugin in Manage, off by default.
+- Custard calls it while Custard runs (also hidden in the tray): first about a minute after it is turned on or Custard starts, then every `everyMinutes`. One background call at a time across all plugins, at most 96 a day per plugin, and after a failure the wait doubles, up to 6 hours, until a call works. The first failure after one that worked sends one notification a day; the error shows in Manage.
+- It is an ordinary call: the same call-time checks, permissions, timeout, `ctx.signal` and redaction. `ctx.caller` is `background`. Nothing from it reaches a model; keep what you need with `ctx.events` or `ctx.storage`.
+- The tool is never offered to a model, in any mode or automation. A widget could still call it, so check `ctx.caller` if only the schedule should run it.
+- "Use in Chat and Design" doesn't apply: it isn't chat use.
+- Don't use it to poll something live (playback, a feed every minute). Read what the service already keeps, as rarely as works.
+
 ## What API v1 does not have
 
 - No vault or file access, except adding to its own event log (`ctx.events`).
 - No UI in tool code. A plugin can draw UI only in a widget (see [WIDGETS.md](WIDGETS.md)).
-- No background work or timers outside a call.
+- No background work or timers outside a call. (Background sync is Custard calling a tool, above.)
 - No npm packages or Node modules.
 - No raw sockets.
 - No access to other plugins or to Custard's settings.
