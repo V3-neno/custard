@@ -6,6 +6,7 @@ import {
   GRANT_MODES,
   grantFor,
   grantLabel,
+  isEventLogPlace,
   modeAllows,
   normalizeGrants,
   placeKind,
@@ -240,4 +241,39 @@ describe('protected places, at every level', () => {
       for (const parent of ['Custard', 'Custard/Plugins', 'Custard/Plugins/Spotify'])
         for (const p of places) expect(grantFor([g(parent, mode)], p)).toBeNull()
     })
+})
+
+describe('plugin event logs', () => {
+  const day = 'Custard/Plugins/Spotify/Events/2026-10/2026-10-20.md'
+  it('are protected, derived text, and found without case or trailing dots', () => {
+    expect(protectedDepth(day)).toBe(4)
+    expect(placeKind(day)).toBe('derived')
+    expect(isEventLogPlace('custard/plugins/spotify/EVENTS./x.md')).toBe(true)
+    expect(isEventLogPlace('Custard/Plugins/Spotify/Events')).toBe(true)
+    expect(isEventLogPlace('Custard/Plugins/Spotify/Listening/Events/a.md')).toBe(false)
+    expect(isEventLogPlace('Projects/Events/a.md')).toBe(false)
+  })
+  it('no grant covers them, not even one naming the folder', () => {
+    for (const f of [
+      'Custard',
+      'Custard/Plugins',
+      'Custard/Plugins/Spotify',
+      'Custard/Plugins/Spotify/Events',
+      'Custard/Plugins/Spotify/Events/2026-10'
+    ]) {
+      expect(grantFor([g(f)], day)).toBeNull()
+      expect(grantFor([g(f)], day, true)).toBeNull()
+    }
+  })
+  it('a grant on one is dropped when the list is cleaned', () => {
+    const r = normalizeGrants([
+      g('Custard/Plugins/Spotify/Events'),
+      g('custard/plugins/spotify/events/2026-10'),
+      g('Custard/Plugins/Spotify/Listening')
+    ])
+    expect(r.grants.map((x: { folder: string }) => x.folder)).toEqual([
+      'Custard/Plugins/Spotify/Listening'
+    ])
+    expect(r.dropped).toBe(2)
+  })
 })

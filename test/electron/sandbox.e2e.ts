@@ -82,6 +82,8 @@ app.whenReady().then(async () => {
       onExit: (reason) => void exits.push(reason)
     })
   const signal = (): AbortSignal => new AbortController().signal
+  // What the host sends next to a call (see CallMeta).
+  const A = { caller: 'assistant' as const, events: false }
 
   try {
     const { handle, tools } = await start()
@@ -92,7 +94,7 @@ app.whenReady().then(async () => {
     )
 
     const probe = JSON.parse(
-      (await handle.call('c1', 'probe', {}, {}, 20_000, signal(), 'assistant')).content
+      (await handle.call('c1', 'probe', {}, {}, 20_000, signal(), A)).content
     )
     await new Promise((r) => setTimeout(r, 1000))
     check(
@@ -110,7 +112,10 @@ app.whenReady().then(async () => {
     check('popups denied', probe.open === 'null', probe.open)
     check('no request reached the local server', hits.length === 0, hits)
 
-    const via = await handle.call('c2', 'viaHost', {}, {}, 20_000, signal(), 'widget')
+    const via = await handle.call('c2', 'viaHost', {}, {}, 20_000, signal(), {
+      caller: 'widget',
+      events: false
+    })
     check(
       'host capability works, carries the call id, and the caller reaches ctx',
       via.content === 'from host widget' && caps.at(-1)?.callId === 'c2',
@@ -118,7 +123,7 @@ app.whenReady().then(async () => {
     )
 
     const ac = new AbortController()
-    const p = handle.call('c3', 'wait', {}, {}, 20_000, ac.signal, 'assistant')
+    const p = handle.call('c3', 'wait', {}, {}, 20_000, ac.signal, A)
     setTimeout(() => ac.abort(), 100)
     const cancelled = await p
     check(
@@ -128,7 +133,7 @@ app.whenReady().then(async () => {
     )
 
     const t0 = Date.now()
-    const timedOut = await handle.call('c4', 'never', {}, {}, 1500, signal(), 'assistant')
+    const timedOut = await handle.call('c4', 'never', {}, {}, 1500, signal(), A)
     check(
       'a call that never answers times out',
       /did not answer within 2 seconds/.test(timedOut.content) && Date.now() - t0 < 2500,
@@ -137,7 +142,7 @@ app.whenReady().then(async () => {
     check('a slow but responsive plugin keeps running', exits.length === 0, exits)
 
     if (process.env.CUSTARD_TEST_VERBOSE) console.log('spin start')
-    const spun = await handle.call('c5', 'spin', {}, {}, 1000, signal(), 'assistant')
+    const spun = await handle.call('c5', 'spin', {}, {}, 1000, signal(), A)
     if (process.env.CUSTARD_TEST_VERBOSE) console.log('spin settled', spun)
     await new Promise((r) => setTimeout(r, 2500))
     check(
@@ -152,7 +157,7 @@ app.whenReady().then(async () => {
     )
 
     const second = await start()
-    const pending = second.handle.call('c6', 'never', {}, {}, 20_000, signal(), 'assistant')
+    const pending = second.handle.call('c6', 'never', {}, {}, 20_000, signal(), A)
     const wins = BrowserWindow.getAllWindows()
     wins[0].webContents.forcefullyCrashRenderer()
     const crashed = await pending
@@ -164,7 +169,7 @@ app.whenReady().then(async () => {
     )
 
     const third = await start()
-    const inflight = third.handle.call('c7', 'never', {}, {}, 20_000, signal(), 'assistant')
+    const inflight = third.handle.call('c7', 'never', {}, {}, 20_000, signal(), A)
     third.handle.dispose('disabled')
     const disabled = await inflight
     check(
@@ -172,7 +177,7 @@ app.whenReady().then(async () => {
       /stopped \(disabled\)/.test(disabled.content),
       disabled
     )
-    const after = await third.handle.call('c8', 'viaHost', {}, {}, 20_000, signal(), 'assistant')
+    const after = await third.handle.call('c8', 'viaHost', {}, {}, 20_000, signal(), A)
     check('no calls after disposal', after.content === 'The plugin is not running.', after)
 
     const testCode = await (async () => {

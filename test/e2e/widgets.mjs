@@ -339,6 +339,85 @@ try {
   )
   check((await inWidget(`document.querySelector('.count').textContent`)) === '1', 'still 1')
 
+  step('Event log: off by default, then on in Manage; a press is logged in the vault')
+  const events = `${OUT}/vault/Custard/Plugins`
+  const logNotes = () => {
+    const out = []
+    const walk = (d) => {
+      if (!fs.existsSync(d)) return
+      for (const e of fs.readdirSync(d, { withFileTypes: true }))
+        if (e.isDirectory()) walk(`${d}/${e.name}`)
+        else if (/\/Events\/\d{4}-\d\d\/\d{4}-\d\d-\d\d\.md$/.test(`${d}/${e.name}`))
+          out.push(`${d}/${e.name}`)
+    }
+    walk(events)
+    return out
+  }
+  check(logNotes().length === 0, 'with the log off, the allowed press wrote nothing to the vault')
+  await openPlugins()
+  await w.click('article[aria-label="Plugin Tally"] button:text-is("Manage")')
+  const logBox = w.locator('[data-event-log] input[type=checkbox]')
+  await logBox.waitFor({ timeout: 10000 })
+  check(!(await logBox.isChecked()), 'Manage shows the event log, off')
+  // Controlled by what the main process saved, so it changes after the save.
+  await logBox.click()
+  await w.waitForSelector('[data-event-log-status]:has-text("Logging on · 0 entries today")')
+  check(true, 'turned on: "Logging on · 0 entries today"')
+  check(
+    (await w.locator('article[aria-label="Plugin Tally"]').innerText()).includes(
+      'Logging to vault'
+    ),
+    'the hub card says it is logging'
+  )
+  await shot('02b-event-log-on')
+  await closePlugins()
+  await slot().waitFor({ timeout: 10000 })
+  check(
+    await until(
+      async () => (await inWidget(`document.querySelector('.count')?.textContent`)) === '1'
+    ),
+    'the tally is back after Manage'
+  )
+  await clickInWidget('.add')
+  await card.waitFor({ timeout: 10000 })
+  await card.getByRole('button', { name: 'Allow', exact: true }).click()
+  check(
+    await until(
+      async () => (await inWidget(`document.querySelector('.count').textContent`)) === '2'
+    ),
+    'allowed: the tally is 2'
+  )
+  check(await until(async () => logNotes().length === 1), "today's event note was made")
+  const note = logNotes().length ? fs.readFileSync(logNotes()[0], 'utf8') : ''
+  check(
+    /^---\ncustard-plugin-id: tally\n/.test(note) && note.includes('# Tally events, '),
+    "it starts with Custard's header"
+  )
+  check(
+    note.includes('"type":"add","amount":1,"source":"widget","title":"Cups [[Memory]] #x"'),
+    'the entry says the widget asked, in one JSON line'
+  )
+  check(
+    note
+      .split('\n')
+      .filter((l) => l.startsWith('```'))
+      .join() === '```custard-event,```',
+    'inside one fenced block, so its text is not a link or tag'
+  )
+  check(
+    logNotes()[0]?.includes('/Custard/Plugins/Tally/Events/'),
+    "in the plugin's own folder, under Events"
+  )
+  await openPlugins()
+  await w.click('article[aria-label="Plugin Tally"] button:text-is("Manage")')
+  await w.waitForSelector('[data-event-log-status]:has-text("1 entry today")')
+  check(true, 'Manage counts it: 1 entry today')
+  await w.locator('[data-event-log] input[type=checkbox]').click()
+  await w.waitForSelector('[data-event-log-status]', { state: 'detached' })
+  check(true, 'turned off again')
+  await closePlugins()
+  await slot().waitFor({ timeout: 10000 })
+
   step('Replace, update, expand')
   const tallyView = (await widgetViews())[0]
   await send('widget gauge test')

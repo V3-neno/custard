@@ -351,6 +351,61 @@ function Review({
   )
 }
 
+const clock = (t: number): string =>
+  new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+// The plugin's event log in the vault (ctx.events): the user's switch, off by
+// default, and what it has done today. Custard draws this, not the plugin.
+function EventLog({
+  p,
+  run
+}: {
+  p: PluginStatus
+  run: (busy: string, f: () => Promise<PluginStatus>) => Promise<void>
+}): React.JSX.Element {
+  const e = p.events!
+  // Before the first entry the folder isn't made yet; it is named after the plugin.
+  const folder = e.folder ?? `Custard/Plugins/${p.name}/Events`
+  return (
+    <section className="mb-5" data-event-log>
+      <h4 className="mb-1 text-sm font-medium">Event log in your vault</h4>
+      <p className="mb-2 text-xs text-ash-500">
+        {p.name} can add an entry to one note per day in {folder} when something happens, for
+        example when you press a control in its widget. It can only add entries: it can&apos;t read,
+        change or delete notes, and Claude can&apos;t edit the log. No account tokens are saved.
+      </p>
+      <label className="flex items-center gap-2 text-sm text-ash-300">
+        <input
+          type="checkbox"
+          checked={e.on}
+          disabled={!e.granted || p.state !== 'enabled'}
+          onChange={(x) =>
+            run('Saving…', () => window.custard.plugins.setEvents(p.id, x.target.checked))
+          }
+        />
+        Keep an event log for {p.name}
+      </label>
+      {!e.granted && (
+        <p className="mt-1 text-xs text-ash-500">Approve the event log permission first.</p>
+      )}
+      {e.on && (
+        <p
+          className={`mt-1 flex items-center gap-1.5 text-xs ${e.error ? 'text-ember-600' : 'text-ash-300'}`}
+          data-event-log-status
+        >
+          <span
+            aria-hidden
+            className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${e.error ? 'bg-ember-600' : 'bg-molten-400'}`}
+          />
+          {e.error
+            ? `Logging on · the last entry couldn't be saved: ${e.error}`
+            : `Logging on · ${e.today} ${e.today === 1 ? 'entry' : 'entries'} today${e.last ? ` · last ${clock(e.last)}` : ''}`}
+        </p>
+      )}
+    </section>
+  )
+}
+
 export function Detail({
   p,
   onChange
@@ -539,6 +594,8 @@ export function Detail({
           )}
         </section>
       )}
+
+      {p.active && p.events && <EventLog p={p} run={run} />}
 
       {writeTools.length > 0 && (
         <section className="mb-5">

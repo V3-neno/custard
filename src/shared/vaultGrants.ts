@@ -50,6 +50,8 @@ const parts = (path: string): string[] => split(path).map(fold)
 // folder. A grant covers one of them only when it names that place itself (or
 // something inside it). Custard's own memory and skills, its captures, and
 // each plugin's activity notes are things other parts of Custard rely on.
+// A plugin's event log (Custard/Plugins/<plugin>/Events) is protected too, and
+// can't be granted at all: see isEventLogPlace.
 const PROTECTED: string[][] = [
   ['custard', 'memory.md'],
   ['custard', 'skills'],
@@ -66,7 +68,17 @@ export function protectedDepth(path: string): number {
   // Custard writes and later chats read as background.
   if (p[0] === 'custard' && p[1] === 'plugins' && p.length >= 4 && p[3] === 'activity') return 4
   if (p[0] === 'custard' && p[1] === 'plugins' && p.length === 4 && p[3] === 'overview.md') return 4
+  if (isEventLogPlace(path)) return 4
   return 0
+}
+
+// Custard/Plugins/<plugin>/Events, or anything in it: where a plugin's event
+// log goes (plugins/eventLog.ts). Only Custard writes there, for the plugin,
+// when the user turned the log on; Claude can't be allowed to change it, so
+// the log stays a record of what really happened and not what a model wrote.
+export function isEventLogPlace(path: string): boolean {
+  const p = parts(path)
+  return p[0] === 'custard' && p[1] === 'plugins' && p.length >= 4 && p[3] === 'events'
 }
 
 // What a note's place says about the text in it, for the outside-text rule:
@@ -80,6 +92,8 @@ export function placeKind(path: string): 'own' | 'derived' | null {
   if (p[1] === 'memory.md' || p[1] === 'skills') return 'own'
   if (p[1] === 'captures' || p[1] === 'chats') return 'derived'
   if (p[1] === 'plugins' && p.length >= 4 && p[3] === 'activity') return 'derived'
+  // Event logs hold the plugin's service's text (song titles, names).
+  if (p[1] === 'plugins' && p.length >= 4 && p[3] === 'events') return 'derived'
   if (p[1] === 'plugins' && p.length === 4 && p[3] === 'overview.md') return 'own'
   return null
 }
@@ -104,8 +118,8 @@ export type GrantNormalization = { grants: VaultGrant[]; dropped: number }
 
 // Cleans what is read from settings or sent from the window: whole entries
 // only, folders relative to the vault with no "..", hidden folders, drive
-// letters or "~" aliases, no root grant, one entry per folder (the widest
-// mode wins).
+// letters or "~" aliases, no root grant, no plugin event log, one entry per
+// folder (the widest mode wins).
 export function normalizeGrants(value: unknown): GrantNormalization {
   const list = Array.isArray(value) ? value : []
   const byFolder = new Map<string, VaultGrant>()
@@ -134,6 +148,10 @@ export function normalizeGrants(value: unknown): GrantNormalization {
       continue
     }
     const folder = segs.join('/')
+    if (isEventLogPlace(folder)) {
+      dropped++
+      continue
+    }
     const key = fold(folder)
     const had = byFolder.get(key)
     if (!had || RANK[mode] > RANK[had.mode]) byFolder.set(key, { folder, mode })
@@ -152,6 +170,8 @@ export function grantFor(
   path: string,
   caseSensitive = false
 ): GrantMode | null {
+  // Never, even from a list that didn't go through normalizeGrants.
+  if (isEventLogPlace(path)) return null
   const need = protectedDepth(path)
   const seg = caseSensitive ? split : parts
   const p = seg(path)

@@ -40,6 +40,16 @@ export interface PluginContext {
   signal: AbortSignal
   // Who started this call, set by the host (see Caller).
   caller: Caller
+  // The plugin's event log in the user's vault (needs permissions.events).
+  events: {
+    // Whether the user turned the log on in Manage. Off by default.
+    enabled: boolean
+    // Adds one entry to the day's note. `at` (an ISO time within the last
+    // day) picks the day; `record` is JSON (at most 4 KB). Custard formats
+    // it. Throws when the log is off or the entry is refused; it never
+    // changes the tool's result unless the plugin lets it.
+    append(entry: { at: string; record: Record<string, unknown> }): Promise<void>
+  }
   // https requests to hosts in permissions.network.
   fetch(url: string, init?: FetchInit): Promise<PluginResponse>
   // Plugin-scoped key-value storage (needs permissions.storage). Values are JSON.

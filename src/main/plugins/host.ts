@@ -39,6 +39,14 @@ import {
 } from './manifest'
 import { safeFetch, type NetResponse, type Transport } from './net'
 import { AuthError, refreshTokens, signIn, type Tokens } from './oauth'
+import {
+  appendEvent,
+  countEntries,
+  EVENT_LIMITS,
+  eventsFolder,
+  localDay,
+  zoneOrSystem
+} from './eventLog'
 import { redact } from './redact'
 import { validate } from './schema'
 import { SecretsLockedError, type PluginStore } from './store'
@@ -54,6 +62,10 @@ export type ConfigValues = Record<string, string | number | boolean>
 // Caller in custard-plugin-sdk). Set here, from where the call came in, never
 // from anything the model, a widget or the plugin sends.
 export type PluginCaller = 'assistant' | 'widget' | 'automation' | 'design'
+
+// What the host tells plugin code about a call, next to its input: who
+// started it, and whether the plugin's event log is on (ctx.events.enabled).
+export type CallMeta = { caller: PluginCaller; events: boolean }
 // From the runtime: `interrupted` when the call was cut short after it reached
 // the plugin (timeout, cancel, crash), `notSent` when it never reached it.
 // From invoke: `outcome`, what became of the call (see ActionStatus).
@@ -77,7 +89,7 @@ export type RuntimeHandle = {
     config: ConfigValues,
     timeoutMs: number,
     signal: AbortSignal,
-    caller: PluginCaller
+    meta: CallMeta
   ): Promise<ToolOutcome>
   dispose(reason: string): void
 }
@@ -111,6 +123,10 @@ export type HostDeps = {
   // default, tests pass their own.
   authorizations?: Authorizations
   transport?: () => Transport | undefined
+  // Where a plugin's event log goes: the vault and the plugin's folder in it
+  // (made, with its Overview, when `create`). null when there is no vault, or
+  // no folder yet and `create` is false. Without it there are no event logs.
+  eventVault?: (pluginId: string, create: boolean) => { vault: string; pluginFolder: string } | null
 }
 
 // Which build each offered tool came from, captured when a request starts.
@@ -282,7 +298,19 @@ export class PluginHost {
   private starting = new Map<string, Promise<RuntimeHandle>>()
   private calls = new Map<
     string,
-    { pluginId: string; buildId: string; controller: AbortController; write: boolean }
+    {
+      pluginId: string
+      buildId: string
+      controller: AbortController
+      write: boolean
+      // Event log entries this call has asked to add.
+      events: number
+    }
+  >()
+  // Per plugin: event log entries in the last hour, and how the last went.
+  private eventStats = new Map<
+    string,
+    { times: number[]; last: number | null; error: string | null }
   >()
   private logs = new Map<string, string[]>()
   private refreshing = new Map<string, Promise<string>>()
@@ -474,6 +502,7 @@ export class PluginHost {
       })),
       ...(m?.fills?.length ? { fills: m.fills } : {}),
       chatDesign: active ? chatDesignState(active, st.chatDesign) : 'off',
+      ...(active?.permissions.events ? { events: this.eventStatus(id, active, st.granted) } : {}),
       ...(m?.widgets?.length
         ? { widgets: m.widgets.map((w) => ({ id: w.id, title: w.title })) }
         : {}),
@@ -892,6 +921,104 @@ export class PluginHost {
   setAskEveryTime(id: string, tool: string, ask: boolean): PluginStatus {
     const st = this.d.store.state(id)
     this.d.store.setState(id, { askEveryTime: { ...st.askEveryTime, [tool]: ask } })
+    return this.status(id)
+  }
+
+  // Event logs (plugins/eventLog.ts): the user's switch, off by default, and
+  // only for a version that asks for the `events` permission and has it.
+
+  private eventsOn(id: string, m: PluginManifest, granted: string[]): boolean {
+    return (
+      !!m.permissions.events &&
+      granted.includes('events') &&
+      this.d.store.state(id).events === true &&
+      !!this.d.eventVault
+    )
+  }
+
+  private eventZone(id: string, m: PluginManifest): string {
+    const saved = this.d.store.config(id).timeZone
+    return zoneOrSystem(saved !== undefined ? saved : m.config.timeZone?.default)
+  }
+
+  private eventStat(id: string): { times: number[]; last: number | null; error: string | null } {
+    let s = this.eventStats.get(id)
+    if (!s) this.eventStats.set(id, (s = { times: [], last: null, error: null }))
+    return s
+  }
+
+  private appendEvent(
+    id: string,
+    m: PluginManifest,
+    granted: string[],
+    call: { events: number },
+    a: Record<string, unknown>,
+    secrets: string[]
+  ): void {
+    if (!m.permissions.events || !granted.includes('events'))
+      throw new Error('This plugin has no event log permission.')
+    if (!this.eventsOn(id, m, granted))
+      throw new Error('The event log is off, so nothing was saved.')
+    const stat = this.eventStat(id)
+    const now = Date.now()
+    stat.times = stat.times.filter((t) => now - t < 3_600_000)
+    if (call.events >= EVENT_LIMITS.perCall)
+      throw new Error(`At most ${EVENT_LIMITS.perCall} event log entries per call.`)
+    if (stat.times.length >= EVENT_LIMITS.perHour)
+      throw new Error(`At most ${EVENT_LIMITS.perHour} event log entries an hour.`)
+    call.events++
+    stat.times.push(now)
+    try {
+      const where = this.d.eventVault!(id, true)
+      if (!where) throw new Error('No Obsidian vault is set up, so nothing was saved.')
+      appendEvent(a, {
+        ...where,
+        pluginId: id,
+        pluginName: m.name,
+        zone: this.eventZone(id, m),
+        secrets,
+        now
+      })
+      stat.last = now
+      stat.error = null
+    } catch (err) {
+      stat.error = redact(message(err), secrets).slice(0, 300)
+      throw err
+    }
+  }
+
+  private eventStatus(id: string, m: PluginManifest, granted: string[]): PluginStatus['events'] {
+    const st = this.d.store.state(id)
+    const stat = this.eventStats.get(id)
+    let where: { vault: string; pluginFolder: string } | null = null
+    try {
+      where = this.d.eventVault?.(id, false) ?? null
+    } catch {
+      // No folder to show.
+    }
+    return {
+      on: this.eventsOn(id, m, granted),
+      granted: granted.includes('events'),
+      folder: where ? eventsFolder(where.pluginFolder) : null,
+      today:
+        where && st.events ? countEntries(where, localDay(Date.now(), this.eventZone(id, m))) : 0,
+      last: stat?.last ?? null,
+      error: stat?.error ?? null
+    }
+  }
+
+  // The user's event log switch for the active version.
+  setEvents(id: string, on: boolean): PluginStatus {
+    const st = this.d.store.state(id)
+    if (on) {
+      if (!st.active) throw new Error('Review and activate the plugin first.')
+      const m = this.build(id, st.active.buildId).manifest
+      if (!m.permissions.events) throw new Error('This plugin has no event log.')
+      if (!st.granted.includes('events')) throw new Error('Approve the event log permission first.')
+      if (!this.d.eventVault) throw new Error('Event logs are not available here.')
+    }
+    this.d.store.setState(id, { events: on })
+    if (!on) this.eventStats.delete(id)
     return this.status(id)
   }
 
@@ -1418,7 +1545,13 @@ export class PluginHost {
     const onAbort = (): void => controller.abort()
     o.signal.addEventListener('abort', onAbort)
     const write = tool.effect === 'write'
-    this.calls.set(callId, { pluginId: id, buildId: offered.buildId, controller, write })
+    this.calls.set(callId, {
+      pluginId: id,
+      buildId: offered.buildId,
+      controller,
+      write,
+      events: 0
+    })
     const secrets = this.secretValues(id)
     // Once the call may have reached the plugin, a write cut short might
     // still have happened.
@@ -1438,7 +1571,7 @@ export class PluginHost {
         config,
         tool.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         controller.signal,
-        o.caller
+        { caller: o.caller, events: this.eventsOn(id, c.manifest, c.granted) }
       )
       const content = cutResult(redact(String(r.content), secrets))
       const { data, dropped } = widgetData(r.data, secrets, o.dataLimit)
@@ -1546,6 +1679,9 @@ export class PluginHost {
         }
         case 'log':
           this.log(id, redact(String(a.message ?? '').slice(0, 300), secrets))
+          return { ok: true, value: null }
+        case 'events.append':
+          this.appendEvent(id, manifest, granted, call, a, secrets)
           return { ok: true, value: null }
         default:
           throw new Error(`Unknown capability ${name}.`)

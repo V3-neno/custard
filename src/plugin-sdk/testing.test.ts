@@ -70,4 +70,12 @@ describe('the sandbox test runner', () => {
     expect(createContext().caller).toBe('assistant')
     expect(createContext({ caller: 'widget' }).caller).toBe('widget')
   })
+  it('keeps a fake event log only when a test turns it on', async () => {
+    const off = createContext()
+    expect(off.events.enabled).toBe(false)
+    await expect(off.events.append({ at: 'x', record: {} })).rejects.toThrow(/off/)
+    const on = createContext({ events: true })
+    await on.events.append({ at: '2026-10-20T12:00:00Z', record: { type: 'skip' } })
+    expect(on.events.entries).toEqual([{ at: '2026-10-20T12:00:00Z', record: { type: 'skip' } }])
+  })
 })

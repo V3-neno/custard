@@ -40,6 +40,7 @@ function chips(p: PluginStatus): string[] {
           ? 'Chat use needs a new yes'
           : 'Plugins mode only'
     )
+  if (p.events?.on) out.push('Logging to vault')
   if (p.sourceChanged && !p.sourceErrors.length)
     out.push(p.active ? 'Update ready to review' : 'Ready to review')
   return out

@@ -43,16 +43,17 @@ type ToolResult = string | { content: string; isError?: boolean; data?: unknown 
 
 ## `ctx`
 
-| Member                            | What it does                                                                            | Needs                                                                                                                                                  |
-| --------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ctx.signal`                      | `AbortSignal`, aborted on timeout, Stop, or disable                                     | —                                                                                                                                                      |
-| `ctx.caller`                      | Who started the call: `assistant`, `widget`, `automation` or `design` (see below)       | —                                                                                                                                                      |
-| `ctx.fetch(url, init?)`           | HTTPS request through the host. Returns `{ status, ok, headers.get(), text(), json() }` | `permissions.network` lists the host                                                                                                                   |
-| `ctx.fetch(url, { auth: true })`  | Same, and the host adds `Authorization: Bearer <token>` for the signed-in account       | `auth` in the manifest; only for `auth.apiHosts`                                                                                                       |
-| `ctx.storage.get/set/delete(key)` | Plugin-scoped JSON storage, 1 MB in total                                               | `permissions.storage: true`                                                                                                                            |
-| `ctx.config`                      | The user's non-secret configuration values, with defaults                               | —                                                                                                                                                      |
-| `ctx.openExternal(url)`           | Asks the OS to open a link                                                              | URL starts with a prefix in `permissions.openExternal` and uses only plain URL characters (no spaces, quotes, backslashes or non-ASCII; use %-escapes) |
-| `ctx.log(message)`                | A line in the plugin's log in Settings (redacted, last 50 kept)                         | —                                                                                                                                                      |
+| Member                                           | What it does                                                                            | Needs                                                                                                                                                  |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ctx.signal`                                     | `AbortSignal`, aborted on timeout, Stop, or disable                                     | —                                                                                                                                                      |
+| `ctx.caller`                                     | Who started the call: `assistant`, `widget`, `automation` or `design` (see below)       | —                                                                                                                                                      |
+| `ctx.fetch(url, init?)`                          | HTTPS request through the host. Returns `{ status, ok, headers.get(), text(), json() }` | `permissions.network` lists the host                                                                                                                   |
+| `ctx.fetch(url, { auth: true })`                 | Same, and the host adds `Authorization: Bearer <token>` for the signed-in account       | `auth` in the manifest; only for `auth.apiHosts`                                                                                                       |
+| `ctx.events.enabled`, `ctx.events.append(entry)` | Adds an entry to the plugin's event log in the user's vault (see below)                 | `permissions.events: true`, and the user turned the log on                                                                                             |
+| `ctx.storage.get/set/delete(key)`                | Plugin-scoped JSON storage, 1 MB in total                                               | `permissions.storage: true`                                                                                                                            |
+| `ctx.config`                                     | The user's non-secret configuration values, with defaults                               | —                                                                                                                                                      |
+| `ctx.openExternal(url)`                          | Asks the OS to open a link                                                              | URL starts with a prefix in `permissions.openExternal` and uses only plain URL characters (no spaces, quotes, backslashes or non-ASCII; use %-escapes) |
+| `ctx.log(message)`                               | A line in the plugin's log in Settings (redacted, last 50 kept)                         | —                                                                                                                                                      |
 
 ### `ctx.caller`
 
@@ -66,6 +67,34 @@ Custard sets it from where the call came in. The model, a widget's input and the
 | `design`     | Design's media jobs                                                                                                                                          |
 
 Use it to tell the user's own presses apart from the assistant's actions, for example in a log. It says where the call came from, not that the plugin's code is honest about it afterwards. In tests, `createContext({ caller: 'widget' })`; the default is `assistant`.
+
+### `ctx.events`
+
+An append-only log of things that happened, kept in the user's Obsidian vault so the user (and later skills) can read it. One note per day:
+
+```
+Custard/Plugins/<plugin folder>/Events/2026-10/2026-10-20.md
+```
+
+```ts
+if (ctx.events.enabled)
+  await ctx.events.append({
+    at: new Date().toISOString(), // picks the day, in the plugin's timeZone setting or the system's
+    record: { type: 'skip', source: ctx.caller, title: track.name }
+  })
+```
+
+- **Two gates, both the user's.** The manifest asks for `permissions.events`, which the user approves at review. Then the user turns the log on in the plugin's **Manage** panel. It is off by default. While it is off, `enabled` is `false` and `append` throws.
+- **Only adds.** A plugin can't name a path, read the log, or change or delete anything. Custard picks the note from `at`, which must be within the last 24 hours. It makes the note with a short header the first time, and after that only adds to the end.
+- **Custard writes the text.** Each record becomes one line of JSON inside its own fenced block with the language `custard-event`. Obsidian shows it as plain text, so a title holding `[[...]]`, `#tags`, links or HTML stays inert.
+- **Limits.** A record can be at most 4 KB of JSON, nested at most 4 levels, and hold at most 40 fields per object and 50 items per list. Field names are letters, digits and `_`. Strings are cut to 300 characters, with control characters removed.
+- **Rates.** At most 20 entries per tool call and 600 per hour. A day's note stops taking entries at 1 MB.
+- **Secrets are refused.** A record holding one of the plugin's secrets, or anything shaped like a token (`Bearer …`, `access_token`, …), is refused and not written.
+- **Any tool may log, read tools too.** The log isn't an action outside Custard, so it asks for no approval.
+- **Don't let the log change your result.** Catch errors from `append`. A tool's outcome shouldn't depend on whether the log worked.
+- **The assistant can't edit the log.** The `Events` folder can't be added to Editable folders. A chat that reads a log note counts as having outside text.
+
+Manage shows whether logging is on, how many entries today's note holds, and the last failure. In tests, use `createContext({ events: true })` and read `ctx.events.entries`.
 
 ### `ctx.fetch` rules (enforced by the host)
 
@@ -90,7 +119,7 @@ Tokens never enter plugin code, the model's context, the vault or logs. **Discon
 
 ## What API v1 does not have
 
-- No vault or file access.
+- No vault or file access, except adding to its own event log (`ctx.events`).
 - No UI in tool code. A plugin can draw UI only in a widget (see [WIDGETS.md](WIDGETS.md)).
 - No background work or timers outside a call.
 - No npm packages or Node modules.
