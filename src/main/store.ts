@@ -29,6 +29,7 @@ import { readSettingsFile, writeSettingsFile } from './settingsFile'
 import { defaultMemorySettings, type MemorySettings } from '../shared/memory'
 import { normalizeGrants, type VaultGrant } from '../shared/vaultGrants'
 import { normalizeAutomations, type Automation } from '../shared/automations'
+import { normalizeBackground, type BackgroundSettings } from '../shared/background'
 
 // Conversations are plain JSON files in the app's data folder, one per chat.
 const dir = (): string => {
@@ -263,6 +264,7 @@ type Config = {
   memory: MemorySettings
   vaultGrants: VaultGrant[]
   automations: Automation[]
+  background: BackgroundSettings
   // Monthly spending budget in dollars, or null for none.
   budget: number | null
 }
@@ -283,6 +285,7 @@ function readConfig(): Config {
     memory: { ...defaultMemorySettings, ...raw.memory },
     vaultGrants: normalizeGrants(raw.vaultGrants).grants,
     automations: normalizeAutomations(raw.automations),
+    background: normalizeBackground(raw.background),
     budget: normalizeBudget(raw.budget)
   }
 }
@@ -335,6 +338,13 @@ export const vaultEditsDir = (): string => join(app.getPath('userData'), 'vault-
 export const getAutomations = (): Automation[] => readConfig().automations
 export const setAutomations = (automations: Automation[]): void =>
   writeConfig({ automations: normalizeAutomations(automations) })
+// Tray, login, notifications and the limits on all automations together.
+export const getBackground = (): BackgroundSettings => readConfig().background
+export const setBackground = (background: unknown): BackgroundSettings => {
+  const b = normalizeBackground(background)
+  writeConfig({ background: b })
+  return b
+}
 export const automationRunsDir = (): string => join(app.getPath('userData'), 'automation-runs')
 export const automationQuestionsFile = (): string =>
   join(app.getPath('userData'), 'automation-questions.json')

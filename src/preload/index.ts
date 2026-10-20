@@ -19,6 +19,7 @@ import type {
 import type { SkillEntry, SkillText, VaultEditEntry, VaultInfo } from '../shared/vault'
 import type { VaultGrant } from '../shared/vaultGrants'
 import type { AutomationView, PendingQuestion } from '../shared/automations'
+import type { BackgroundView } from '../shared/background'
 import type { WidgetBounds, WidgetDisplay, WidgetPresentation, WidgetView } from '../shared/widgets'
 import type { Attachment, AttachResult, DraftAttachment } from '../shared/attachments'
 import type { ApprovalDecision, ModelAvailability } from '../shared/chat'
@@ -98,6 +99,17 @@ const custard = {
       const h = (): void => cb()
       ipcRenderer.on('automations:changed', h)
       return () => ipcRenderer.removeListener('automations:changed', h)
+    }
+  },
+  // Tray, start at login, notifications and limits on all automations.
+  background: {
+    get: (): Promise<BackgroundView> => ipcRenderer.invoke('background:get'),
+    set: (s: unknown): Promise<BackgroundView> => ipcRenderer.invoke('background:set', s),
+    // A notification about a run was clicked.
+    onOpenSettings: (cb: () => void): (() => void) => {
+      const h = (): void => cb()
+      ipcRenderer.on('app:openSettings', h)
+      return () => ipcRenderer.removeListener('app:openSettings', h)
     }
   },
   vault: {

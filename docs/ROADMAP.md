@@ -69,6 +69,6 @@ Alongside: shorter plugin output (Spotify's metadata blob) and a review of the d
 ## Phase 6: Polish and reach
 
 - Windows installer and auto-update.
-- Global shortcut to open Custard from anywhere, plus a tray icon.
+- Global shortcut to open Custard from anywhere. (The tray icon is built: see "Running in the background" in automations.md.)
 - Attach files and images in Chat.
 - Investigate connecting to Claude cloud sessions, if a supported way exists.

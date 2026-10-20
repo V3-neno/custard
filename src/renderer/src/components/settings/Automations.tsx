@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   DEFAULT_LIMITS,
+  LIMIT_BOUNDS,
   type Automation,
+  type AutomationLimits,
   type AutomationView,
   type PendingQuestion,
   type RunRecord
@@ -17,6 +19,7 @@ import { grantLabel, type VaultGrant } from '../../../../shared/vaultGrants'
 import { cleanError, danger, input, primary, secondary } from './ui'
 import Select from '../ui/Select'
 import PillGroup from '../ui/PillGroup'
+import Background from './Background'
 
 const when = (t: number): string =>
   new Date(t).toLocaleString(undefined, {
@@ -52,8 +55,61 @@ type Form = {
   timezone: string
   folders: string[]
   plugins: string[]
-  runsPerDay: string
-  catchUpRuns: string
+  // Each limit as typed (see LIMITS).
+  limits: Record<keyof AutomationLimits, string>
+}
+
+// The limits the form shows, in order, with a line on what each does.
+const LIMITS: { key: keyof AutomationLimits; label: string; help: string }[] = [
+  {
+    key: 'runsPerDay',
+    label: 'Runs per day',
+    help: 'Scheduled runs started on one day; more are skipped. Run now is not counted.'
+  },
+  {
+    key: 'toolCalls',
+    label: 'Tool calls per run',
+    help: 'A run is stopped when it reaches this.'
+  },
+  {
+    key: 'minutes',
+    label: 'Minutes per run',
+    help: 'A run is stopped when it takes this long.'
+  },
+  {
+    key: 'failuresBeforePause',
+    label: 'Failures before pausing',
+    help: 'Scheduled runs that fail in a row before it pauses itself.'
+  },
+  {
+    key: 'catchUpRuns',
+    label: 'Catch-up runs',
+    help: 'When Custard was closed, how many missed runs happen on opening (the newest; 0 = none).'
+  }
+]
+
+const limitText = (l: AutomationLimits): string =>
+  `Limits: ${l.runsPerDay} runs a day · ${l.toolCalls} tool calls and ${l.minutes} min a run · pauses after ${l.failuresBeforePause} failures in a row · ${l.catchUpRuns} catch-up runs`
+
+const limitStrings = (l: AutomationLimits): Record<keyof AutomationLimits, string> =>
+  Object.fromEntries(LIMITS.map(({ key }) => [key, String(l[key])])) as Record<
+    keyof AutomationLimits,
+    string
+  >
+
+// The typed limits as numbers, or what is wrong with the first bad one.
+function readLimits(
+  f: Record<keyof AutomationLimits, string>
+): { ok: true; limits: AutomationLimits } | { ok: false; problem: string } {
+  const limits = {} as AutomationLimits
+  for (const { key, label } of LIMITS) {
+    const n = Number(f[key])
+    const [lo, hi] = LIMIT_BOUNDS[key]
+    if (f[key].trim() === '' || !Number.isInteger(n) || n < lo || n > hi)
+      return { ok: false, problem: `${label} must be a whole number from ${lo} to ${hi}.` }
+    limits[key] = n
+  }
+  return { ok: true, limits }
 }
 
 const blank = (model: string, skill: string): Form => ({
@@ -67,8 +123,7 @@ const blank = (model: string, skill: string): Form => ({
   timezone: '',
   folders: [],
   plugins: [],
-  runsPerDay: String(DEFAULT_LIMITS.runsPerDay),
-  catchUpRuns: String(DEFAULT_LIMITS.catchUpRuns)
+  limits: limitStrings(DEFAULT_LIMITS)
 })
 
 const split = (s: string): string[] =>
@@ -145,14 +200,15 @@ export default function Automations(): React.JSX.Element {
       timezone: a.timezone ?? '',
       folders: a.folders,
       plugins: a.plugins,
-      runsPerDay: String(a.limits.runsPerDay),
-      catchUpRuns: String(a.limits.catchUpRuns)
+      limits: limitStrings(a.limits)
     })
   }
 
   const save = async (): Promise<void> => {
     if (!form) return
     setError(null)
+    const limits = readLimits(form.limits)
+    if (!limits.ok) return setError(limits.problem)
     const existing = views.find((v) => v.automation.id === form.id)?.automation
     // The effort is whatever the form shows: dropped from the copy of the
     // existing automation, then set only when the form holds one.
@@ -171,11 +227,7 @@ export default function Automations(): React.JSX.Element {
       folders: form.folders,
       plugins: form.plugins,
       enabled: existing?.enabled ?? false,
-      limits: {
-        ...(existing?.limits ?? {}),
-        runsPerDay: Number(form.runsPerDay),
-        catchUpRuns: Number(form.catchUpRuns)
-      }
+      limits: limits.limits
     })
     if (r.ok) {
       setForm(null)
@@ -200,12 +252,13 @@ export default function Automations(): React.JSX.Element {
     <section className="mt-5">
       <h3 className="mb-1 text-sm font-medium">Automations</h3>
       <p className="mb-3 text-sm text-ash-300">
-        Run a skill on a schedule. It runs only while Custard is open, on its own with nobody to
-        ask: it can read your vault, change notes only in the editable folders you pick, and use
-        only the read tools of the plugins you pick. When Custard was closed at a scheduled time,
-        the newest missed runs happen when it opens (you set how many), marked catch-up; older ones
-        are noted and passed to the first of them.
+        Run a skill on a schedule. It runs only while Custard is running (also hidden in the tray,
+        below), on its own with nobody to ask: it can read your vault, change notes only in the
+        editable folders you pick, and use only the read tools of the plugins you pick. When Custard
+        was closed at a scheduled time, the newest missed runs happen when it opens (you set how
+        many), marked catch-up; older ones are noted and passed to the first of them.
       </p>
+      <Background />
       {questions.some((q) => q.status === 'open') && (
         <div className="mb-3">
           <h4 className="mb-1 text-xs font-medium text-ash-300">
@@ -271,6 +324,9 @@ export default function Automations(): React.JSX.Element {
               </div>
               <p className="text-xs text-ash-400">
                 Skill {a.skill} · {schedule(a)}
+              </p>
+              <p className="text-xs text-ash-500" data-limits>
+                {limitText(a.limits)}
               </p>
               {state.paused && <p className="mt-1 text-xs text-ember-600">{state.paused.reason}</p>}
               <div className="mt-2 flex flex-wrap gap-2">
@@ -478,27 +534,35 @@ export default function Automations(): React.JSX.Element {
               placeholder="Time zone (empty = this computer's)"
               className={input}
             />
-            <input
-              aria-label="Runs per day"
-              type="number"
-              min={1}
-              max={96}
-              value={form.runsPerDay}
-              onChange={(e) => setForm({ ...form, runsPerDay: e.target.value })}
-              title="At most this many scheduled runs a day"
-              className={`${input} !w-24`}
-            />
-            <input
-              aria-label="Catch-up runs"
-              type="number"
-              min={0}
-              max={10}
-              value={form.catchUpRuns}
-              onChange={(e) => setForm({ ...form, catchUpRuns: e.target.value })}
-              title="When Custard was closed, how many missed runs to run on opening (the newest; 0 = none)"
-              className={`${input} !w-24`}
-            />
           </div>
+          <fieldset data-limits-form>
+            <legend className="mb-1 text-xs text-ash-400">
+              Limits. A run that reaches one is stopped or skipped, and recorded with the reason.
+            </legend>
+            <div className="space-y-1.5">
+              {LIMITS.map(({ key, label, help }) => (
+                <div key={key} className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-ash-300">{label}</p>
+                    <p className="text-xs text-ash-500">
+                      {help} {LIMIT_BOUNDS[key][0]} to {LIMIT_BOUNDS[key][1]}.
+                    </p>
+                  </div>
+                  <input
+                    aria-label={label}
+                    type="number"
+                    min={LIMIT_BOUNDS[key][0]}
+                    max={LIMIT_BOUNDS[key][1]}
+                    value={form.limits[key]}
+                    onChange={(e) =>
+                      setForm({ ...form, limits: { ...form.limits, [key]: e.target.value } })
+                    }
+                    className={`${input} !w-20 !py-1`}
+                  />
+                </div>
+              ))}
+            </div>
+          </fieldset>
           <fieldset>
             <legend className="mb-1 text-xs text-ash-400">Folders it may change</legend>
             {grants.length === 0 && (

@@ -67,6 +67,19 @@ import {
 } from './vaultTemplate'
 import { createSkill, readSkill, skillEntries } from './skillsHub'
 import { deleteChat, deleteOldChats, type ChatCleanup } from './chatDelete'
+import {
+  registerBackgroundHandlers,
+  showWindow,
+  startBackground,
+  startHidden,
+  trackWindow
+} from './background'
+
+// One Custard at a time: a second one would run every automation twice.
+// Opening it again shows the window of the one already running (it may be
+// hidden in the tray).
+if (!app.requestSingleInstanceLock()) app.exit(0)
+else app.on('second-instance', () => showWindow())
 
 // What goes with a chat when it is deleted (chatDelete.ts).
 const cleanup: ChatCleanup = {
@@ -106,9 +119,12 @@ function createWindow(): void {
     }
   })
 
+  // Started at login while kept in the tray: it stays hidden there.
+  const hidden = startHidden()
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    if (!hidden) mainWindow.show()
   })
+  trackWindow(mainWindow, createWindow)
 
   // Links in answers can come from web pages, so only web links are opened.
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -332,11 +348,15 @@ app.whenReady().then(() => {
   registerWidgetHandlers()
   registerDesignHandlers()
   registerAutomationHandlers()
+  registerBackgroundHandlers()
 
+  // The tray icon first, so a window started hidden has it.
+  startBackground()
   createWindow()
   // Plugins start after the window so a slow plugin can't delay the app.
   void startPlugins()
-  // Scheduled runs happen only while Custard is open.
+  // Scheduled runs happen only while Custard is running (also when its
+  // window is hidden in the tray).
   startAutomations()
 
   app.on('activate', function () {
